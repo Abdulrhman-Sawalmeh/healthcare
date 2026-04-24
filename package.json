@@ -1,0 +1,21 @@
+{
+  "name": "healthcare-ecosystem",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:central-api": "npm --workspace @healthcare/central-api run dev",
+    "dev:central-web": "npm --workspace @healthcare/central-web run dev",
+    "dev:medium-api": "npm --workspace @healthcare/medium-center-api run dev",
+    "dev:medium-web": "npm --workspace @healthcare/medium-center-web run dev",
+    "dev:small-api": "npm --workspace @healthcare/small-center-api run dev",
+    "dev:small-web": "npm --workspace @healthcare/small-center-web run dev",
+    "dev:mobile": "npm --workspace @healthcare/mobile run start",
+    "build": "npm run build --workspaces --if-present",
+    "db:migrate": "npm --workspace @healthcare/central-api run db:migrate",
+    "db:seed": "npm --workspace @healthcare/central-api run db:seed"
+  }
+}

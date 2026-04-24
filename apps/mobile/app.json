@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Healthcare Ecosystem",
+    "slug": "healthcare-ecosystem",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#eef6f1"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#eef6f1"
+      }
+    },
+    "extra": {
+      "apiUrl": "http://10.0.2.2:4000/api"
+    }
+  }
+}
