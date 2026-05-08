@@ -14,6 +14,7 @@
     "dev:small-api": "npm --workspace @healthcare/small-center-api run dev",
     "dev:small-web": "npm --workspace @healthcare/small-center-web run dev",
     "dev:mobile": "npm --workspace @healthcare/mobile run start",
+    "start:local": "powershell -ExecutionPolicy Bypass -File scripts/start-local.ps1",
     "build": "npm run build --workspaces --if-present",
     "db:migrate": "npm --workspace @healthcare/central-api run db:migrate",
     "db:seed": "npm --workspace @healthcare/central-api run db:seed"

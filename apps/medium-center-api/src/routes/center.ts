@@ -16,6 +16,7 @@ import {
   getCenterVisits,
   getCenterWorkspaceData
 } from "../services/network-queries";
+import { ensurePatientPortalAccount } from "../services/patient-accounts";
 import { asyncHandler } from "../utils/async-handler";
 
 const router = Router();
@@ -36,7 +37,7 @@ const patientSchema = z.object({
   bloodType: z.string().optional(),
   allergies: z.array(z.string()).default([]),
   chronicDiseases: z.array(z.string()).default([]),
-  nationalId: z.string().optional()
+  nationalId: z.string().min(6)
 });
 
 const visitSchema = z.object({
@@ -97,7 +98,7 @@ router.get(
 
 router.get(
   "/patients",
-  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE"),
+  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR"),
   asyncHandler(async (req, res) => {
     const search = typeof req.query.search === "string" ? req.query.search : undefined;
     res.json(await getCenterPatients(getCenterId(req), search));
@@ -106,18 +107,38 @@ router.get(
 
 router.get(
   "/patients/search",
-  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE"),
+  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR"),
   asyncHandler(async (req, res) => {
-    const phone = String(req.query.phone ?? "");
+    const term = String(req.query.term ?? req.query.phone ?? "").trim();
     const centerId = getCenterId(req);
+
+    if (!term) {
+      return res.json({
+        found: false,
+        localPatient: null,
+        patient: null,
+        recentVisits: []
+      });
+    }
 
     const [localPatient, unifiedPatient] = await Promise.all([
       prisma.localPatient.findFirst({
         where: {
           centerId,
-          phone
+          OR: [
+            { phone: term },
+            { unifiedId: term },
+            {
+              unifiedPatient: {
+                is: {
+                  nationalId: term
+                }
+              }
+            }
+          ]
         },
         include: {
+          unifiedPatient: true,
           visits: {
             orderBy: {
               visitDate: "desc"
@@ -128,7 +149,7 @@ router.get(
       }),
       prisma.unifiedPatient.findFirst({
         where: {
-          primaryPhone: phone
+          OR: [{ primaryPhone: term }, { nationalId: term }, { unifiedId: term }]
         },
         include: {
           unifiedVisits: {
@@ -146,8 +167,25 @@ router.get(
 
     res.json({
       found: Boolean(localPatient || unifiedPatient),
-      localPatient,
-      patient: unifiedPatient,
+      localPatient: localPatient
+        ? {
+            id: localPatient.id,
+            fullName: localPatient.fullName,
+            phone: localPatient.phone,
+            nationalId: localPatient.unifiedPatient?.nationalId ?? null
+          }
+        : null,
+      patient: unifiedPatient
+        ? {
+            id: unifiedPatient.id,
+            unifiedId: unifiedPatient.unifiedId,
+            nationalId: unifiedPatient.nationalId,
+            fullName: unifiedPatient.fullName,
+            primaryPhone: unifiedPatient.primaryPhone,
+            address: unifiedPatient.address,
+            chronicDiseases: unifiedPatient.chronicDiseases
+          }
+        : null,
       recentVisits: unifiedPatient?.unifiedVisits ?? []
     });
   })
@@ -155,7 +193,7 @@ router.get(
 
 router.post(
   "/patients",
-  authorize("CENTER_MANAGER", "RECEPTIONIST", "NURSE"),
+  authorize("RECEPTIONIST"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const payload = patientSchema.parse(req.body);
@@ -169,7 +207,26 @@ router.post(
       }
     });
 
-    if (!unifiedPatient) {
+    const hadUnifiedPatient = Boolean(unifiedPatient);
+
+    if (unifiedPatient) {
+      unifiedPatient = await prisma.unifiedPatient.update({
+        where: {
+          id: unifiedPatient.id
+        },
+        data: {
+          nationalId: payload.nationalId,
+          fullName: payload.fullName,
+          dateOfBirth: payload.dateOfBirth,
+          gender: payload.gender,
+          primaryPhone: payload.primaryPhone,
+          address: payload.address,
+          bloodType: payload.bloodType,
+          allergies: payload.allergies,
+          chronicDiseases: payload.chronicDiseases
+        }
+      });
+    } else {
       unifiedPatient = await prisma.unifiedPatient.create({
         data: {
           unifiedId: `P-${new Date().getFullYear()}-${Date.now().toString().slice(-7)}`,
@@ -186,35 +243,75 @@ router.post(
       });
     }
 
-    const localPatient = await prisma.localPatient.create({
-      data: {
+    let localPatient = await prisma.localPatient.findFirst({
+      where: {
         centerId,
-        unifiedPatientId: unifiedPatient.id,
-        unifiedId: unifiedPatient.unifiedId,
-        fullName: payload.fullName,
-        dateOfBirth: payload.dateOfBirth,
-        gender: payload.gender,
-        phone: payload.primaryPhone,
-        address: payload.address,
-        emergencyContact: payload.emergencyContact,
-        bloodType: payload.bloodType,
-        allergies: payload.allergies,
-        chronicDiseases: payload.chronicDiseases,
-        createdLocally: !Boolean(unifiedPatient)
+        OR: [{ unifiedPatientId: unifiedPatient.id }, { phone: payload.primaryPhone }]
       }
+    });
+
+    if (localPatient) {
+      localPatient = await prisma.localPatient.update({
+        where: {
+          id: localPatient.id
+        },
+        data: {
+          unifiedPatientId: unifiedPatient.id,
+          unifiedId: unifiedPatient.unifiedId,
+          fullName: payload.fullName,
+          dateOfBirth: payload.dateOfBirth,
+          gender: payload.gender,
+          phone: payload.primaryPhone,
+          address: payload.address,
+          emergencyContact: payload.emergencyContact,
+          bloodType: payload.bloodType,
+          allergies: payload.allergies,
+          chronicDiseases: payload.chronicDiseases
+        }
+      });
+    } else {
+      localPatient = await prisma.localPatient.create({
+        data: {
+          centerId,
+          unifiedPatientId: unifiedPatient.id,
+          unifiedId: unifiedPatient.unifiedId,
+          fullName: payload.fullName,
+          dateOfBirth: payload.dateOfBirth,
+          gender: payload.gender,
+          phone: payload.primaryPhone,
+          address: payload.address,
+          emergencyContact: payload.emergencyContact,
+          bloodType: payload.bloodType,
+          allergies: payload.allergies,
+          chronicDiseases: payload.chronicDiseases,
+          createdLocally: !hadUnifiedPatient
+        }
+      });
+    }
+
+    const portalAccount = await ensurePatientPortalAccount({
+      centerId,
+      fullName: payload.fullName,
+      nationalId: payload.nationalId,
+      primaryPhone: payload.primaryPhone,
+      dateOfBirth: payload.dateOfBirth,
+      gender: payload.gender,
+      emergencyContact: payload.emergencyContact,
+      chronicDiseases: payload.chronicDiseases
     });
 
     res.status(201).json({
       success: true,
       unifiedId: unifiedPatient.unifiedId,
-      patient: localPatient
+      patient: localPatient,
+      portalAccount
     });
   })
 );
 
 router.get(
   "/visits",
-  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE"),
+  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"),
   asyncHandler(async (req, res) => {
     res.json(await getCenterVisits(getCenterId(req)));
   })
@@ -222,7 +319,7 @@ router.get(
 
 router.post(
   "/visits",
-  authorize("CENTER_MANAGER", "DOCTOR", "NURSE"),
+  authorize("CENTER_MANAGER", "DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const payload = visitSchema.parse(req.body);
@@ -233,7 +330,7 @@ router.post(
         patientId: payload.patientId,
         doctorId:
           payload.doctorId ??
-          (req.auth?.role === "DOCTOR" || req.auth?.role === "NURSE" ? Number(req.auth.sub) : undefined),
+          (req.auth?.role === "DOCTOR" ? Number(req.auth.sub) : undefined),
         visitDate: payload.visitDate,
         visitTime: payload.visitTime,
         visitType: payload.visitType,
@@ -265,7 +362,7 @@ router.post(
 
 router.get(
   "/referrals",
-  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE"),
+  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const referrals = await prisma.centralReferral.findMany({
@@ -382,7 +479,7 @@ router.get(
 
 router.get(
   "/notifications",
-  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"),
+  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"),
   asyncHandler(async (req, res) => {
     res.json(await getCenterNotifications(getCenterId(req)));
   })

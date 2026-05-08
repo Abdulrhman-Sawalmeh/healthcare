@@ -37,20 +37,20 @@ export const systemConfig: FrontendSystemConfig = {
   name: "المركز الصحي الصغير",
   shortName: "نظام المركز الصحي الصغير",
   description:
-    "نظام محلي مستقل للمركز الصحي الصغير يركز على الاستقبال والعيادات والزيارات والإحالات مع مزامنة مرحلية مع النظام المركزي.",
+    "نظام محلي مستقل للمركز الصحي الصغير يربط بين الاستقبال والعيادات والإحالات، مع بوابة مريض لحجز المواعيد وتسجيل الدخول برقم الهوية.",
   workspace: "center",
-  allowedRoles: ["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"],
-  allowedRoutes: ["/", "/patients", "/visits", "/referrals", "/notifications"],
+  allowedRoles: ["CENTER_MANAGER", "DOCTOR", "PATIENT", "RECEPTIONIST"],
+  allowedRoutes: ["/", "/appointments", "/medical-record", "/doctors", "/messages", "/patients", "/visits", "/referrals", "/notifications"],
   allowedCenterCode: "C001",
   apiUrl: "http://localhost:4200/api",
   storageKey: "healthcare.small-center-web.token",
   loginEyebrow: "نظام المركز الصحي الصغير",
-  loginTitle: "واجهة خفيفة لإدارة الاستقبال والعيادات والإحالات في المركز الصحي الصغير.",
+  loginTitle: "واجهة خفيفة لإدارة العمل اليومي مع بوابة مريض مباشرة وواضحة.",
   loginDescription:
-    "تخدم هذه الواجهة المراكز ذات البنية التشغيلية الأبسط، مع الحفاظ على التكامل مع السجل الموحد والإحالات الذكية عبر النظام المركزي.",
+    "تخدم هذه الواجهة فرق الاستقبال والعيادات في إنشاء حساب المريض وإرسال كلمة المرور عبر رسالة نصية، مع حجز الموعد ومراجعة التقارير الطبية والإحالات.",
   dashboardLabel: "تشغيل المركز الصغير",
-  feedLabel: "الإشعارات المحلية",
-  feedTitle: "آخر التنبيهات التشغيلية",
+  feedLabel: "آخر المستجدات",
+  feedTitle: "الإشعارات والتنبيهات",
   accessDeniedMessage: "هذا الحساب لا ينتمي إلى نظام المركز الصحي الصغير.",
   demoAccounts: [
     {
@@ -67,6 +67,12 @@ export const systemConfig: FrontendSystemConfig = {
     },
     {
       group: "المركز الصحي الصغير",
+      roleLabel: "مريض",
+      identifier: "402010101",
+      password: "Password123!"
+    },
+    {
+      group: "المركز الصحي الصغير",
       roleLabel: "موظف الاستقبال",
       identifier: "reception.hussein",
       password: "Password123!"
@@ -75,7 +81,9 @@ export const systemConfig: FrontendSystemConfig = {
 };
 
 export function isUserAllowedForSystem(user: SessionUser) {
-  if (user.workspace !== systemConfig.workspace) {
+  const isLegacyPatient = user.workspace === "legacy" && user.role === "PATIENT";
+
+  if (!isLegacyPatient && user.workspace !== systemConfig.workspace) {
     return false;
   }
 

@@ -3,6 +3,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { authenticate } from "../middleware/auth";
 import { AppError } from "../middleware/error";
+import { resolvePortalNotificationUserId } from "../services/portal-identity";
 import { asyncHandler } from "../utils/async-handler";
 import { getSingleParam } from "../utils/request";
 import { mapNotification } from "../utils/serializers";
@@ -13,9 +14,10 @@ router.get(
   "/",
   authenticate,
   asyncHandler(async (req, res) => {
+    const notificationUserId = await resolvePortalNotificationUserId(req.auth!);
     const notifications = await prisma.notification.findMany({
       where: {
-        userId: req.auth!.sub
+        userId: notificationUserId
       },
       orderBy: {
         createdAt: "desc"
@@ -31,11 +33,12 @@ router.patch(
   authenticate,
   asyncHandler(async (req, res) => {
     const notificationId = getSingleParam(req.params.notificationId, "Notification ID");
+    const notificationUserId = await resolvePortalNotificationUserId(req.auth!);
     const notification = await prisma.notification.findUnique({
       where: { id: notificationId }
     });
 
-    if (!notification || notification.userId !== req.auth!.sub) {
+    if (!notification || notification.userId !== notificationUserId) {
       throw new AppError("Notification not found.", 404);
     }
 

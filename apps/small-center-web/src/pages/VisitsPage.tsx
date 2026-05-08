@@ -105,7 +105,7 @@ export function VisitsPage() {
     }
   }
 
-  const canCreate = user?.role === "CENTER_MANAGER" || user?.role === "DOCTOR" || user?.role === "NURSE";
+  const canCreate = user?.role === "CENTER_MANAGER" || user?.role === "DOCTOR";
 
   return (
     <div className="page-stack">
@@ -137,7 +137,7 @@ export function VisitsPage() {
               >
                 <option value="">استخدم المستخدم الحالي</option>
                 {workspace?.team
-                  .filter((member) => member.role === "DOCTOR" || member.role === "NURSE")
+                  .filter((member) => member.role === "DOCTOR")
                   .map((member) => (
                     <option key={member.id} value={member.id}>
                       {member.fullName}

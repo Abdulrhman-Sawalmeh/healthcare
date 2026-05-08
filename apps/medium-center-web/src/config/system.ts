@@ -37,20 +37,20 @@ export const systemConfig: FrontendSystemConfig = {
   name: "المركز الصحي المتوسط",
   shortName: "نظام المركز الصحي المتوسط",
   description:
-    "نظام محلي مستقل لإدارة المرضى والزيارات والمختبر والصيدلية والإحالات مع تكامل منظم مع النظام المركزي.",
+    "نظام محلي مستقل لإدارة الاستقبال والعيادات والزيارات والإحالات، مع بوابة مريض يدخل إليها برقم الهوية وكلمة المرور المرسلة إليه.",
   workspace: "center",
-  allowedRoles: ["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"],
-  allowedRoutes: ["/", "/patients", "/visits", "/referrals", "/lab", "/pharmacy", "/notifications"],
+  allowedRoles: ["CENTER_MANAGER", "DOCTOR", "PATIENT", "RECEPTIONIST"],
+  allowedRoutes: ["/", "/appointments", "/medical-record", "/doctors", "/messages", "/patients", "/visits", "/referrals", "/notifications"],
   allowedCenterCode: "M002",
   apiUrl: "http://localhost:4100/api",
   storageKey: "healthcare.medium-center-web.token",
   loginEyebrow: "نظام المركز الصحي المتوسط",
-  loginTitle: "إدارة سريرية وتشغيلية متكاملة للمركز الصحي المتوسط.",
+  loginTitle: "إدارة سريرية وتشغيلية متكاملة مع بوابة مريض واضحة وسهلة الاستخدام.",
   loginDescription:
-    "تدعم هذه الواجهة الاستقبال والعيادات والتمريض والمختبر والصيدلية، مع استقبال الإحالات من المراكز الأصغر ومزامنة البيانات مع النظام المركزي.",
+    "تدعم هذه الواجهة فرق الاستقبال والعيادات في إنشاء حساب المريض وإرسال كلمة المرور عبر رسالة نصية، مع حجز المواعيد ومتابعة السجل الصحي والإحالات.",
   dashboardLabel: "تشغيل المركز المتوسط",
-  feedLabel: "الإشعارات المحلية",
-  feedTitle: "أحدث العناصر التشغيلية",
+  feedLabel: "آخر المستجدات",
+  feedTitle: "الإشعارات والتنبيهات",
   accessDeniedMessage: "هذا الحساب لا ينتمي إلى نظام المركز الصحي المتوسط.",
   demoAccounts: [
     {
@@ -67,33 +67,23 @@ export const systemConfig: FrontendSystemConfig = {
     },
     {
       group: "المركز الصحي المتوسط",
+      roleLabel: "مريضة",
+      identifier: "402010102",
+      password: "Password123!"
+    },
+    {
+      group: "المركز الصحي المتوسط",
       roleLabel: "موظف الاستقبال",
       identifier: "reception.shifaa",
-      password: "Password123!"
-    },
-    {
-      group: "المركز الصحي المتوسط",
-      roleLabel: "فني مختبر",
-      identifier: "lab.shifaa",
-      password: "Password123!"
-    },
-    {
-      group: "المركز الصحي المتوسط",
-      roleLabel: "صيدلي",
-      identifier: "pharmacy.shifaa",
-      password: "Password123!"
-    },
-    {
-      group: "المركز الصحي المتوسط",
-      roleLabel: "ممرض",
-      identifier: "nurse.shifaa",
       password: "Password123!"
     }
   ]
 };
 
 export function isUserAllowedForSystem(user: SessionUser) {
-  if (user.workspace !== systemConfig.workspace) {
+  const isLegacyPatient = user.workspace === "legacy" && user.role === "PATIENT";
+
+  if (!isLegacyPatient && user.workspace !== systemConfig.workspace) {
     return false;
   }
 

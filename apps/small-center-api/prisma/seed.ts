@@ -1,4 +1,4 @@
-import bcrypt from "bcryptjs";
+﻿import bcrypt from "bcryptjs";
 import { subDays } from "date-fns";
 import { PrismaClient } from "@prisma/client";
 
@@ -228,45 +228,6 @@ async function main() {
       role: "RECEPTIONIST",
       phone: "+970-59-222-0003",
       email: "reception.shifaa@shifaa.local",
-      createdById: managerMedical.id
-    }
-  });
-
-  const labTechMedical = await prisma.centerUserAccount.create({
-    data: {
-      centerId: medicalCenter.id,
-      username: "lab.shifaa",
-      passwordHash,
-      fullName: "بسمة خوري",
-      role: "LAB_TECH",
-      phone: "+970-59-222-0004",
-      email: "lab.shifaa@shifaa.local",
-      createdById: managerMedical.id
-    }
-  });
-
-  const pharmacistMedical = await prisma.centerUserAccount.create({
-    data: {
-      centerId: medicalCenter.id,
-      username: "pharmacy.shifaa",
-      passwordHash,
-      fullName: "أحمد صلحب",
-      role: "PHARMACIST",
-      phone: "+970-59-222-0005",
-      email: "pharmacy.shifaa@shifaa.local",
-      createdById: managerMedical.id
-    }
-  });
-
-  const nurseMedical = await prisma.centerUserAccount.create({
-    data: {
-      centerId: medicalCenter.id,
-      username: "nurse.shifaa",
-      passwordHash,
-      fullName: "نور صبري",
-      role: "NURSE",
-      phone: "+970-59-222-0006",
-      email: "nurse.shifaa@shifaa.local",
       createdById: managerMedical.id
     }
   });
@@ -733,6 +694,412 @@ async function main() {
     ]
   });
 
+  const legacyClinic = await prisma.center.create({
+    data: {
+      name: "مركز الحسين الصحي الصغير",
+      code: "C001",
+      city: "القدس",
+      address: "شارع البلدية 12",
+      phone: "+970-2-555-1000",
+      email: "portal.hussein@shifaa.local",
+      description: "بوابة مرضى للرعاية الأولية ومتابعة الأمراض المزمنة."
+    }
+  });
+
+  const legacyMedicalCenter = await prisma.center.create({
+    data: {
+      name: "مركز الشفاء الصحي المتوسط",
+      code: "M002",
+      city: "رام الله",
+      address: "شارع المنطقة الصحية 45",
+      phone: "+970-2-555-2200",
+      email: "portal.shifaa@shifaa.local",
+      description: "بوابة مرضى للمواعيد التخصصية والمتابعة القلبية والمحادثات الطبية."
+    }
+  });
+
+  const [clinicFamilyDepartment, medicalCardiologyDepartment, medicalInternalDepartment] = await Promise.all([
+    prisma.department.create({
+      data: {
+        centerId: legacyClinic.id,
+        name: "طب الأسرة",
+        floor: 1,
+        phone: "+970-2-555-1001",
+        description: "عيادة المتابعة الأولية وارتفاع ضغط الدم والسكري."
+      }
+    }),
+    prisma.department.create({
+      data: {
+        centerId: legacyMedicalCenter.id,
+        name: "أمراض القلب",
+        floor: 2,
+        phone: "+970-2-555-2201",
+        description: "عيادة تقييم الذبحة الصدرية واضطرابات النظم ومتابعة ضغط الدم."
+      }
+    }),
+    prisma.department.create({
+      data: {
+        centerId: legacyMedicalCenter.id,
+        name: "الطب الباطني",
+        floor: 2,
+        phone: "+970-2-555-2202",
+        description: "متابعة الأمراض المزمنة والاستشارات الباطنية العامة."
+      }
+    })
+  ]);
+
+  const [
+    clinicDoctorUser,
+    medicalDoctorUser,
+    medicalInternalDoctorUser,
+    clinicPatientUser,
+    medicalPatientUser
+  ] = await Promise.all([
+    prisma.user.create({
+      data: {
+        email: "doctor.hussein.portal@shifaa.local",
+        passwordHash,
+        fullName: "د. عمر ناصر",
+        phone: "+970-59-111-1001",
+        role: "DOCTOR"
+      }
+    }),
+    prisma.user.create({
+      data: {
+        email: "doctor.shifaa.portal@shifaa.local",
+        passwordHash,
+        fullName: "د. لينا حداد",
+        phone: "+970-59-222-1001",
+        role: "DOCTOR"
+      }
+    }),
+    prisma.user.create({
+      data: {
+        email: "doctor.batiny@shifaa.local",
+        passwordHash,
+        fullName: "د. سامر عودة",
+        phone: "+970-59-222-1002",
+        role: "DOCTOR"
+      }
+    }),
+    prisma.user.create({
+      data: {
+        email: "402010101@patients.local",
+        passwordHash,
+        fullName: "يوسف درويش",
+        phone: "0599000101",
+        role: "PATIENT"
+      }
+    }),
+    prisma.user.create({
+      data: {
+        email: "402010102@patients.local",
+        passwordHash,
+        fullName: "مريم خليل",
+        phone: "0599000201",
+        role: "PATIENT"
+      }
+    })
+  ]);
+
+  const [clinicDoctorProfile, medicalDoctorProfile, medicalInternalDoctorProfile] = await Promise.all([
+    prisma.doctorProfile.create({
+      data: {
+        userId: clinicDoctorUser.id,
+        centerId: legacyClinic.id,
+        departmentId: clinicFamilyDepartment.id,
+        licenseNumber: "LIC-C001-2026-01",
+        specialization: "طب الأسرة",
+        yearsExperience: 9,
+        bio: "متخصص في متابعة ارتفاع ضغط الدم والسكري والرعاية الأولية المستمرة."
+      }
+    }),
+    prisma.doctorProfile.create({
+      data: {
+        userId: medicalDoctorUser.id,
+        centerId: legacyMedicalCenter.id,
+        departmentId: medicalCardiologyDepartment.id,
+        licenseNumber: "LIC-M002-2026-01",
+        specialization: "أمراض القلب",
+        yearsExperience: 11,
+        bio: "متخصصة في متابعة الذبحة الصدرية وارتفاع الضغط واضطرابات نظم القلب."
+      }
+    }),
+    prisma.doctorProfile.create({
+      data: {
+        userId: medicalInternalDoctorUser.id,
+        centerId: legacyMedicalCenter.id,
+        departmentId: medicalInternalDepartment.id,
+        licenseNumber: "LIC-M002-2026-02",
+        specialization: "الطب الباطني",
+        yearsExperience: 8,
+        bio: "يركز على الأمراض المزمنة وخطط المتابعة الدوائية الوقائية."
+      }
+    })
+  ]);
+
+  const [clinicPatientProfile, medicalPatientProfile] = await Promise.all([
+    prisma.patientProfile.create({
+      data: {
+        userId: clinicPatientUser.id,
+        centerId: legacyClinic.id,
+        medicalRecordNumber: "MRN-C001-2026-001",
+        dateOfBirth: new Date("1988-07-10"),
+        gender: "MALE",
+        chronicConditions: "ارتفاع ضغط الدم، فرط شحميات الدم",
+        insuranceNumber: "INS-C001-4482",
+        emergencyContact: "مريم درويش - 0599000999"
+      }
+    }),
+    prisma.patientProfile.create({
+      data: {
+        userId: medicalPatientUser.id,
+        centerId: legacyMedicalCenter.id,
+        medicalRecordNumber: "MRN-M002-2026-001",
+        dateOfBirth: new Date("1995-11-21"),
+        gender: "FEMALE",
+        chronicConditions: "داء السكري",
+        insuranceNumber: "INS-M002-2217",
+        emergencyContact: "خليل مريم - 0599000222"
+      }
+    })
+  ]);
+
+  const [clinicSubscriptionPlan, medicalSubscriptionPlan] = await Promise.all([
+    prisma.subscriptionPlan.create({
+      data: {
+        centerId: legacyClinic.id,
+        name: "برنامج متابعة الأمراض المزمنة",
+        description: "زيارات متابعة شهرية لمرضى الضغط والسكري مع خطة تذكير دوائي.",
+        billingCycle: "MONTHLY",
+        priceInCents: 12000,
+        maxVisits: 4
+      }
+    }),
+    prisma.subscriptionPlan.create({
+      data: {
+        centerId: legacyMedicalCenter.id,
+        name: "باقة متابعة القلب",
+        description: "متابعة سريرية شهرية واستشارة تخصصية وتقارير متابعة علاجية.",
+        billingCycle: "MONTHLY",
+        priceInCents: 18000,
+        maxVisits: 3
+      }
+    })
+  ]);
+
+  const [clinicSubscription, medicalSubscription] = await Promise.all([
+    prisma.subscription.create({
+      data: {
+        patientId: clinicPatientProfile.id,
+        centerId: legacyClinic.id,
+        planId: clinicSubscriptionPlan.id,
+        status: "ACTIVE",
+        startedAt: subDays(new Date(), 20),
+        endsAt: subDays(new Date(), -10),
+        autoRenew: true
+      }
+    }),
+    prisma.subscription.create({
+      data: {
+        patientId: medicalPatientProfile.id,
+        centerId: legacyMedicalCenter.id,
+        planId: medicalSubscriptionPlan.id,
+        status: "ACTIVE",
+        startedAt: subDays(new Date(), 28),
+        endsAt: subDays(new Date(), -2),
+        autoRenew: true
+      }
+    })
+  ]);
+
+  await prisma.payment.createMany({
+    data: [
+      {
+        subscriptionId: clinicSubscription.id,
+        amountInCents: 12000,
+        currency: "ILS",
+        status: "PAID",
+        method: "CARD",
+        reference: "PAY-C001-202604",
+        paidAt: subDays(new Date(), 18)
+      },
+      {
+        subscriptionId: medicalSubscription.id,
+        amountInCents: 18000,
+        currency: "ILS",
+        status: "PAID",
+        method: "CARD",
+        reference: "PAY-M002-202604",
+        paidAt: subDays(new Date(), 25)
+      }
+    ]
+  });
+
+  await Promise.all([
+    prisma.appointment.create({
+      data: {
+        centerId: legacyClinic.id,
+        departmentId: clinicFamilyDepartment.id,
+        patientId: clinicPatientProfile.id,
+        doctorId: clinicDoctorProfile.id,
+        scheduledAt: subDays(new Date(), 12),
+        status: "COMPLETED",
+        type: "FOLLOW_UP",
+        reason: "متابعة ارتفاع ضغط الدم وتعديل الجرعة العلاجية",
+        notes: "استقرت القراءات المنزلية بعد الالتزام بالعلاج وخطة تقليل الملح.",
+        waitingMinutes: 18,
+        attended: true
+      }
+    }),
+    prisma.appointment.create({
+      data: {
+        centerId: legacyClinic.id,
+        departmentId: clinicFamilyDepartment.id,
+        patientId: clinicPatientProfile.id,
+        doctorId: clinicDoctorProfile.id,
+        scheduledAt: subDays(new Date(), -4),
+        status: "CONFIRMED",
+        type: "CLINIC",
+        reason: "مراجعة نتائج الضغط المنزلي وتقييم الحاجة لإحالة تخصصية",
+        notes: "يرجى إحضار سجل القياسات المنزلية والأدوية الحالية."
+      }
+    }),
+    prisma.appointment.create({
+      data: {
+        centerId: legacyMedicalCenter.id,
+        departmentId: medicalCardiologyDepartment.id,
+        patientId: medicalPatientProfile.id,
+        doctorId: medicalDoctorProfile.id,
+        scheduledAt: subDays(new Date(), 6),
+        status: "COMPLETED",
+        type: "CLINIC",
+        reason: "تقييم خفقان متكرر وألم صدري خفيف بعد الجهد",
+        notes: "لا توجد علامات خطورة حادة، وتمت التوصية بمتابعة دهون الدم والاستمرار على الخطة الوقائية.",
+        waitingMinutes: 24,
+        attended: true
+      }
+    }),
+    prisma.appointment.create({
+      data: {
+        centerId: legacyMedicalCenter.id,
+        departmentId: medicalInternalDepartment.id,
+        patientId: medicalPatientProfile.id,
+        doctorId: medicalInternalDoctorProfile.id,
+        scheduledAt: subDays(new Date(), -5),
+        status: "SCHEDULED",
+        type: "FOLLOW_UP",
+        reason: "متابعة السكري والخطة الغذائية ومراجعة النتائج المخبرية",
+        notes: "يفضّل الصيام 8 ساعات قبل الموعد إذا أمكن."
+      }
+    })
+  ]);
+
+  await prisma.referral.create({
+    data: {
+      fromCenterId: legacyClinic.id,
+      toCenterId: legacyMedicalCenter.id,
+      patientId: clinicPatientProfile.id,
+      fromDoctorId: clinicDoctorProfile.id,
+      toDoctorId: medicalDoctorProfile.id,
+      departmentId: medicalCardiologyDepartment.id,
+      status: "ACCEPTED",
+      reason: "ألم صدري متكرر مع ارتفاع ضغط الدم وحاجة لتقييم قلبي تخصصي",
+      notes: "يرجى إحضار جميع الأدوية الحالية ونتائج التخطيط السابقة.",
+      priority: "HIGH",
+      acceptedAt: subDays(new Date(), 2)
+    }
+  });
+
+  const [clinicThread, medicalThread] = await Promise.all([
+    prisma.messageThread.create({
+      data: {
+        patientId: clinicPatientProfile.id,
+        doctorId: clinicDoctorProfile.id
+      }
+    }),
+    prisma.messageThread.create({
+      data: {
+        patientId: medicalPatientProfile.id,
+        doctorId: medicalDoctorProfile.id
+      }
+    })
+  ]);
+
+  await prisma.message.createMany({
+    data: [
+      {
+        threadId: clinicThread.id,
+        senderId: clinicDoctorUser.id,
+        content: "أهلًا يوسف، راقب قياسات الضغط صباحًا ومساءً حتى موعد المراجعة القادم.",
+        isRead: true,
+        createdAt: subDays(new Date(), 3)
+      },
+      {
+        threadId: clinicThread.id,
+        senderId: clinicPatientUser.id,
+        content: "تم، وسأحضر سجل القراءات والأدوية الحالية في الموعد.",
+        isRead: true,
+        createdAt: subDays(new Date(), 2)
+      },
+      {
+        threadId: medicalThread.id,
+        senderId: medicalDoctorUser.id,
+        content: "مرحبًا مريم، نتائج الزيارة مطمئنة ونحتاج متابعة مخبرية قبل الموعد القادم.",
+        isRead: true,
+        createdAt: subDays(new Date(), 4)
+      },
+      {
+        threadId: medicalThread.id,
+        senderId: medicalPatientUser.id,
+        content: "شكرًا دكتورة، هل أحتاج إلى إحضار نتائج السكر التراكمي الأخيرة؟",
+        isRead: false,
+        createdAt: subDays(new Date(), 1)
+      }
+    ]
+  });
+
+  await prisma.notification.createMany({
+    data: [
+      {
+        userId: clinicPatientUser.id,
+        title: "تذكير بموعد متابعة الضغط",
+        body: "لديك موعد مؤكد بعد أربعة أيام في عيادة طب الأسرة.",
+        type: "APPOINTMENT"
+      },
+      {
+        userId: clinicPatientUser.id,
+        title: "تحديث حالة الإحالة",
+        body: "تم قبول إحالتك إلى عيادة أمراض القلب في مركز الشفاء الصحي المتوسط.",
+        type: "REFERRAL"
+      },
+      {
+        userId: clinicPatientUser.id,
+        title: "رسالة من الطبيب المعالج",
+        body: "وصلتك رسالة جديدة بخصوص قياسات ضغط الدم قبل الموعد القادم.",
+        type: "MESSAGE"
+      },
+      {
+        userId: medicalPatientUser.id,
+        title: "ملخص الزيارة القلبية جاهز",
+        body: "أضيف تقرير الزيارة القلبية الأخيرة إلى سجلك الصحي الإلكتروني.",
+        type: "SYSTEM"
+      },
+      {
+        userId: medicalPatientUser.id,
+        title: "تذكير بموعد متابعة السكري",
+        body: "لديك موعد متابعة مجدول خلال خمسة أيام في عيادة الطب الباطني.",
+        type: "APPOINTMENT"
+      },
+      {
+        userId: medicalPatientUser.id,
+        title: "رسالة جديدة من الطبيب",
+        body: "وصلتك رسالة جديدة بخصوص التحاليل المطلوبة قبل الزيارة القادمة.",
+        type: "MESSAGE"
+      }
+    ]
+  });
+
   console.log("اكتملت زراعة البيانات التجريبية للشبكة الصحية العربية.");
   console.log("مدير النظام المركزي: central.admin / Password123!");
   console.log("مدير المركز الصحي الصغير: manager.hussein / Password123!");
@@ -741,9 +1108,8 @@ async function main() {
   console.log("مدير المركز الصحي المتوسط: manager.shifaa / Password123!");
   console.log("طبيب المركز الصحي المتوسط: doctor.shifaa / Password123!");
   console.log("موظف استقبال المركز الصحي المتوسط: reception.shifaa / Password123!");
-  console.log("فني مختبر المركز الصحي المتوسط: lab.shifaa / Password123!");
-  console.log("صيدلي المركز الصحي المتوسط: pharmacy.shifaa / Password123!");
-  console.log("ممرض المركز الصحي المتوسط: nurse.shifaa / Password123!");
+  console.log("مريض المركز الصحي الصغير: 402010101 / Password123!");
+  console.log("مريضة المركز الصحي المتوسط: 402010102 / Password123!");
 }
 
 main()
@@ -754,3 +1120,4 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+

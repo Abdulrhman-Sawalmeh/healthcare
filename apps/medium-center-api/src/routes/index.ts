@@ -5,6 +5,7 @@ import { authRouter } from "./auth";
 import { centerRouter } from "./center";
 import { centralRouter } from "./central";
 import { networkRouter } from "./network";
+import { portalRouter } from "./portal";
 
 const router = Router();
 
@@ -20,6 +21,10 @@ if (systemConfig.allowCenterRoutes) {
 
 if (systemConfig.allowNetworkRoutes) {
   router.use("/network", networkRouter);
+}
+
+if (systemConfig.workspace === "center") {
+  router.use("/portal", portalRouter);
 }
 
 export const apiRouter = router;

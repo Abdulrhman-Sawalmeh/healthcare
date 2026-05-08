@@ -9,7 +9,7 @@ export type AppRole = UserRole | PromptRole;
 export type AuthWorkspace = "central" | "center" | "legacy";
 
 export interface SessionCenter {
-  id: number;
+  id: string | number;
   code: string;
   name: string;
   type: CentralCenterType;
@@ -28,6 +28,14 @@ export interface SessionUser {
   role: AppRole;
   workspace: AuthWorkspace;
   center?: SessionCenter;
+  phone?: string | null;
+  patientProfileId?: string;
+  doctorProfileId?: string;
+  departmentName?: string;
+  memberships?: Array<{
+    centerId: string;
+    centerName: string;
+  }>;
 }
 
 export function isPromptRole(role: AppRole): role is PromptRole {

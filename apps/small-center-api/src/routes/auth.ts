@@ -31,6 +31,8 @@ router.post(
       role: result.user.role,
       workspace: result.workspace,
       centerId: result.user.center ? String(result.user.center.id) : undefined,
+      doctorProfileId: result.user.doctorProfileId,
+      patientProfileId: result.user.patientProfileId,
       username: result.user.username
     });
 

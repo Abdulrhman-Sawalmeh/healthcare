@@ -15,7 +15,7 @@ const router = Router();
 const createAppointmentSchema = z.object({
   centerId: z.string().uuid().optional(),
   departmentId: z.string().uuid(),
-  patientId: z.string().uuid(),
+  patientId: z.string().uuid().optional(),
   doctorId: z.string().uuid(),
   scheduledAt: z.coerce.date(),
   type: z.nativeEnum(AppointmentType).default(AppointmentType.CLINIC),
@@ -89,7 +89,7 @@ router.get(
 router.post(
   "/",
   authenticate,
-  authorize(UserRole.ADMIN, UserRole.DOCTOR),
+  authorize(UserRole.ADMIN, UserRole.DOCTOR, UserRole.PATIENT),
   asyncHandler(async (req, res) => {
     const payload = createAppointmentSchema.parse(req.body);
     const centerId = resolveCenterScope(req, payload.centerId);
@@ -98,11 +98,40 @@ router.post(
       throw new AppError("A center must be selected to create an appointment.", 400);
     }
 
+    if (payload.scheduledAt <= new Date()) {
+      throw new AppError("Appointment time must be in the future.", 400);
+    }
+
+    const patientId =
+      req.auth?.role === UserRole.PATIENT
+        ? requireProfileId(req.auth.patientProfileId, "Patient profile is required.")
+        : payload.patientId;
+
+    if (!patientId) {
+      throw new AppError("A patient must be selected to create an appointment.", 400);
+    }
+
+    const doctor = await prisma.doctorProfile.findUnique({
+      where: { id: payload.doctorId },
+      include: {
+        user: true,
+        department: true
+      }
+    });
+
+    if (!doctor || doctor.centerId !== centerId) {
+      throw new AppError("Selected doctor does not belong to the active center.", 400);
+    }
+
+    if (doctor.departmentId !== payload.departmentId) {
+      throw new AppError("Selected department does not match the chosen doctor.", 400);
+    }
+
     const appointment = await prisma.appointment.create({
       data: {
         centerId,
         departmentId: payload.departmentId,
-        patientId: payload.patientId,
+        patientId,
         doctorId: payload.doctorId,
         scheduledAt: payload.scheduledAt,
         type: payload.type,
@@ -124,6 +153,23 @@ router.post(
           }
         }
       }
+    });
+
+    await prisma.notification.createMany({
+      data: [
+        {
+          userId: appointment.patient.userId,
+          title: "تم تأكيد حجز الموعد",
+          body: `تم حجز موعدك مع ${appointment.doctor.user.fullName}.`,
+          type: "APPOINTMENT"
+        },
+        {
+          userId: appointment.doctor.userId,
+          title: "موعد جديد بحاجة إلى متابعة",
+          body: `تم تسجيل موعد جديد للمريض ${appointment.patient.user.fullName}.`,
+          type: "APPOINTMENT"
+        }
+      ]
     });
 
     res.status(201).json(mapAppointment(appointment));

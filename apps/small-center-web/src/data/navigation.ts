@@ -6,20 +6,33 @@ export interface NavigationItem {
   roles: Role[];
 }
 
-const allCenterRoles: Role[] = [
-  "CENTER_MANAGER",
-  "DOCTOR",
-  "RECEPTIONIST",
-  "LAB_TECH",
-  "PHARMACIST",
-  "NURSE"
-];
+const allCenterRoles: Role[] = ["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"];
 
 export const navigationItems: NavigationItem[] = [
   {
     to: "/",
     label: "لوحة المتابعة",
     roles: ["CENTRAL_ADMIN", ...allCenterRoles]
+  },
+  {
+    to: "/appointments",
+    label: "حجز موعد",
+    roles: ["PATIENT"]
+  },
+  {
+    to: "/medical-record",
+    label: "السجل الصحي",
+    roles: ["PATIENT"]
+  },
+  {
+    to: "/doctors",
+    label: "الأطباء",
+    roles: ["PATIENT"]
+  },
+  {
+    to: "/messages",
+    label: "المحادثة الطبية",
+    roles: ["PATIENT", "DOCTOR"]
   },
   {
     to: "/centers",
@@ -29,27 +42,17 @@ export const navigationItems: NavigationItem[] = [
   {
     to: "/patients",
     label: "المرضى",
-    roles: ["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE"]
+    roles: ["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]
   },
   {
     to: "/visits",
     label: "الزيارات",
-    roles: ["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE"]
+    roles: ["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]
   },
   {
     to: "/referrals",
     label: "الإحالات",
-    roles: ["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE"]
-  },
-  {
-    to: "/lab",
-    label: "المختبر",
-    roles: ["CENTER_MANAGER", "DOCTOR", "LAB_TECH"]
-  },
-  {
-    to: "/pharmacy",
-    label: "الصيدلية",
-    roles: ["CENTER_MANAGER", "PHARMACIST"]
+    roles: ["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]
   },
   {
     to: "/master-data",
@@ -64,6 +67,6 @@ export const navigationItems: NavigationItem[] = [
   {
     to: "/notifications",
     label: "الإشعارات",
-    roles: ["CENTRAL_ADMIN", ...allCenterRoles]
+    roles: ["PATIENT", "CENTRAL_ADMIN", ...allCenterRoles]
   }
 ];

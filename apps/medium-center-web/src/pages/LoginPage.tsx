@@ -63,7 +63,7 @@ export function LoginPage() {
         </div>
 
         <label className="field">
-          <span>اسم المستخدم أو البريد الإلكتروني</span>
+          <span>اسم المستخدم أو رقم الهوية أو البريد الإلكتروني</span>
           <input
             value={identifier}
             onChange={(event) => setIdentifier(event.target.value)}

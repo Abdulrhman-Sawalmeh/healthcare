@@ -3,6 +3,8 @@ import { CenterUserRole } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
 
+const hiddenCenterRoles: CenterUserRole[] = ["LAB_TECH", "PHARMACIST", "NURSE"];
+
 export async function getCentralDashboardData() {
   const [
     connectedCenters,
@@ -184,7 +186,8 @@ export async function getUnifiedPatients(search?: string) {
           OR: [
             { unifiedId: { contains: search, mode: "insensitive" } },
             { fullName: { contains: search, mode: "insensitive" } },
-            { primaryPhone: { contains: search } }
+            { primaryPhone: { contains: search } },
+            { nationalId: { contains: search } }
           ]
         }
       : undefined,
@@ -374,7 +377,12 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
         }
       }),
       prisma.centerUserAccount.findMany({
-        where: { centerId },
+        where: {
+          centerId,
+          role: {
+            notIn: hiddenCenterRoles
+          }
+        },
         orderBy: [{ role: "asc" }, { fullName: "asc" }]
       }),
       prisma.localPatient.count({ where: { centerId } }),
@@ -515,12 +523,22 @@ export async function getCenterPatients(centerId: number, search?: string) {
             OR: [
               { fullName: { contains: search, mode: "insensitive" } },
               { phone: { contains: search } },
-              { unifiedId: { contains: search, mode: "insensitive" } }
+              { unifiedId: { contains: search, mode: "insensitive" } },
+              {
+                unifiedPatient: {
+                  is: {
+                    nationalId: {
+                      contains: search
+                    }
+                  }
+                }
+              }
             ]
           }
         : {})
     },
     include: {
+      unifiedPatient: true,
       visits: {
         orderBy: {
           visitDate: "desc"
@@ -542,6 +560,7 @@ export async function getCenterPatients(centerId: number, search?: string) {
   return patients.map((patient) => ({
     id: patient.id,
     unifiedId: patient.unifiedId,
+    nationalId: patient.unifiedPatient?.nationalId ?? null,
     fullName: patient.fullName,
     phone: patient.phone,
     gender: patient.gender,

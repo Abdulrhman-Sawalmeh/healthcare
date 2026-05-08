@@ -9,3 +9,4 @@ coverage
 *.log
 apps/api/generated
 apps/api/prisma/dev.db
+runtime-postgres/

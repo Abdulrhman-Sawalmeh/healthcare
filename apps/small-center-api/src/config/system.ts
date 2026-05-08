@@ -24,8 +24,11 @@ export const systemConfig: BackendSystemConfig = {
   accessDeniedMessage: "هذا الحساب لا ينتمي إلى نظام المركز الصحي الصغير."
 };
 
-export function isWorkspaceAllowed(workspace: "central" | "center", centerCode?: string | null) {
-  if (workspace !== systemConfig.workspace) {
+export function isWorkspaceAllowed(workspace: "central" | "center" | "legacy", centerCode?: string | null) {
+  const sameWorkspace = workspace === systemConfig.workspace;
+  const isLegacyPortal = workspace === "legacy" && systemConfig.workspace === "center";
+
+  if (!sameWorkspace && !isLegacyPortal) {
     return false;
   }
 

@@ -5,10 +5,10 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { authenticate, authorize } from "../middleware/auth";
 import { AppError } from "../middleware/error";
+import { resolvePortalActor } from "../services/portal-identity";
 import { asyncHandler } from "../utils/async-handler";
 import { getSingleParam } from "../utils/request";
 import { mapThread } from "../utils/serializers";
-import { requireProfileId } from "../utils/scope";
 
 const router = Router();
 
@@ -44,6 +44,42 @@ const threadInclude = {
   }
 } as const;
 
+function assertThreadAccess(
+  thread: {
+    patientId: string;
+    doctorId: string;
+  },
+  actor: Awaited<ReturnType<typeof resolvePortalActor>>
+) {
+  if (actor.role === UserRole.PATIENT && thread.patientId !== actor.patientProfileId) {
+    throw new AppError("You cannot access another patient's thread.", 403);
+  }
+
+  if (actor.role === UserRole.DOCTOR && thread.doctorId !== actor.doctorProfileId) {
+    throw new AppError("You cannot access another doctor's thread.", 403);
+  }
+}
+
+async function touchThread(threadId: string) {
+  await prisma.messageThread.update({
+    where: { id: threadId },
+    data: {
+      updatedAt: new Date()
+    }
+  });
+}
+
+async function createMessageNotification(userId: string) {
+  await prisma.notification.create({
+    data: {
+      userId,
+      title: "رسالة طبية جديدة",
+      body: "وصلتك رسالة جديدة ضمن المحادثة الطبية الآمنة.",
+      type: "MESSAGE"
+    }
+  });
+}
+
 router.get(
   "/threads",
   authenticate,
@@ -51,12 +87,16 @@ router.get(
   asyncHandler(async (req, res) => {
     const where: Prisma.MessageThreadWhereInput = {};
 
-    if (req.auth?.role === UserRole.PATIENT) {
-      where.patientId = requireProfileId(req.auth.patientProfileId, "Patient profile is required.");
-    }
+    if (req.auth?.role === UserRole.PATIENT || req.auth?.role === UserRole.DOCTOR) {
+      const actor = await resolvePortalActor(req.auth);
 
-    if (req.auth?.role === UserRole.DOCTOR) {
-      where.doctorId = requireProfileId(req.auth.doctorProfileId, "Doctor profile is required.");
+      if (actor.role === UserRole.PATIENT) {
+        where.patientId = actor.patientProfileId;
+      }
+
+      if (actor.role === UserRole.DOCTOR) {
+        where.doctorId = actor.doctorProfileId;
+      }
     }
 
     if (req.auth?.role === UserRole.ADMIN && req.auth.centerId) {
@@ -85,15 +125,10 @@ router.post(
   authorize(UserRole.DOCTOR, UserRole.PATIENT),
   asyncHandler(async (req, res) => {
     const payload = createThreadSchema.parse(req.body);
+    const actor = await resolvePortalActor(req.auth!);
 
-    const patientId =
-      req.auth?.role === UserRole.PATIENT
-        ? requireProfileId(req.auth.patientProfileId, "Patient profile is required.")
-        : payload.patientId;
-    const doctorId =
-      req.auth?.role === UserRole.DOCTOR
-        ? requireProfileId(req.auth.doctorProfileId, "Doctor profile is required.")
-        : payload.doctorId;
+    const patientId = actor.role === UserRole.PATIENT ? actor.patientProfileId : payload.patientId;
+    const doctorId = actor.role === UserRole.DOCTOR ? actor.doctorProfileId : payload.doctorId;
 
     if (!patientId || !doctorId) {
       throw new AppError("Doctor and patient are required to start a thread.", 400);
@@ -116,15 +151,22 @@ router.post(
     await prisma.message.create({
       data: {
         threadId: thread.id,
-        senderId: req.auth!.sub,
+        senderId: actor.userId,
         content: payload.initialMessage
       }
     });
+    await touchThread(thread.id);
 
     const updatedThread = await prisma.messageThread.findUnique({
       where: { id: thread.id },
       include: threadInclude
     });
+
+    if (updatedThread) {
+      const recipientUserId =
+        actor.role === UserRole.PATIENT ? updatedThread.doctor.userId : updatedThread.patient.userId;
+      await createMessageNotification(recipientUserId);
+    }
 
     res.status(201).json(updatedThread ? mapThread(updatedThread) : null);
   })
@@ -133,10 +175,11 @@ router.post(
 router.post(
   "/threads/:threadId/messages",
   authenticate,
-  authorize(UserRole.ADMIN, UserRole.DOCTOR, UserRole.PATIENT),
+  authorize(UserRole.DOCTOR, UserRole.PATIENT),
   asyncHandler(async (req, res) => {
     const { content } = sendMessageSchema.parse(req.body);
     const threadId = getSingleParam(req.params.threadId, "Thread ID");
+    const actor = await resolvePortalActor(req.auth!);
     const thread = await prisma.messageThread.findUnique({
       where: { id: threadId },
       include: {
@@ -157,37 +200,57 @@ router.post(
       throw new AppError("Thread not found.", 404);
     }
 
-    if (
-      req.auth?.role === UserRole.PATIENT &&
-      thread.patientId !== requireProfileId(req.auth.patientProfileId, "Patient profile is required.")
-    ) {
-      throw new AppError("You cannot post to another patient's thread.", 403);
-    }
-
-    if (
-      req.auth?.role === UserRole.DOCTOR &&
-      thread.doctorId !== requireProfileId(req.auth.doctorProfileId, "Doctor profile is required.")
-    ) {
-      throw new AppError("You cannot post to another doctor's thread.", 403);
-    }
+    assertThreadAccess(thread, actor);
 
     await prisma.message.create({
       data: {
         threadId: thread.id,
-        senderId: req.auth!.sub,
+        senderId: actor.userId,
         content
       }
     });
+    await touchThread(thread.id);
 
     const recipientUserId =
-      req.auth?.role === UserRole.PATIENT ? thread.doctor.userId : thread.patient.userId;
+      actor.role === UserRole.PATIENT ? thread.doctor.userId : thread.patient.userId;
+    await createMessageNotification(recipientUserId);
 
-    await prisma.notification.create({
+    const updatedThread = await prisma.messageThread.findUnique({
+      where: { id: thread.id },
+      include: threadInclude
+    });
+
+    res.json(updatedThread ? mapThread(updatedThread) : null);
+  })
+);
+
+router.patch(
+  "/threads/:threadId/read",
+  authenticate,
+  authorize(UserRole.DOCTOR, UserRole.PATIENT),
+  asyncHandler(async (req, res) => {
+    const threadId = getSingleParam(req.params.threadId, "Thread ID");
+    const actor = await resolvePortalActor(req.auth!);
+    const thread = await prisma.messageThread.findUnique({
+      where: { id: threadId }
+    });
+
+    if (!thread) {
+      throw new AppError("Thread not found.", 404);
+    }
+
+    assertThreadAccess(thread, actor);
+
+    await prisma.message.updateMany({
+      where: {
+        threadId: thread.id,
+        senderId: {
+          not: actor.userId
+        },
+        isRead: false
+      },
       data: {
-        userId: recipientUserId,
-        title: "New secure message",
-        body: "You received a new message in the care coordination chat.",
-        type: "MESSAGE"
+        isRead: true
       }
     });
 

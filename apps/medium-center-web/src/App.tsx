@@ -6,12 +6,16 @@ import { useAuth } from "./context/AuthContext";
 import { AppShell } from "./layouts/AppShell";
 import { CentersPage } from "./pages/CentersPage";
 import { DashboardPage } from "./pages/DashboardPage";
-import { LabPage } from "./pages/LabPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MasterDataPage } from "./pages/MasterDataPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
+import { PatientAppointmentsPage } from "./pages/PatientAppointmentsPage";
+import { PatientDoctorsPage } from "./pages/PatientDoctorsPage";
+import { PatientHomePage } from "./pages/PatientHomePage";
+import { PatientMedicalRecordPage } from "./pages/PatientMedicalRecordPage";
+import { PatientMessagesPage } from "./pages/PatientMessagesPage";
+import { PatientNotificationsPage } from "./pages/PatientNotificationsPage";
 import { PatientsPage } from "./pages/PatientsPage";
-import { PharmacyPage } from "./pages/PharmacyPage";
 import { ReferralsPage } from "./pages/ReferralsPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { VisitsPage } from "./pages/VisitsPage";
@@ -45,6 +49,26 @@ function ProtectedRoute({ children, roles }: { children: ReactNode; roles?: Role
   return <>{children}</>;
 }
 
+function HomeRoute() {
+  const { user } = useAuth();
+
+  if (user?.role === "PATIENT") {
+    return <PatientHomePage />;
+  }
+
+  return <DashboardPage />;
+}
+
+function NotificationsRoute() {
+  const { user } = useAuth();
+
+  if (user?.role === "PATIENT") {
+    return <PatientNotificationsPage />;
+  }
+
+  return <NotificationsPage />;
+}
+
 export function App() {
   return (
     <BrowserRouter>
@@ -57,7 +81,39 @@ export function App() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<DashboardPage />} />
+          <Route index element={<HomeRoute />} />
+          <Route
+            path="/appointments"
+            element={
+              <ProtectedRoute roles={["PATIENT"]}>
+                <PatientAppointmentsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/medical-record"
+            element={
+              <ProtectedRoute roles={["PATIENT"]}>
+                <PatientMedicalRecordPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/doctors"
+            element={
+              <ProtectedRoute roles={["PATIENT"]}>
+                <PatientDoctorsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/messages"
+            element={
+              <ProtectedRoute roles={["PATIENT", "DOCTOR"]}>
+                <PatientMessagesPage />
+              </ProtectedRoute>
+            }
+          />
           {isRouteEnabled("/centers") ? (
             <Route
               path="/centers"
@@ -72,9 +128,7 @@ export function App() {
             <Route
               path="/patients"
               element={
-                <ProtectedRoute
-                  roles={["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE"]}
-                >
+                <ProtectedRoute roles={["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]}>
                   <PatientsPage />
                 </ProtectedRoute>
               }
@@ -84,7 +138,7 @@ export function App() {
             <Route
               path="/visits"
               element={
-                <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE"]}>
+                <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]}>
                   <VisitsPage />
                 </ProtectedRoute>
               }
@@ -94,30 +148,8 @@ export function App() {
             <Route
               path="/referrals"
               element={
-                <ProtectedRoute
-                  roles={["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE"]}
-                >
+                <ProtectedRoute roles={["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]}>
                   <ReferralsPage />
-                </ProtectedRoute>
-              }
-            />
-          ) : null}
-          {isRouteEnabled("/lab") ? (
-            <Route
-              path="/lab"
-              element={
-                <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "LAB_TECH"]}>
-                  <LabPage />
-                </ProtectedRoute>
-              }
-            />
-          ) : null}
-          {isRouteEnabled("/pharmacy") ? (
-            <Route
-              path="/pharmacy"
-              element={
-                <ProtectedRoute roles={["CENTER_MANAGER", "PHARMACIST"]}>
-                  <PharmacyPage />
                 </ProtectedRoute>
               }
             />
@@ -142,7 +174,7 @@ export function App() {
               }
             />
           ) : null}
-          {isRouteEnabled("/notifications") ? <Route path="/notifications" element={<NotificationsPage />} /> : null}
+          {isRouteEnabled("/notifications") ? <Route path="/notifications" element={<NotificationsRoute />} /> : null}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

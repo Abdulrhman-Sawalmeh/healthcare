@@ -74,7 +74,7 @@ table {
 
 .eyebrow {
   letter-spacing: 0.04em;
-  font-size: 0.73rem;
+  font-size: 0.82rem;
   font-weight: 800;
   color: var(--accent);
 }
@@ -472,6 +472,28 @@ table {
   border: 1px solid var(--border);
   display: grid;
   gap: 0.55rem;
+}
+
+.interactive-card {
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.interactive-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(23, 50, 45, 0.08);
+  border-color: rgba(15, 118, 99, 0.18);
+}
+
+.interactive-card:focus-visible {
+  outline: 3px solid rgba(15, 118, 99, 0.18);
+  outline-offset: 2px;
+}
+
+.action-hint {
+  color: var(--accent);
+  font-size: 0.84rem;
+  font-weight: 700;
 }
 
 .stack-list.compact {

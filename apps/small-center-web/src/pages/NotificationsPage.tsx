@@ -1,14 +1,21 @@
-import { useEffect, useState } from "react";
+import { KeyboardEvent, MouseEvent, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAuth } from "../context/AuthContext";
 import { formatDateTime, toArabicLabel } from "../lib/arabic";
+import { resolveNotificationPath } from "../lib/notification-routing";
 import { CenterNotificationsBundle, CentralNotificationsBundle } from "../types";
+
+function isActivationKey(event: KeyboardEvent<HTMLElement>) {
+  return event.key === "Enter" || event.key === " ";
+}
 
 export function NotificationsPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [centralBundle, setCentralBundle] = useState<CentralNotificationsBundle | null>(null);
   const [centerBundle, setCenterBundle] = useState<CenterNotificationsBundle | null>(null);
   const [error, setError] = useState("");
@@ -30,7 +37,7 @@ export function NotificationsPage() {
   }
 
   useEffect(() => {
-    loadData().catch((cause: Error) => setError(cause.message));
+    void loadData().catch((cause: Error) => setError(cause.message));
   }, [user]);
 
   async function processQueues() {
@@ -49,7 +56,9 @@ export function NotificationsPage() {
     }
   }
 
-  async function retryOutgoing(notificationId: number) {
+  async function retryOutgoing(event: MouseEvent<HTMLButtonElement>, notificationId: number) {
+    event.stopPropagation();
+
     try {
       await apiRequest(`/center/notifications/retry/${notificationId}`, {
         method: "POST"
@@ -61,12 +70,33 @@ export function NotificationsPage() {
     }
   }
 
+  function handleCardNavigation(path: string) {
+    if (path !== "/notifications") {
+      navigate(path);
+    }
+  }
+
+  function interactiveProps(path: string) {
+    return {
+      role: "button" as const,
+      tabIndex: 0,
+      className: "stack-item interactive-card",
+      onClick: () => handleCardNavigation(path),
+      onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+        if (isActivationKey(event)) {
+          event.preventDefault();
+          handleCardNavigation(path);
+        }
+      }
+    };
+  }
+
   if (user?.workspace === "central" && centralBundle) {
     return (
       <div className="page-stack">
         <SectionCard
           title="مركز الإشعارات المركزي"
-          subtitle="قناة الاتصال ثنائية الاتجاه بين النظام المركزي والمراكز الصحية المرتبطة."
+          subtitle="قناة الاتصال الثنائية بين النظام المركزي والمراكز الصحية المرتبطة."
           action={
             <button className="primary-button" type="button" onClick={() => void processQueues()}>
               {processing ? "جارٍ المعالجة..." : "معالجة الطوابير"}
@@ -79,46 +109,69 @@ export function NotificationsPage() {
             <div className="section-card inset-card">
               <h3>إشعارات صادرة إلى المراكز</h3>
               <div className="stack-list">
-                {centralBundle.outgoing.map((item) => (
-                  <article className="stack-item" key={item.id}>
-                    <div className="info-row">
-                      <div>
-                        <strong>{toArabicLabel(item.notificationType)}</strong>
-                        <p className="muted">
-                          {item.targetCenter.centerName} • {item.targetCenter.centerCode}
-                        </p>
+                {centralBundle.outgoing.map((item) => {
+                  const path = resolveNotificationPath({
+                    role: user.role,
+                    workspace: user.workspace,
+                    type: item.notificationType,
+                    title: toArabicLabel(item.notificationType),
+                    body: item.targetCenter.centerName
+                  });
+
+                  return (
+                    <article key={item.id} {...interactiveProps(path)}>
+                      <div className="info-row">
+                        <div>
+                          <strong>{toArabicLabel(item.notificationType)}</strong>
+                          <p className="muted">
+                            {item.targetCenter.centerName} - {item.targetCenter.centerCode}
+                          </p>
+                        </div>
+                        <StatusBadge status={item.status} />
                       </div>
-                      <StatusBadge status={item.status} />
-                    </div>
-                    <span className="muted">{formatDateTime(item.createdAt)}</span>
-                  </article>
-                ))}
+                      <span className="muted">{formatDateTime(item.createdAt)}</span>
+                    </article>
+                  );
+                })}
               </div>
             </div>
 
             <div className="section-card inset-card">
               <h3>إشعارات واردة من المراكز</h3>
               <div className="stack-list">
-                {centralBundle.incoming.map((item) => (
-                  <article className="stack-item" key={item.id}>
-                    <div className="info-row">
-                      <div>
-                        <strong>{toArabicLabel(item.notificationType)}</strong>
-                        <p className="muted">
-                          {item.fromCenter.centerName} • {item.fromCenter.centerCode}
-                        </p>
+                {centralBundle.incoming.map((item) => {
+                  const path = resolveNotificationPath({
+                    role: user.role,
+                    workspace: user.workspace,
+                    type: item.notificationType,
+                    title: toArabicLabel(item.notificationType),
+                    body: item.fromCenter.centerName
+                  });
+
+                  return (
+                    <article key={item.id} {...interactiveProps(path)}>
+                      <div className="info-row">
+                        <div>
+                          <strong>{toArabicLabel(item.notificationType)}</strong>
+                          <p className="muted">
+                            {item.fromCenter.centerName} - {item.fromCenter.centerCode}
+                          </p>
+                        </div>
+                        <StatusBadge status={item.status} />
                       </div>
-                      <StatusBadge status={item.status} />
-                    </div>
-                    <span className="muted">{formatDateTime(item.receivedAt)}</span>
-                  </article>
-                ))}
+                      <span className="muted">{formatDateTime(item.receivedAt)}</span>
+                    </article>
+                  );
+                })}
               </div>
             </div>
           </div>
         </SectionCard>
 
-        <SectionCard title="سجل التتبع الاتصالي" subtitle="أثر تشغيلي لتسليم الرسائل والاستجابات بين الأنظمة.">
+        <SectionCard
+          title="سجل التتبع الاتصالي"
+          subtitle="أثر تشغيلي لتسليم الرسائل والاستجابات بين الأنظمة."
+        >
           <div className="table-shell">
             <table className="data-table">
               <thead>
@@ -132,7 +185,37 @@ export function NotificationsPage() {
               </thead>
               <tbody>
                 {centralBundle.communicationLogs.map((log) => (
-                  <tr key={log.id}>
+                  <tr
+                    key={log.id}
+                    className="interactive-card"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() =>
+                      handleCardNavigation(
+                        resolveNotificationPath({
+                          role: user.role,
+                          workspace: user.workspace,
+                          type: log.notificationType,
+                          title: toArabicLabel(log.notificationType),
+                          body: log.center?.centerName ?? log.errorMessage ?? undefined
+                        })
+                      )
+                    }
+                    onKeyDown={(event) => {
+                      if (isActivationKey(event)) {
+                        event.preventDefault();
+                        handleCardNavigation(
+                          resolveNotificationPath({
+                            role: user.role,
+                            workspace: user.workspace,
+                            type: log.notificationType,
+                            title: toArabicLabel(log.notificationType),
+                            body: log.center?.centerName ?? log.errorMessage ?? undefined
+                          })
+                        );
+                      }
+                    }}
+                  >
                     <td>{toArabicLabel(log.direction)}</td>
                     <td>{toArabicLabel(log.notificationType)}</td>
                     <td>{log.center?.centerName ?? "النظام"}</td>
@@ -173,41 +256,65 @@ export function NotificationsPage() {
           <div className="section-card inset-card">
             <h3>وارد من النظام المركزي</h3>
             <div className="stack-list">
-              {centerBundle.incoming.map((item) => (
-                <article key={item.id} className="stack-item">
-                  <div className="info-row">
-                    <div>
-                      <strong>{toArabicLabel(item.notificationType)}</strong>
-                      <p className="muted">{formatDateTime(item.receivedAt)}</p>
+              {centerBundle.incoming.map((item) => {
+                const path = resolveNotificationPath({
+                  role: user?.role,
+                  workspace: user?.workspace,
+                  type: item.notificationType,
+                  title: toArabicLabel(item.notificationType),
+                  body: item.responseError ?? item.responseStatus ?? undefined
+                });
+
+                return (
+                  <article key={item.id} {...interactiveProps(path)}>
+                    <div className="info-row">
+                      <div>
+                        <strong>{toArabicLabel(item.notificationType)}</strong>
+                        <p className="muted">{formatDateTime(item.receivedAt)}</p>
+                      </div>
+                      <StatusBadge status={item.status} />
                     </div>
-                    <StatusBadge status={item.status} />
-                  </div>
-                </article>
-              ))}
+                  </article>
+                );
+              })}
             </div>
           </div>
 
           <div className="section-card inset-card">
             <h3>صادر إلى النظام المركزي</h3>
             <div className="stack-list">
-              {centerBundle.outgoing.map((item) => (
-                <article key={item.id} className="stack-item">
-                  <div className="info-row">
-                    <div>
-                      <strong>{toArabicLabel(item.notificationType)}</strong>
-                      <p className="muted">
-                        المحاولات {item.retryCount}/{item.maxRetries}
-                      </p>
+              {centerBundle.outgoing.map((item) => {
+                const path = resolveNotificationPath({
+                  role: user?.role,
+                  workspace: user?.workspace,
+                  type: item.notificationType,
+                  title: toArabicLabel(item.notificationType),
+                  body: item.lastError ?? `عدد المحاولات ${item.retryCount}/${item.maxRetries}`
+                });
+
+                return (
+                  <article key={item.id} {...interactiveProps(path)}>
+                    <div className="info-row">
+                      <div>
+                        <strong>{toArabicLabel(item.notificationType)}</strong>
+                        <p className="muted">
+                          المحاولات {item.retryCount}/{item.maxRetries}
+                        </p>
+                      </div>
+                      <StatusBadge status={item.status} />
                     </div>
-                    <StatusBadge status={item.status} />
-                  </div>
-                  {user?.role === "CENTER_MANAGER" && item.status !== "COMPLETED" ? (
-                    <button className="ghost-button" type="button" onClick={() => void retryOutgoing(item.id)}>
-                      إعادة المحاولة الآن
-                    </button>
-                  ) : null}
-                </article>
-              ))}
+                    {user?.role === "CENTER_MANAGER" && item.status !== "COMPLETED" ? (
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={(event) => void retryOutgoing(event, item.id)}
+                      >
+                        إعادة المحاولة الآن
+                      </button>
+                    ) : null}
+                  </article>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -216,33 +323,53 @@ export function NotificationsPage() {
       <div className="split-grid">
         <SectionCard title="تنبيهات النظام" subtitle="تنبيهات وتحذيرات يراجعها مدير المركز.">
           <div className="stack-list">
-            {centerBundle.alerts.map((alert) => (
-              <article key={alert.id} className="stack-item">
-                <div className="info-row">
-                  <div>
-                    <strong>{alert.title}</strong>
-                    <p className="muted">{alert.message}</p>
+            {centerBundle.alerts.map((alert) => {
+              const path = resolveNotificationPath({
+                role: user?.role,
+                workspace: user?.workspace,
+                type: alert.severity,
+                title: alert.title,
+                body: alert.message
+              });
+
+              return (
+                <article key={alert.id} {...interactiveProps(path)}>
+                  <div className="info-row">
+                    <div>
+                      <strong>{alert.title}</strong>
+                      <p className="muted">{alert.message}</p>
+                    </div>
+                    <StatusBadge status={alert.severity} />
                   </div>
-                  <StatusBadge status={alert.severity} />
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </div>
         </SectionCard>
 
         <SectionCard title="سجل المعالجة" subtitle="آخر الإجراءات التي نُفذت على طوابير الإشعارات داخل المركز.">
           <div className="stack-list">
-            {centerBundle.logs.map((log) => (
-              <article key={log.id} className="stack-item">
-                <div className="info-row">
-                  <div>
-                    <strong>{log.message}</strong>
-                    <p className="muted">{formatDateTime(log.createdAt)}</p>
+            {centerBundle.logs.map((log) => {
+              const path = resolveNotificationPath({
+                role: user?.role,
+                workspace: user?.workspace,
+                type: log.severity,
+                title: log.message,
+                body: undefined
+              });
+
+              return (
+                <article key={log.id} {...interactiveProps(path)}>
+                  <div className="info-row">
+                    <div>
+                      <strong>{log.message}</strong>
+                      <p className="muted">{formatDateTime(log.createdAt)}</p>
+                    </div>
+                    <StatusBadge status={log.severity} />
                   </div>
-                  <StatusBadge status={log.severity} />
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </div>
         </SectionCard>
       </div>

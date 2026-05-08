@@ -1,16 +1,17 @@
-export type Workspace = "central" | "center";
+export type Workspace = "central" | "center" | "legacy";
 
 export type Role =
   | "CENTRAL_ADMIN"
   | "CENTER_MANAGER"
   | "DOCTOR"
+  | "PATIENT"
   | "RECEPTIONIST"
   | "LAB_TECH"
   | "PHARMACIST"
   | "NURSE";
 
 export interface SessionCenter {
-  id: number;
+  id: string | number;
   code: string;
   name: string;
   type: "CLINIC" | "MEDICAL_CENTER" | "HOSPITAL";
@@ -29,6 +30,10 @@ export interface SessionUser {
   role: Role;
   workspace: Workspace;
   center?: SessionCenter;
+  phone?: string | null;
+  patientProfileId?: string;
+  doctorProfileId?: string;
+  departmentName?: string;
 }
 
 export interface CentralDashboardData {
@@ -205,6 +210,7 @@ export interface UnifiedPatientRecord {
 export interface LocalPatientRecord {
   id: number;
   unifiedId?: string | null;
+  nationalId?: string | null;
   fullName: string;
   phone: string;
   gender: string;
@@ -422,6 +428,7 @@ export interface NetworkPatientSearchResult {
   patient?: {
     id: number;
     unifiedId: string;
+    nationalId?: string | null;
     fullName: string;
     primaryPhone: string;
     address: string;
@@ -431,6 +438,7 @@ export interface NetworkPatientSearchResult {
     id: number;
     fullName: string;
     phone: string;
+    nationalId?: string | null;
   };
   recentVisits?: Array<{
     id: number;
@@ -438,4 +446,209 @@ export interface NetworkPatientSearchResult {
     primaryDiagnosis?: string;
     visitDate?: string;
   }>;
+}
+
+export interface PortalPatientRecord {
+  id: string;
+  fullName: string;
+  email: string;
+  phone?: string | null;
+  medicalRecordNumber: string;
+  chronicConditions?: string | null;
+  insuranceNumber?: string | null;
+  center: {
+    id: string;
+    name: string;
+  };
+  appointmentsCount: number;
+  referralsCount: number;
+}
+
+export interface PortalDoctorRecord {
+  id: string;
+  fullName: string;
+  email: string;
+  phone?: string | null;
+  specialization: string;
+  yearsExperience: number;
+  center: {
+    id: string;
+    name: string;
+  };
+  department: {
+    id: string;
+    name: string;
+  };
+}
+
+export interface PortalAppointmentRecord {
+  id: string;
+  status: string;
+  type: string;
+  scheduledAt: string;
+  reason: string;
+  notes?: string | null;
+  waitingMinutes?: number | null;
+  attended?: boolean | null;
+  center: {
+    id: string;
+    name: string;
+  };
+  department: {
+    id: string;
+    name: string;
+  };
+  patient: {
+    id: string;
+    fullName: string;
+    medicalRecordNumber: string;
+  };
+  doctor: {
+    id: string;
+    fullName: string;
+    specialization: string;
+  };
+}
+
+export interface PortalReferralRecord {
+  id: string;
+  status: string;
+  reason: string;
+  notes?: string | null;
+  priority: string;
+  createdAt: string;
+  acceptedAt?: string | null;
+  completedAt?: string | null;
+  fromCenter: {
+    id: string;
+    name: string;
+  };
+  toCenter: {
+    id: string;
+    name: string;
+  };
+  patient: {
+    id: string;
+    fullName: string;
+    medicalRecordNumber: string;
+  };
+  fromDoctor: {
+    id: string;
+    fullName: string;
+  };
+  toDoctor?: {
+    id: string;
+    fullName: string;
+  } | null;
+  department?: {
+    id: string;
+    name: string;
+  } | null;
+}
+
+export interface PortalNotificationRecord {
+  id: string;
+  title: string;
+  body: string;
+  type: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface PortalThreadRecord {
+  id: string;
+  updatedAt: string;
+  patient: {
+    id: string;
+    fullName: string;
+  };
+  doctor: {
+    id: string;
+    fullName: string;
+    departmentName: string;
+  };
+  messages: Array<{
+    id: string;
+    content: string;
+    createdAt: string;
+    isRead: boolean;
+    sender: {
+      id: string;
+      fullName: string;
+      role: string;
+    };
+  }>;
+}
+
+export interface PortalSubscriptionRecord {
+  id: string;
+  status: string;
+  autoRenew: boolean;
+  startedAt: string;
+  endsAt: string;
+  center: {
+    id: string;
+    name: string;
+  };
+  patient: {
+    id: string;
+    fullName: string;
+  };
+  plan: {
+    id: string;
+    name: string;
+    billingCycle: string;
+    priceInCents: number;
+    maxVisits: number;
+    description?: string | null;
+  };
+  payments: Array<{
+    id: string;
+    amountInCents: number;
+    currency: string;
+    status: string;
+    method: string;
+    reference?: string | null;
+    paidAt?: string | null;
+    createdAt: string;
+  }>;
+}
+
+export interface PortalSummary {
+  patient: PortalPatientRecord;
+  stats: {
+    upcomingAppointments: number;
+    completedReports: number;
+    activeReferrals: number;
+    unreadNotifications: number;
+    activeSubscriptions: number;
+    careTeamCount: number;
+  };
+  nextAppointment: PortalAppointmentRecord | null;
+  recentReports: PortalAppointmentRecord[];
+  careTeam: PortalDoctorRecord[];
+  recentThreads: PortalThreadRecord[];
+  recentNotifications: PortalNotificationRecord[];
+}
+
+export interface PortalMedicalRecord {
+  patient: PortalPatientRecord;
+  profile: {
+    dateOfBirth: string;
+    gender: string;
+    chronicConditions?: string | null;
+    insuranceNumber?: string | null;
+    emergencyContact?: string | null;
+    center: {
+      id: string;
+      code: string;
+      name: string;
+      city: string;
+      address: string;
+    };
+  };
+  clinicalReports: PortalAppointmentRecord[];
+  upcomingAppointments: PortalAppointmentRecord[];
+  referrals: PortalReferralRecord[];
+  subscriptions: PortalSubscriptionRecord[];
 }

@@ -1,0 +1,85 @@
+import { Role, Workspace } from "../types";
+
+type NotificationRouteContext = {
+  role?: Role;
+  workspace?: Workspace;
+};
+
+type NotificationRouteInput = NotificationRouteContext & {
+  type?: string | null;
+  title?: string | null;
+  body?: string | null;
+};
+
+function buildHaystack(parts: Array<string | null | undefined>) {
+  return parts
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function includesAny(source: string, terms: string[]) {
+  return terms.some((term) => source.includes(term.toLowerCase()));
+}
+
+function resolveAppointmentsPath(context: NotificationRouteContext) {
+  if (context.role === "PATIENT") {
+    return "/appointments";
+  }
+
+  if (context.workspace === "center") {
+    return "/visits";
+  }
+
+  return "/notifications";
+}
+
+function resolveReferralsPath(context: NotificationRouteContext) {
+  return context.role === "PATIENT" ? "/medical-record" : "/referrals";
+}
+
+function resolvePatientsPath(context: NotificationRouteContext) {
+  return context.role === "PATIENT" ? "/medical-record" : "/patients";
+}
+
+function resolveDoctorsPath(context: NotificationRouteContext) {
+  return context.role === "PATIENT" ? "/doctors" : "/patients";
+}
+
+export function resolveNotificationPath(input: NotificationRouteInput) {
+  const haystack = buildHaystack([input.type, input.title, input.body]);
+
+  if (includesAny(haystack, ["message", "chat", "رسالة", "محادثة"])) {
+    return input.workspace === "central" ? "/notifications" : "/messages";
+  }
+
+  if (includesAny(haystack, ["appointment", "visit", "موعد", "حجز", "زيارة", "زياره"])) {
+    return resolveAppointmentsPath(input);
+  }
+
+  if (includesAny(haystack, ["referral", "إحالة", "احالة"])) {
+    return resolveReferralsPath(input);
+  }
+
+  if (includesAny(haystack, ["patient", "مريض", "مرضى"])) {
+    return resolvePatientsPath(input);
+  }
+
+  if (includesAny(haystack, ["doctor", "طبيب", "أطباء"])) {
+    return resolveDoctorsPath(input);
+  }
+
+  if (includesAny(haystack, ["master_data", "master data", "البيانات المرجعية"])) {
+    return input.workspace === "central" ? "/master-data" : "/notifications";
+  }
+
+  if (includesAny(haystack, ["report", "reports", "تقارير", "إحصاء"])) {
+    return input.workspace === "central" ? "/reports" : "/notifications";
+  }
+
+  if (includesAny(haystack, ["center", "centers", "مركز", "مراكز"])) {
+    return input.workspace === "central" ? "/centers" : "/notifications";
+  }
+
+  return "/notifications";
+}
