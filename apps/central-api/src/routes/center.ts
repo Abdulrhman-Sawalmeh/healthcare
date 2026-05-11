@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { prisma } from "../lib/prisma";
+import { AppError } from "../middleware/error";
 import { authorize, authorizeWorkspace, authenticate } from "../middleware/auth";
 import {
   enqueueOutgoingNotification,
@@ -86,6 +87,24 @@ const labRequestSchema = z.object({
 const labResultSchema = z.object({
   status: z.enum(["PENDING", "IN_PROGRESS", "COMPLETED", "CANCELLED"]),
   resultValue: z.string().optional()
+});
+
+const labRequestUpdateSchema = z.object({
+  patientId: z.coerce.number(),
+  doctorId: z.coerce.number(),
+  testId: z.coerce.number(),
+  status: z.enum(["PENDING", "IN_PROGRESS", "COMPLETED", "CANCELLED"]).default("PENDING"),
+  resultValue: z.string().optional()
+});
+
+const pharmacyItemSchema = z.object({
+  medicineName: z.string().min(2).max(120),
+  batchNumber: z.string().min(2).max(80),
+  quantity: z.coerce.number().int().min(0),
+  unit: z.string().min(1).max(30),
+  expiryDate: z.coerce.date(),
+  sellingPrice: z.coerce.number().min(0),
+  reorderLevel: z.coerce.number().int().min(0)
 });
 
 router.get(
@@ -212,6 +231,148 @@ router.post(
   })
 );
 
+router.put(
+  "/patients/:patientId",
+  authorize("CENTER_MANAGER", "RECEPTIONIST", "NURSE"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const patientId = Number(req.params.patientId);
+    const payload = patientSchema.parse(req.body);
+
+    const updatedPatient = await prisma.$transaction(async (tx) => {
+      const existingPatient = await tx.localPatient.findFirst({
+        where: {
+          id: patientId,
+          centerId
+        },
+        include: {
+          unifiedPatient: true
+        }
+      });
+
+      if (!existingPatient) {
+        throw new AppError("تعذر العثور على المريض المطلوب داخل هذا المركز.", 404);
+      }
+
+      let unifiedPatient = existingPatient.unifiedPatient;
+
+      if (unifiedPatient) {
+        unifiedPatient = await tx.unifiedPatient.update({
+          where: {
+            id: unifiedPatient.id
+          },
+          data: {
+            nationalId: payload.nationalId,
+            fullName: payload.fullName,
+            dateOfBirth: payload.dateOfBirth,
+            gender: payload.gender,
+            primaryPhone: payload.primaryPhone,
+            address: payload.address,
+            bloodType: payload.bloodType,
+            allergies: payload.allergies,
+            chronicDiseases: payload.chronicDiseases
+          }
+        });
+      } else {
+        unifiedPatient =
+          (await tx.unifiedPatient.findFirst({
+            where: {
+              OR: [
+                { primaryPhone: payload.primaryPhone },
+                ...(payload.nationalId ? [{ nationalId: payload.nationalId }] : [])
+              ]
+            }
+          })) ??
+          (await tx.unifiedPatient.create({
+            data: {
+              unifiedId: existingPatient.unifiedId ?? `P-${new Date().getFullYear()}-${Date.now().toString().slice(-7)}`,
+              nationalId: payload.nationalId,
+              fullName: payload.fullName,
+              dateOfBirth: payload.dateOfBirth,
+              gender: payload.gender,
+              primaryPhone: payload.primaryPhone,
+              address: payload.address,
+              bloodType: payload.bloodType,
+              allergies: payload.allergies,
+              chronicDiseases: payload.chronicDiseases
+            }
+          }));
+
+        unifiedPatient = await tx.unifiedPatient.update({
+          where: {
+            id: unifiedPatient.id
+          },
+          data: {
+            nationalId: payload.nationalId,
+            fullName: payload.fullName,
+            dateOfBirth: payload.dateOfBirth,
+            gender: payload.gender,
+            primaryPhone: payload.primaryPhone,
+            address: payload.address,
+            bloodType: payload.bloodType,
+            allergies: payload.allergies,
+            chronicDiseases: payload.chronicDiseases
+          }
+        });
+      }
+
+      return tx.localPatient.update({
+        where: {
+          id: existingPatient.id
+        },
+        data: {
+          unifiedPatientId: unifiedPatient.id,
+          unifiedId: unifiedPatient.unifiedId,
+          fullName: payload.fullName,
+          dateOfBirth: payload.dateOfBirth,
+          gender: payload.gender,
+          phone: payload.primaryPhone,
+          address: payload.address,
+          emergencyContact: payload.emergencyContact,
+          bloodType: payload.bloodType,
+          allergies: payload.allergies,
+          chronicDiseases: payload.chronicDiseases
+        }
+      });
+    });
+
+    res.json({
+      success: true,
+      patient: updatedPatient
+    });
+  })
+);
+
+router.delete(
+  "/patients/:patientId",
+  authorize("CENTER_MANAGER", "RECEPTIONIST", "NURSE"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const patientId = Number(req.params.patientId);
+
+    const patient = await prisma.localPatient.findFirst({
+      where: {
+        id: patientId,
+        centerId
+      }
+    });
+
+    if (!patient) {
+      throw new AppError("تعذر العثور على المريض المطلوب داخل هذا المركز.", 404);
+    }
+
+    await prisma.localPatient.delete({
+      where: {
+        id: patient.id
+      }
+    });
+
+    res.json({
+      success: true
+    });
+  })
+);
+
 router.get(
   "/visits",
   authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE"),
@@ -260,6 +421,136 @@ router.post(
     }
 
     res.status(201).json(visit);
+  })
+);
+
+router.put(
+  "/visits/:visitId",
+  authorize("CENTER_MANAGER", "DOCTOR", "NURSE"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const visitId = Number(req.params.visitId);
+    const payload = visitSchema.parse(req.body);
+
+    const visit = await prisma.localVisit.findFirst({
+      where: {
+        id: visitId,
+        centerId
+      },
+      include: {
+        invoice: true
+      }
+    });
+
+    if (!visit) {
+      throw new AppError("تعذر العثور على الزيارة المطلوبة داخل هذا المركز.", 404);
+    }
+
+    if (visit.syncedToCentral || visit.syncState === "SYNCED") {
+      throw new AppError("لا يمكن تعديل زيارة تمت مزامنتها إلى النظام المركزي حفاظًا على الأرشفة.", 409);
+    }
+
+    if (visit.invoice && !["UNPAID", "VOID"].includes(visit.invoice.status)) {
+      throw new AppError("لا يمكن تعديل زيارة مرتبطة بفاتورة مدفوعة أو مرحلة.", 409);
+    }
+
+    const updatedVisit = await prisma.$transaction(async (tx) => {
+      const savedVisit = await tx.localVisit.update({
+        where: {
+          id: visit.id
+        },
+        data: {
+          patientId: payload.patientId,
+          doctorId:
+            payload.doctorId ??
+            (req.auth?.role === "DOCTOR" || req.auth?.role === "NURSE" ? Number(req.auth.sub) : undefined),
+          visitDate: payload.visitDate,
+          visitTime: payload.visitTime,
+          visitType: payload.visitType,
+          symptoms: payload.symptoms,
+          bloodPressure: payload.bloodPressure,
+          temperature: payload.temperature,
+          heartRate: payload.heartRate,
+          diagnosis: payload.diagnosis,
+          notes: payload.notes,
+          syncState: "PENDING"
+        }
+      });
+
+      await tx.localPrescription.deleteMany({
+        where: {
+          visitId: visit.id
+        }
+      });
+
+      if (payload.prescriptions.length > 0) {
+        await tx.localPrescription.createMany({
+          data: payload.prescriptions.map((prescription) => ({
+            visitId: visit.id,
+            medicineName: prescription.medicineName,
+            dosage: prescription.dosage,
+            duration: prescription.duration,
+            instructions: prescription.instructions
+          }))
+        });
+      }
+
+      return savedVisit;
+    });
+
+    res.json({
+      success: true,
+      visit: updatedVisit
+    });
+  })
+);
+
+router.delete(
+  "/visits/:visitId",
+  authorize("CENTER_MANAGER", "DOCTOR", "NURSE"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const visitId = Number(req.params.visitId);
+
+    const visit = await prisma.localVisit.findFirst({
+      where: {
+        id: visitId,
+        centerId
+      },
+      include: {
+        invoice: true
+      }
+    });
+
+    if (!visit) {
+      throw new AppError("تعذر العثور على الزيارة المطلوبة داخل هذا المركز.", 404);
+    }
+
+    if (visit.syncedToCentral || visit.syncState === "SYNCED") {
+      throw new AppError("لا يمكن حذف زيارة تمت مزامنتها إلى النظام المركزي حفاظًا على الأرشفة.", 409);
+    }
+
+    if (visit.invoice && !["UNPAID", "VOID"].includes(visit.invoice.status)) {
+      throw new AppError("لا يمكن حذف زيارة مرتبطة بفاتورة مدفوعة أو مرحلة.", 409);
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.localInvoice.deleteMany({
+        where: {
+          visitId: visit.id
+        }
+      });
+
+      await tx.localVisit.delete({
+        where: {
+          id: visit.id
+        }
+      });
+    });
+
+    res.json({
+      success: true
+    });
   })
 );
 
@@ -354,6 +645,48 @@ router.post(
   })
 );
 
+router.put(
+  "/lab/requests/:requestId",
+  authorize("CENTER_MANAGER", "DOCTOR", "LAB_TECH"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const requestId = Number(req.params.requestId);
+    const payload = labRequestUpdateSchema.parse(req.body);
+
+    const requestRecord = await prisma.labRequestLocal.findFirst({
+      where: {
+        id: requestId,
+        centerId
+      }
+    });
+
+    if (!requestRecord) {
+      throw new AppError("تعذر العثور على طلب المختبر المطلوب داخل هذا المركز.", 404);
+    }
+
+    if (req.auth?.role === "DOCTOR" && requestRecord.status !== "PENDING") {
+      throw new AppError("يمكن للطبيب تعديل الطلبات المعلقة فقط قبل بدء المعالجة المخبرية.", 409);
+    }
+
+    const record = await prisma.labRequestLocal.update({
+      where: { id: requestRecord.id },
+      data: {
+        patientId: payload.patientId,
+        doctorId: payload.doctorId,
+        testId: payload.testId,
+        status: payload.status,
+        resultValue: payload.resultValue,
+        resultDate: payload.status === "COMPLETED" ? new Date() : null
+      }
+    });
+
+    res.json({
+      success: true,
+      request: record
+    });
+  })
+);
+
 router.patch(
   "/lab/requests/:requestId",
   authorize("CENTER_MANAGER", "LAB_TECH"),
@@ -372,11 +705,142 @@ router.patch(
   })
 );
 
+router.delete(
+  "/lab/requests/:requestId",
+  authorize("CENTER_MANAGER", "DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const requestId = Number(req.params.requestId);
+
+    const requestRecord = await prisma.labRequestLocal.findFirst({
+      where: {
+        id: requestId,
+        centerId
+      }
+    });
+
+    if (!requestRecord) {
+      throw new AppError("تعذر العثور على طلب المختبر المطلوب داخل هذا المركز.", 404);
+    }
+
+    if (requestRecord.status === "COMPLETED") {
+      throw new AppError("لا يمكن حذف طلب مختبري مكتمل بعد اعتماد النتيجة.", 409);
+    }
+
+    await prisma.labRequestLocal.delete({
+      where: {
+        id: requestRecord.id
+      }
+    });
+
+    res.json({
+      success: true
+    });
+  })
+);
+
 router.get(
   "/pharmacy",
   authorize("CENTER_MANAGER", "PHARMACIST"),
   asyncHandler(async (req, res) => {
     res.json(await getCenterPharmacyData(getCenterId(req)));
+  })
+);
+
+router.post(
+  "/pharmacy",
+  authorize("CENTER_MANAGER", "PHARMACIST"),
+  asyncHandler(async (req, res) => {
+    const payload = pharmacyItemSchema.parse(req.body);
+
+    const item = await prisma.pharmacyInventoryLocal.create({
+      data: {
+        centerId: getCenterId(req),
+        medicineName: payload.medicineName,
+        batchNumber: payload.batchNumber,
+        quantity: payload.quantity,
+        unit: payload.unit,
+        expiryDate: payload.expiryDate,
+        sellingPrice: payload.sellingPrice,
+        reorderLevel: payload.reorderLevel
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      item
+    });
+  })
+);
+
+router.put(
+  "/pharmacy/:itemId",
+  authorize("CENTER_MANAGER", "PHARMACIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const itemId = Number(req.params.itemId);
+    const payload = pharmacyItemSchema.parse(req.body);
+
+    const existingItem = await prisma.pharmacyInventoryLocal.findFirst({
+      where: {
+        id: itemId,
+        centerId
+      }
+    });
+
+    if (!existingItem) {
+      throw new AppError("تعذر العثور على الصنف الدوائي المطلوب داخل هذا المركز.", 404);
+    }
+
+    const item = await prisma.pharmacyInventoryLocal.update({
+      where: {
+        id: existingItem.id
+      },
+      data: {
+        medicineName: payload.medicineName,
+        batchNumber: payload.batchNumber,
+        quantity: payload.quantity,
+        unit: payload.unit,
+        expiryDate: payload.expiryDate,
+        sellingPrice: payload.sellingPrice,
+        reorderLevel: payload.reorderLevel
+      }
+    });
+
+    res.json({
+      success: true,
+      item
+    });
+  })
+);
+
+router.delete(
+  "/pharmacy/:itemId",
+  authorize("CENTER_MANAGER", "PHARMACIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const itemId = Number(req.params.itemId);
+
+    const existingItem = await prisma.pharmacyInventoryLocal.findFirst({
+      where: {
+        id: itemId,
+        centerId
+      }
+    });
+
+    if (!existingItem) {
+      throw new AppError("تعذر العثور على الصنف الدوائي المطلوب داخل هذا المركز.", 404);
+    }
+
+    await prisma.pharmacyInventoryLocal.delete({
+      where: {
+        id: existingItem.id
+      }
+    });
+
+    res.json({
+      success: true
+    });
   })
 );
 

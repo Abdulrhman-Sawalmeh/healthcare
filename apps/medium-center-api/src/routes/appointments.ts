@@ -5,6 +5,11 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { authenticate, authorize } from "../middleware/auth";
 import { AppError } from "../middleware/error";
+import {
+  appointmentPriorityValues,
+  findAppointmentConflict,
+  getAppointmentSuggestions
+} from "../services/appointment-suggestions";
 import { asyncHandler } from "../utils/async-handler";
 import { getSingleParam } from "../utils/request";
 import { mapAppointment } from "../utils/serializers";
@@ -29,6 +34,50 @@ const updateStatusSchema = z.object({
   attended: z.boolean().optional(),
   notes: z.string().optional()
 });
+
+const appointmentSuggestionQuerySchema = z.object({
+  centerId: z.string().uuid().optional(),
+  doctorId: z.string().uuid(),
+  preferredDate: z.coerce.date(),
+  appointmentType: z.nativeEnum(AppointmentType).default(AppointmentType.CLINIC),
+  priority: z.enum(appointmentPriorityValues).default("NORMAL")
+});
+
+router.get(
+  "/suggestions",
+  authenticate,
+  authorize(UserRole.ADMIN, UserRole.DOCTOR, UserRole.PATIENT),
+  asyncHandler(async (req, res) => {
+    const payload = appointmentSuggestionQuerySchema.parse(req.query);
+    const centerId = resolveCenterScope(req, payload.centerId);
+
+    if (!centerId) {
+      throw new AppError("A center must be selected before loading appointment suggestions.", 400);
+    }
+
+    const suggestions = await getAppointmentSuggestions({
+      centerId,
+      doctorId: payload.doctorId,
+      preferredDate: payload.preferredDate,
+      appointmentType: payload.appointmentType,
+      priority: payload.priority,
+      patientId:
+        req.auth?.role === UserRole.PATIENT
+          ? requireProfileId(req.auth.patientProfileId, "Patient profile is required.")
+          : undefined
+    });
+
+    res.json(
+      suggestions.map((suggestion) => ({
+        scheduledAt: suggestion.scheduledAt,
+        type: suggestion.type,
+        priority: suggestion.priority,
+        note: suggestion.note,
+        doctor: suggestion.doctor
+      }))
+    );
+  })
+);
 
 router.get(
   "/",
@@ -125,6 +174,16 @@ router.post(
 
     if (doctor.departmentId !== payload.departmentId) {
       throw new AppError("Selected department does not match the chosen doctor.", 400);
+    }
+
+    const conflictingAppointment = await findAppointmentConflict({
+      centerId,
+      doctorId: payload.doctorId,
+      scheduledAt: payload.scheduledAt
+    });
+
+    if (conflictingAppointment) {
+      throw new AppError("The selected time is already booked for this doctor. Please choose another slot.", 409);
     }
 
     const appointment = await prisma.appointment.create({

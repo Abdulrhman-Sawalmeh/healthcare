@@ -579,6 +579,8 @@ export async function getCenterVisits(centerId: number) {
 
   return visits.map((visit) => ({
     id: visit.id,
+    patientId: visit.patientId,
+    doctorId: visit.doctorId,
     patientName: visit.patient.fullName,
     patientUnifiedId: visit.patient.unifiedId,
     doctorName: visit.doctor?.fullName ?? "غير محدد",
@@ -593,7 +595,15 @@ export async function getCenterVisits(centerId: number) {
     syncState: visit.syncState,
     syncedToCentral: visit.syncedToCentral,
     prescriptionCount: visit.prescriptions.length,
-    invoiceStatus: visit.invoice?.status ?? "UNPAID"
+    invoiceStatus: visit.invoice?.status ?? "UNPAID",
+    notes: visit.notes,
+    prescriptions: visit.prescriptions.map((prescription) => ({
+      id: prescription.id,
+      medicineName: prescription.medicineName,
+      dosage: prescription.dosage,
+      duration: prescription.duration,
+      instructions: prescription.instructions
+    }))
   }));
 }
 
@@ -620,6 +630,9 @@ export async function getCenterLabData(centerId: number) {
     catalog,
     requests: requests.map((request) => ({
       id: request.id,
+      patientId: request.patientId,
+      doctorId: request.doctorId,
+      testId: request.testId,
       patientName: request.patient.fullName,
       doctorName: request.doctor.fullName,
       testName: request.test.testName,

@@ -15,6 +15,7 @@ async function main() {
   await prisma.labRequestLocal.deleteMany();
   await prisma.labTestLocal.deleteMany();
   await prisma.localInvoice.deleteMany();
+  await prisma.localResultReport.deleteMany();
   await prisma.localPrescription.deleteMany();
   await prisma.localVisit.deleteMany();
   await prisma.localPatient.deleteMany();
@@ -232,6 +233,47 @@ async function main() {
     }
   });
 
+  await Promise.all([
+    prisma.centerDoctorProfile.create({
+      data: {
+        userAccountId: doctorClinic.id,
+        centerId: clinic.id,
+        nationalId: "901010101",
+        gender: "MALE",
+        specialization: "طب الأسرة",
+        yearsExperience: 8,
+        licenseNumber: "LIC-C001-DR-01",
+        qualification: "البورد الفلسطيني في طب الأسرة",
+        shiftDays: ["SUNDAY", "MONDAY", "WEDNESDAY", "THURSDAY"],
+        shiftStartTime: "08:00",
+        shiftEndTime: "14:00",
+        consultationRoom: "عيادة 1",
+        hireDate: subDays(new Date(), 1200),
+        bio: "يتابع العيادة العامة وحالات الأمراض المزمنة داخل المركز.",
+        notes: "مرجع أولي لتحويلات الرعاية الأولية."
+      }
+    }),
+    prisma.centerDoctorProfile.create({
+      data: {
+        userAccountId: doctorMedical.id,
+        centerId: medicalCenter.id,
+        nationalId: "902020202",
+        gender: "FEMALE",
+        specialization: "أمراض القلب",
+        yearsExperience: 11,
+        licenseNumber: "LIC-M002-DR-01",
+        qualification: "اختصاص قلب وقسطرة تشخيصية",
+        shiftDays: ["SUNDAY", "TUESDAY", "WEDNESDAY", "THURSDAY"],
+        shiftStartTime: "09:00",
+        shiftEndTime: "16:00",
+        consultationRoom: "عيادة القلب",
+        hireDate: subDays(new Date(), 1800),
+        bio: "تشرف على عيادة القلب وتقييم الإحالات القلبية الواردة.",
+        notes: "تنسق المواعيد التشخيصية مع الأشعة والمختبر."
+      }
+    })
+  ]);
+
   const [amlodipine, aspirin, atorvastatin] = await Promise.all([
     prisma.masterMedicine.create({
       data: {
@@ -305,8 +347,8 @@ async function main() {
   await prisma.centerDoctorAvailability.createMany({
     data: [
       { centerId: clinic.id, specialty: "طب الأسرة", availableDoctors: 1, totalDoctors: 1 },
-      { centerId: medicalCenter.id, specialty: "أمراض القلب", availableDoctors: 2, totalDoctors: 3 },
-      { centerId: medicalCenter.id, specialty: "الأشعة التشخيصية", availableDoctors: 1, totalDoctors: 1 }
+      { centerId: medicalCenter.id, specialty: "أمراض القلب", availableDoctors: 1, totalDoctors: 1 },
+      { centerId: medicalCenter.id, specialty: "الأشعة التشخيصية", availableDoctors: 0, totalDoctors: 0 }
     ]
   });
 
@@ -458,6 +500,25 @@ async function main() {
     }
   });
 
+  const medicalFollowUpVisit = await prisma.localVisit.create({
+    data: {
+      centerId: medicalCenter.id,
+      patientId: medicalPatient.id,
+      doctorId: doctorMedical.id,
+      visitDate: subDays(new Date(), 4),
+      visitTime: "10:40",
+      visitType: "FOLLOW_UP",
+      symptoms: "خفقان متقطع بعد الجهد مع حاجة لمراجعة التحاليل الوقائية",
+      bloodPressure: "128/82",
+      temperature: 36.6,
+      heartRate: 79,
+      diagnosis: "متابعة قلبية دورية مع مراجعة دهون الدم",
+      notes: "تم طلب تقرير نتائج مبسط للمريضة مع توصيات المتابعة المنزلية.",
+      syncState: "PENDING",
+      syncedToCentral: false
+    }
+  });
+
   await prisma.localPrescription.createMany({
     data: [
       {
@@ -474,8 +535,34 @@ async function main() {
         dosage: "81 ملغ مرة يوميًا",
         duration: "14 يومًا",
         instructions: "يؤخذ مع الماء بعد الطعام"
+      },
+      {
+        visitId: medicalFollowUpVisit.id,
+        medicineName: "أتورفاستاتين",
+        dosage: "20 ملغ مساءً",
+        duration: "30 يومًا",
+        instructions: "مع الاستمرار على الحمية وتقليل الدهون المشبعة"
       }
     ]
+  });
+
+  await prisma.localResultReport.create({
+    data: {
+      centerId: medicalCenter.id,
+      patientId: medicalPatient.id,
+      visitId: medicalFollowUpVisit.id,
+      authorId: doctorMedical.id,
+      title: "ملخص نتائج متابعة القلب والدهون",
+      category: "LAB",
+      summary:
+        "النتائج الحالية مستقرة سريريًا، ولا توجد مؤشرات على تدهور حاد. نوصي بالاستمرار على الخطة الوقائية الحالية مع مراجعة الدهون بعد 6 أسابيع.",
+      findings:
+        "العلامات الحيوية ضمن الحدود المقبولة، ولا توجد شكوى صدرية حادة أثناء الزيارة. مخطط المتابعة القلبية مستقر حتى الآن.",
+      recommendations:
+        "الاستمرار على العلاج الوقائي، متابعة النشاط البدني الخفيف، وإحضار نتائج الدهون والسكر التراكمي في الزيارة القادمة.",
+      recommendedFollowUp: "مراجعة قلبية خلال 6 أسابيع أو أسرع إذا عاد الخفقان بشكل متكرر.",
+      shareWithPatient: true
+    }
   });
 
   await prisma.localInvoice.createMany({

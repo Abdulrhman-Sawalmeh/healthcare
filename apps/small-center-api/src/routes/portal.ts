@@ -99,6 +99,168 @@ const threadInclude = {
   }
 } as const;
 
+const localResultReportInclude = {
+  center: true,
+  author: {
+    include: {
+      doctorProfile: true
+    }
+  }
+} as const;
+
+function mapAppointmentAsClinicalReport(
+  appointment: Parameters<typeof mapAppointment>[0]
+) {
+  const mapped = mapAppointment(appointment);
+
+  return {
+    ...mapped,
+    source: "APPOINTMENT",
+    summary: appointment.notes ?? null,
+    findings: null,
+    recommendations: null,
+    recommendedFollowUp: null,
+    attachment: null
+  };
+}
+
+function mapLocalResultReport(
+  report: {
+    id: number;
+    title: string;
+    category: string;
+    summary: string;
+    findings: string | null;
+    recommendations: string | null;
+    recommendedFollowUp: string | null;
+    createdAt: Date;
+    authorId: number;
+    attachmentFileName: string | null;
+    attachmentMimeType: string | null;
+    attachmentBase64: string | null;
+    center: {
+      id: number;
+      centerName: string;
+    };
+    author: {
+      fullName: string;
+      doctorProfile: {
+        specialization: string;
+      } | null;
+    };
+  },
+  patient: {
+    id: string;
+    fullName: string;
+    medicalRecordNumber: string;
+  },
+  includeAttachmentData: boolean
+) {
+  return {
+    id: `local-report-${report.id}`,
+    status: "AVAILABLE",
+    type: report.category,
+    scheduledAt: report.createdAt,
+    reason: report.title,
+    notes: report.summary,
+    source: "RESULT_REPORT",
+    summary: report.summary,
+    findings: report.findings,
+    recommendations: report.recommendations,
+    recommendedFollowUp: report.recommendedFollowUp,
+    center: {
+      id: String(report.center.id),
+      name: report.center.centerName
+    },
+    department: {
+      id: `specialty-${report.authorId}`,
+      name: report.author.doctorProfile?.specialization ?? "التقرير الطبي"
+    },
+    patient,
+    doctor: {
+      id: String(report.authorId),
+      fullName: report.author.fullName,
+      specialization: report.author.doctorProfile?.specialization ?? "طبيب معالج"
+    },
+    attachment:
+      report.attachmentFileName && report.attachmentMimeType
+        ? {
+            fileName: report.attachmentFileName,
+            mimeType: report.attachmentMimeType,
+            contentBase64: includeAttachmentData ? report.attachmentBase64 : null
+          }
+        : null
+  };
+}
+
+async function getPatientLocalResultReports(
+  patient: {
+    id: string;
+    medicalRecordNumber: string;
+    center: {
+      code: string;
+    };
+    user: {
+      phone: string | null;
+      fullName: string;
+    };
+  },
+  includeAttachmentData: boolean
+) {
+  const centralCenter = await prisma.centralCenter.findUnique({
+    where: {
+      centerCode: patient.center.code
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (!centralCenter) {
+    return [];
+  }
+
+  const localPatient = await prisma.localPatient.findFirst({
+    where: {
+      centerId: centralCenter.id,
+      OR: [
+        ...(patient.user.phone ? [{ phone: patient.user.phone }] : []),
+        {
+          fullName: patient.user.fullName
+        }
+      ]
+    }
+  });
+
+  if (!localPatient) {
+    return [];
+  }
+
+  const reports = await prisma.localResultReport.findMany({
+    where: {
+      centerId: centralCenter.id,
+      patientId: localPatient.id,
+      shareWithPatient: true
+    },
+    include: localResultReportInclude,
+    orderBy: {
+      createdAt: "desc"
+    }
+  });
+
+  return reports.map((report) =>
+    mapLocalResultReport(
+      report,
+      {
+        id: patient.id,
+        fullName: patient.user.fullName,
+        medicalRecordNumber: patient.medicalRecordNumber
+      },
+      includeAttachmentData
+    )
+  );
+}
+
 router.get(
   "/summary",
   authenticate,
@@ -118,7 +280,7 @@ router.get(
       throw new AppError("Patient profile not found.", 404);
     }
 
-    const [appointments, referrals, subscriptions, notifications, doctors, threads] = await Promise.all([
+    const [appointments, referrals, subscriptions, notifications, doctors, threads, localReports] = await Promise.all([
       prisma.appointment.findMany({
         where: { patientId },
         include: appointmentInclude,
@@ -170,7 +332,8 @@ router.get(
         orderBy: {
           updatedAt: "desc"
         }
-      })
+      }),
+      getPatientLocalResultReports(patient, false)
     ]);
 
     const upcomingAppointments = appointments.filter(
@@ -181,6 +344,10 @@ router.get(
     const completedReports = appointments.filter(
       (appointment) => appointment.status === AppointmentStatus.COMPLETED
     );
+    const clinicalReports = [
+      ...completedReports.map(mapAppointmentAsClinicalReport),
+      ...localReports
+    ].sort((left, right) => new Date(right.scheduledAt).getTime() - new Date(left.scheduledAt).getTime());
     const activeReferrals = referrals.filter((referral) => referral.status !== "COMPLETED");
     const activeSubscriptions = subscriptions.filter(
       (subscription) => subscription.status === SubscriptionStatus.ACTIVE
@@ -194,14 +361,14 @@ router.get(
       }),
       stats: {
         upcomingAppointments: upcomingAppointments.length,
-        completedReports: completedReports.length,
+        completedReports: clinicalReports.length,
         activeReferrals: activeReferrals.length,
         unreadNotifications: notifications.filter((notification) => !notification.isRead).length,
         activeSubscriptions: activeSubscriptions.length,
         careTeamCount: doctors.length
       },
       nextAppointment: upcomingAppointments[0] ? mapAppointment(upcomingAppointments[0]) : null,
-      recentReports: completedReports.slice(0, 3).map(mapAppointment),
+      recentReports: clinicalReports.slice(0, 3),
       careTeam: doctors.slice(0, 4).map(mapDoctor),
       recentThreads: threads.slice(0, 3).map(mapThread),
       recentNotifications: notifications
@@ -246,6 +413,14 @@ router.get(
       throw new AppError("Patient profile not found.", 404);
     }
 
+    const localReports = await getPatientLocalResultReports(patient, true);
+    const clinicalReports = [
+      ...patient.appointments
+        .filter((appointment) => appointment.status === AppointmentStatus.COMPLETED)
+        .map(mapAppointmentAsClinicalReport),
+      ...localReports
+    ].sort((left, right) => new Date(right.scheduledAt).getTime() - new Date(left.scheduledAt).getTime());
+
     res.json({
       patient: mapPatient(patient),
       profile: {
@@ -262,9 +437,7 @@ router.get(
           address: patient.center.address
         }
       },
-      clinicalReports: patient.appointments
-        .filter((appointment) => appointment.status === AppointmentStatus.COMPLETED)
-        .map(mapAppointment),
+      clinicalReports,
       upcomingAppointments: patient.appointments
         .filter(
           (appointment) =>

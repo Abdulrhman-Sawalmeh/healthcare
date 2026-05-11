@@ -461,8 +461,10 @@ model CentralCenter {
   communicationLogs      CommunicationLog[]
   configs                CenterConfig[]
   users                  CenterUserAccount[]
+  doctorProfiles         CenterDoctorProfile[]
   localPatients          LocalPatient[]
   localVisits            LocalVisit[]
+  resultReports          LocalResultReport[]
   localInvoices          LocalInvoice[]
   labTests               LabTestLocal[]
   labRequests            LabRequestLocal[]
@@ -715,11 +717,38 @@ model CenterUserAccount {
   center                         CentralCenter              @relation(fields: [centerId], references: [id], onDelete: Cascade)
   createdBy                      CenterUserAccount?         @relation("CenterUserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdUsers                   CenterUserAccount[]        @relation("CenterUserCreatedBy")
+  doctorProfile                  CenterDoctorProfile?
   visits                         LocalVisit[]               @relation("CenterUserVisits")
+  authoredReports                LocalResultReport[]        @relation("CenterUserAuthoredReports")
   labRequests                    LabRequestLocal[]          @relation("CenterUserLabRequests")
   processedIncomingNotifications IncomingNotification[]     @relation("ProcessedIncomingNotifications")
 
   @@index([centerId, role])
+}
+
+model CenterDoctorProfile {
+  id               Int                @id @default(autoincrement())
+  userAccountId    Int                @unique
+  centerId         Int
+  nationalId       String             @unique
+  gender           Gender             @default(PREFER_NOT_TO_SAY)
+  specialization   String
+  yearsExperience  Int                @default(0)
+  licenseNumber    String             @unique
+  qualification    String?
+  shiftDays        String[]
+  shiftStartTime   String?
+  shiftEndTime     String?
+  consultationRoom String?
+  hireDate         DateTime?
+  bio              String?
+  notes            String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  userAccount      CenterUserAccount  @relation(fields: [userAccountId], references: [id], onDelete: Cascade)
+  center           CentralCenter      @relation(fields: [centerId], references: [id], onDelete: Cascade)
+
+  @@index([centerId, specialization])
 }
 
 model LocalPatient {
@@ -742,6 +771,7 @@ model LocalPatient {
   center           CentralCenter  @relation(fields: [centerId], references: [id], onDelete: Cascade)
   unifiedPatient   UnifiedPatient? @relation(fields: [unifiedPatientId], references: [id], onDelete: SetNull)
   visits           LocalVisit[]
+  resultReports    LocalResultReport[]
   invoices         LocalInvoice[]
   labRequests      LabRequestLocal[]
 
@@ -773,10 +803,39 @@ model LocalVisit {
   doctor         CenterUserAccount? @relation("CenterUserVisits", fields: [doctorId], references: [id], onDelete: SetNull)
   unifiedVisit   UnifiedVisit?      @relation("LocalVisitSync", fields: [centralVisitId], references: [id], onDelete: SetNull)
   prescriptions  LocalPrescription[]
+  resultReports  LocalResultReport[]
   invoice        LocalInvoice?
 
   @@index([centerId, syncState, visitDate])
   @@index([patientId, visitDate])
+}
+
+model LocalResultReport {
+  id                    Int                @id @default(autoincrement())
+  centerId              Int
+  patientId             Int
+  visitId               Int
+  authorId              Int
+  title                 String
+  category              String             @default("GENERAL")
+  summary               String
+  findings              String?
+  recommendations       String?
+  recommendedFollowUp   String?
+  shareWithPatient      Boolean            @default(true)
+  attachmentFileName    String?
+  attachmentMimeType    String?
+  attachmentBase64      String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  center                CentralCenter      @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  patient               LocalPatient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  visit                 LocalVisit         @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  author                CenterUserAccount  @relation("CenterUserAuthoredReports", fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([centerId, createdAt])
+  @@index([patientId, createdAt])
+  @@index([visitId, createdAt])
 }
 
 model LocalPrescription {

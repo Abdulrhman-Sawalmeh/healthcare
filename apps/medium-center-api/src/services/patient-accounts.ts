@@ -26,6 +26,17 @@ export interface EnsurePatientPortalAccountResult {
   accountStatus: "CREATED" | "RESET";
 }
 
+export interface SyncPatientPortalProfileInput {
+  centerId: number;
+  fullName: string;
+  nationalId?: string;
+  primaryPhone: string;
+  dateOfBirth: Date;
+  gender: Gender;
+  emergencyContact?: string;
+  chronicDiseases: string[];
+}
+
 function normalizeNationalId(value: string) {
   return value.replace(/\s+/g, "");
 }
@@ -260,4 +271,84 @@ export async function ensurePatientPortalAccount(
     deliveryMethod,
     accountStatus: "CREATED"
   };
+}
+
+export async function syncPatientPortalProfile(input: SyncPatientPortalProfileInput) {
+  const center = await prisma.centralCenter.findUnique({
+    where: { id: input.centerId },
+    select: {
+      centerCode: true
+    }
+  });
+
+  if (!center) {
+    return;
+  }
+
+  const legacyCenter = await prisma.center.findUnique({
+    where: { code: center.centerCode },
+    select: {
+      id: true
+    }
+  });
+
+  if (!legacyCenter) {
+    return;
+  }
+
+  const normalizedNationalId = input.nationalId ? normalizeNationalId(input.nationalId) : null;
+
+  const existingUser = await prisma.user.findFirst({
+    where: {
+      role: UserRole.PATIENT,
+      OR: [
+        ...(normalizedNationalId
+          ? [
+              {
+                email: {
+                  startsWith: `${normalizedNationalId}@`
+                }
+              }
+            ]
+          : []),
+        {
+          phone: input.primaryPhone,
+          patientProfile: {
+            is: {
+              centerId: legacyCenter.id
+            }
+          }
+        }
+      ]
+    },
+    include: {
+      patientProfile: true
+    }
+  });
+
+  if (!existingUser) {
+    return;
+  }
+
+  await prisma.user.update({
+    where: { id: existingUser.id },
+    data: {
+      email: normalizedNationalId ? buildPatientEmail(normalizedNationalId) : existingUser.email,
+      fullName: input.fullName,
+      phone: input.primaryPhone
+    }
+  });
+
+  if (existingUser.patientProfile) {
+    await prisma.patientProfile.update({
+      where: { id: existingUser.patientProfile.id },
+      data: {
+        centerId: legacyCenter.id,
+        dateOfBirth: input.dateOfBirth,
+        gender: input.gender,
+        chronicConditions: formatChronicConditions(input.chronicDiseases),
+        emergencyContact: input.emergencyContact
+      }
+    });
+  }
 }

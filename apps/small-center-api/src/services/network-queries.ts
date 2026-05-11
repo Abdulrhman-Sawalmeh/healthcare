@@ -383,6 +383,9 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
             notIn: hiddenCenterRoles
           }
         },
+        include: {
+          doctorProfile: true
+        },
         orderBy: [{ role: "asc" }, { fullName: "asc" }]
       }),
       prisma.localPatient.count({ where: { centerId } }),
@@ -489,7 +492,8 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
       role: member.role,
       email: member.email,
       phone: member.phone,
-      isActive: member.isActive
+      isActive: member.isActive,
+      specialization: member.doctorProfile?.specialization ?? null
     })),
     recentVisits: recentVisits.map((visit) => ({
       id: visit.id,
@@ -589,6 +593,18 @@ export async function getCenterVisits(centerId: number) {
       patient: true,
       doctor: true,
       prescriptions: true,
+      resultReports: {
+        include: {
+          author: {
+            include: {
+              doctorProfile: true
+            }
+          }
+        },
+        orderBy: {
+          createdAt: "desc"
+        }
+      },
       invoice: true
     },
     orderBy: {
@@ -598,6 +614,8 @@ export async function getCenterVisits(centerId: number) {
 
   return visits.map((visit) => ({
     id: visit.id,
+    patientId: visit.patientId,
+    doctorId: visit.doctorId,
     patientName: visit.patient.fullName,
     patientUnifiedId: visit.patient.unifiedId,
     doctorName: visit.doctor?.fullName ?? "غير محدد",
@@ -612,7 +630,36 @@ export async function getCenterVisits(centerId: number) {
     syncState: visit.syncState,
     syncedToCentral: visit.syncedToCentral,
     prescriptionCount: visit.prescriptions.length,
-    invoiceStatus: visit.invoice?.status ?? "UNPAID"
+    invoiceStatus: visit.invoice?.status ?? "UNPAID",
+    notes: visit.notes,
+    reports: visit.resultReports.map((report) => ({
+      id: report.id,
+      title: report.title,
+      category: report.category,
+      summary: report.summary,
+      findings: report.findings,
+      recommendations: report.recommendations,
+      recommendedFollowUp: report.recommendedFollowUp,
+      shareWithPatient: report.shareWithPatient,
+      createdAt: report.createdAt,
+      updatedAt: report.updatedAt,
+      authorName: report.author.fullName,
+      authorSpecialization: report.author.doctorProfile?.specialization ?? null,
+      attachment: report.attachmentFileName && report.attachmentMimeType && report.attachmentBase64
+        ? {
+            fileName: report.attachmentFileName,
+            mimeType: report.attachmentMimeType,
+            contentBase64: report.attachmentBase64
+          }
+        : null
+    })),
+    prescriptions: visit.prescriptions.map((prescription) => ({
+      id: prescription.id,
+      medicineName: prescription.medicineName,
+      dosage: prescription.dosage,
+      duration: prescription.duration,
+      instructions: prescription.instructions
+    }))
   }));
 }
 
@@ -639,6 +686,9 @@ export async function getCenterLabData(centerId: number) {
     catalog,
     requests: requests.map((request) => ({
       id: request.id,
+      patientId: request.patientId,
+      doctorId: request.doctorId,
+      testId: request.testId,
       patientName: request.patient.fullName,
       doctorName: request.doctor.fullName,
       testName: request.test.testName,
