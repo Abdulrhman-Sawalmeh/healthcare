@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ApiError } from "../api/client";
+import { LoginScene3D } from "../components/LoginScene3D";
 import { systemConfig } from "../config/system";
 import { useAuth } from "../context/AuthContext";
 
@@ -31,6 +32,7 @@ export function LoginPage() {
   return (
     <div className="login-shell">
       <div className="login-panel hero">
+        <LoginScene3D />
         <div className="hero-copy">
           <p className="eyebrow">{systemConfig.loginEyebrow}</p>
           <h1>{systemConfig.loginTitle}</h1>

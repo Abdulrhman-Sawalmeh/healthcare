@@ -10,6 +10,8 @@ import { LabPage } from "./pages/LabPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MasterDataPage } from "./pages/MasterDataPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
+import { PatientProfilePage } from "./pages/PatientProfilePage";
+import { PatientTimelinePage } from "./pages/PatientTimelinePage";
 import { PatientsPage } from "./pages/PatientsPage";
 import { PharmacyPage } from "./pages/PharmacyPage";
 import { ReferralsPage } from "./pages/ReferralsPage";
@@ -76,6 +78,30 @@ export function App() {
                   roles={["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE"]}
                 >
                   <PatientsPage />
+                </ProtectedRoute>
+              }
+            />
+          ) : null}
+          {isRouteEnabled("/patients") ? (
+            <Route
+              path="/patients/:patientId"
+              element={
+                <ProtectedRoute
+                  roles={["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE"]}
+                >
+                  <PatientProfilePage />
+                </ProtectedRoute>
+              }
+            />
+          ) : null}
+          {isRouteEnabled("/patients") ? (
+            <Route
+              path="/patients/:patientId/timeline"
+              element={
+                <ProtectedRoute
+                  roles={["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE"]}
+                >
+                  <PatientTimelinePage />
                 </ProtectedRoute>
               }
             />

@@ -5,6 +5,7 @@ import { isRouteEnabled } from "./config/system";
 import { useAuth } from "./context/AuthContext";
 import { AppShell } from "./layouts/AppShell";
 import { CentersPage } from "./pages/CentersPage";
+import { CenterDoctorsPage } from "./pages/CenterDoctorsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MasterDataPage } from "./pages/MasterDataPage";
@@ -15,6 +16,8 @@ import { PatientHomePage } from "./pages/PatientHomePage";
 import { PatientMedicalRecordPage } from "./pages/PatientMedicalRecordPage";
 import { PatientMessagesPage } from "./pages/PatientMessagesPage";
 import { PatientNotificationsPage } from "./pages/PatientNotificationsPage";
+import { PatientProfilePage } from "./pages/PatientProfilePage";
+import { PatientTimelinePage } from "./pages/PatientTimelinePage";
 import { PatientsPage } from "./pages/PatientsPage";
 import { ReferralsPage } from "./pages/ReferralsPage";
 import { ReportsPage } from "./pages/ReportsPage";
@@ -69,6 +72,16 @@ function NotificationsRoute() {
   return <NotificationsPage />;
 }
 
+function DoctorsRoute() {
+  const { user } = useAuth();
+
+  if (user?.role === "PATIENT") {
+    return <PatientDoctorsPage />;
+  }
+
+  return <CenterDoctorsPage />;
+}
+
 export function App() {
   return (
     <BrowserRouter>
@@ -101,8 +114,8 @@ export function App() {
           <Route
             path="/doctors"
             element={
-              <ProtectedRoute roles={["PATIENT"]}>
-                <PatientDoctorsPage />
+              <ProtectedRoute roles={["PATIENT", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]}>
+                <DoctorsRoute />
               </ProtectedRoute>
             }
           />
@@ -130,6 +143,26 @@ export function App() {
               element={
                 <ProtectedRoute roles={["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]}>
                   <PatientsPage />
+                </ProtectedRoute>
+              }
+            />
+          ) : null}
+          {isRouteEnabled("/patients") ? (
+            <Route
+              path="/patients/:patientId"
+              element={
+                <ProtectedRoute roles={["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]}>
+                  <PatientProfilePage />
+                </ProtectedRoute>
+              }
+            />
+          ) : null}
+          {isRouteEnabled("/patients") ? (
+            <Route
+              path="/patients/:patientId/timeline"
+              element={
+                <ProtectedRoute roles={["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]}>
+                  <PatientTimelinePage />
                 </ProtectedRoute>
               }
             />

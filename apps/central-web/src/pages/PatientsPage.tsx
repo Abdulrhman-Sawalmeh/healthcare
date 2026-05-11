@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
@@ -142,7 +143,7 @@ export function PatientsPage() {
 
           <div className="card-grid">
             {centralPatients.map((patient) => (
-              <article key={patient.id} className="profile-tile">
+              <Link key={patient.id} to={`/patients/${patient.id}`} className="profile-tile interactive-card">
                 <p className="eyebrow">{patient.unifiedId}</p>
                 <h3>{patient.fullName}</h3>
                 <p>{patient.primaryPhone}</p>
@@ -163,7 +164,8 @@ export function PatientsPage() {
                     </span>
                   ))}
                 </div>
-              </article>
+                <span className="action-hint">عرض أو تعديل ملف المريض</span>
+              </Link>
             ))}
           </div>
         </SectionCard>
@@ -316,7 +318,7 @@ export function PatientsPage() {
 
         <div className="card-grid">
           {localPatients.map((patient) => (
-            <article className="profile-tile" key={patient.id}>
+            <Link key={patient.id} to={`/patients/${patient.id}`} className="profile-tile interactive-card">
               <p className="eyebrow">{patient.unifiedId ?? "سجل محلي فقط"}</p>
               <h3>{patient.fullName}</h3>
               <p>{patient.phone}</p>
@@ -330,7 +332,8 @@ export function PatientsPage() {
                   ? patient.chronicDiseases.join("، ")
                   : "لا توجد أمراض مزمنة مسجلة."}
               </p>
-            </article>
+              <span className="action-hint">عرض أو تعديل ملف المريض</span>
+            </Link>
           ))}
         </div>
       </SectionCard>

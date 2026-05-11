@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Navigate, Outlet } from "react-router-dom";
+import { Link, NavLink, Navigate, Outlet } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { systemConfig } from "../config/system";
@@ -14,7 +14,21 @@ type SidebarAlert = {
   helper: string;
   status: string;
   createdAt: string;
+  to: string;
 };
+
+function buildPath(path: string, params: Record<string, string | undefined>) {
+  const searchParams = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      searchParams.set(key, value);
+    }
+  }
+
+  const query = searchParams.toString();
+  return query ? `${path}?${query}` : path;
+}
 
 export function AppShell() {
   const { user, loading, logout } = useAuth();
@@ -37,7 +51,13 @@ export function AppShell() {
               title: toArabicLabel(item.notificationType),
               helper: item.targetCenter.centerName,
               status: item.status,
-              createdAt: item.createdAt
+              createdAt: item.createdAt,
+              to: buildPath("/notifications", {
+                view: "outgoing",
+                status: item.status,
+                type: item.notificationType,
+                centerCode: item.targetCenter.centerCode
+              })
             }))
           );
           return;
@@ -51,14 +71,20 @@ export function AppShell() {
               title: alert.title,
               helper: alert.message,
               status: alert.severity,
-              createdAt: alert.createdAt
+              createdAt: alert.createdAt,
+              to: "/notifications"
             })),
             ...centerPayload.outgoing.map((item) => ({
               id: `out-${item.id}`,
               title: toArabicLabel(item.notificationType),
               helper: `المحاولات ${item.retryCount}/${item.maxRetries}`,
               status: item.status,
-              createdAt: item.createdAt
+              createdAt: item.createdAt,
+              to: buildPath("/notifications", {
+                view: "outgoing",
+                status: item.status,
+                type: item.notificationType
+              })
             }))
           ].slice(0, 5)
         );
@@ -146,12 +172,13 @@ export function AppShell() {
             </div>
             <div className="notification-list">
               {alerts.map((alert) => (
-                <article key={alert.id} className="notification-card">
+                <Link key={alert.id} className="notification-card interactive-card" to={alert.to}>
                   <div className="notification-pill">{toArabicLabel(alert.status)}</div>
                   <h4>{alert.title}</h4>
                   <p>{alert.helper}</p>
+                  <span className="action-hint">فتح الإشعار المرتبط</span>
                   <span>{formatDateTime(alert.createdAt)}</span>
-                </article>
+                </Link>
               ))}
               {alerts.length === 0 ? <div className="empty-state">لا توجد إشعارات حاليًا.</div> : null}
             </div>

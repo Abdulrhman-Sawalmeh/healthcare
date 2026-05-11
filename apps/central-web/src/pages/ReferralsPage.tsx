@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
@@ -12,6 +13,7 @@ export function ReferralsPage() {
   const [referrals, setReferrals] = useState<ReferralRecord[]>([]);
   const [patients, setPatients] = useState<LocalPatientRecord[]>([]);
   const [error, setError] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
   const [form, setForm] = useState({
     localPatientId: "",
     requiredSpecialty: "أمراض القلب",
@@ -23,6 +25,8 @@ export function ReferralsPage() {
     maxDistanceKm: "120",
     notesFromSender: ""
   });
+
+  const statusFilter = searchParams.get("status") ?? "";
 
   async function loadData() {
     const referralPath = user?.workspace === "central" ? "/central/referrals" : "/center/referrals";
@@ -85,6 +89,14 @@ export function ReferralsPage() {
       setError(cause instanceof Error ? cause.message : "تعذر إرسال طلب الإحالة.");
     }
   }
+
+  const filteredReferrals = useMemo(() => {
+    if (!statusFilter) {
+      return referrals;
+    }
+
+    return referrals.filter((referral) => referral.status === statusFilter);
+  }, [referrals, statusFilter]);
 
   const canRequest = user?.workspace === "center" && (user.role === "CENTER_MANAGER" || user.role === "DOCTOR");
 
@@ -196,41 +208,58 @@ export function ReferralsPage() {
         subtitle="عرض الإحالات المقبولة والمعلقة والمرفوضة والمكتملة ضمن الشبكة الصحية."
       >
         {error ? <div className="error-banner">{error}</div> : null}
-        <div className="table-shell">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>المريض</th>
-                <th>المسار</th>
-                <th>الاحتياج السريري</th>
-                <th>الحالة</th>
-                <th>تاريخ الطلب</th>
-              </tr>
-            </thead>
-            <tbody>
-              {referrals.map((referral) => (
-                <tr key={referral.id}>
-                  <td>
-                    <strong>{referral.patientName ?? "مريض"}</strong>
-                    <span>{referral.patientUnifiedId ?? "سجل إحالة محلي"}</span>
-                  </td>
-                  <td>
-                    <strong>{referral.fromCenter}</strong>
-                    <span>{referral.toCenter}</span>
-                  </td>
-                  <td>
-                    <strong>{referral.requiredSpecialty}</strong>
-                    <span>{referral.reason}</span>
-                  </td>
-                  <td>
-                    <StatusBadge status={referral.status} />
-                  </td>
-                  <td>{formatDateTime(referral.requestedAt)}</td>
+
+        {statusFilter ? (
+          <div className="filter-summary">
+            <div>
+              <strong>تصفية حسب الحالة</strong>
+              <p className="muted">يعرض الجدول الإحالات التي حالتها {toArabicLabel(statusFilter)} فقط.</p>
+            </div>
+            <button className="ghost-button" type="button" onClick={() => setSearchParams({})}>
+              عرض كل الإحالات
+            </button>
+          </div>
+        ) : null}
+
+        {filteredReferrals.length === 0 ? (
+          <div className="empty-state compact">لا توجد إحالات تطابق التصفية الحالية.</div>
+        ) : (
+          <div className="table-shell">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>المريض</th>
+                  <th>المسار</th>
+                  <th>الاحتياج السريري</th>
+                  <th>الحالة</th>
+                  <th>تاريخ الطلب</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filteredReferrals.map((referral) => (
+                  <tr key={referral.id}>
+                    <td>
+                      <strong>{referral.patientName ?? "مريض"}</strong>
+                      <span>{referral.patientUnifiedId ?? "سجل إحالة محلي"}</span>
+                    </td>
+                    <td>
+                      <strong>{referral.fromCenter}</strong>
+                      <span>{referral.toCenter}</span>
+                    </td>
+                    <td>
+                      <strong>{referral.requiredSpecialty}</strong>
+                      <span>{referral.reason}</span>
+                    </td>
+                    <td>
+                      <StatusBadge status={referral.status} />
+                    </td>
+                    <td>{formatDateTime(referral.requestedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </SectionCard>
     </div>
   );

@@ -10,6 +10,15 @@ export type Role =
   | "PHARMACIST"
   | "NURSE";
 
+export type WorkDay =
+  | "SUNDAY"
+  | "MONDAY"
+  | "TUESDAY"
+  | "WEDNESDAY"
+  | "THURSDAY"
+  | "FRIDAY"
+  | "SATURDAY";
+
 export interface SessionCenter {
   id: string | number;
   code: string;
@@ -120,6 +129,7 @@ export interface CenterWorkspaceData {
     email?: string | null;
     phone?: string | null;
     isActive: boolean;
+    specialization?: string | null;
   }>;
   recentVisits: Array<{
     id: number;
@@ -141,6 +151,44 @@ export interface CenterWorkspaceData {
     status: string;
     requestedAt: string;
   }>;
+}
+
+export interface CenterDoctorAccountRecord {
+  id: number;
+  username: string;
+  fullName: string;
+  role: "DOCTOR";
+  phone?: string | null;
+  email?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  createdByName?: string | null;
+  profile: {
+    nationalId: string;
+    gender: string;
+    specialization: string;
+    yearsExperience: number;
+    licenseNumber: string;
+    qualification?: string | null;
+    shiftDays: WorkDay[];
+    shiftStartTime: string;
+    shiftEndTime: string;
+    consultationRoom?: string | null;
+    hireDate?: string | null;
+    bio?: string | null;
+    notes?: string | null;
+  } | null;
+}
+
+export interface CenterDoctorsBundle {
+  center: {
+    id: number;
+    code: string;
+    name: string;
+    specialties: string[];
+  };
+  specialtyOptions: string[];
+  doctors: CenterDoctorAccountRecord[];
 }
 
 export interface CenterRecord {
@@ -231,8 +279,56 @@ export interface LocalPatientRecord {
   }>;
 }
 
+export type PatientTimelineEventType =
+  | "appointment"
+  | "diagnosis"
+  | "prescription"
+  | "lab_result"
+  | "referral"
+  | "note";
+
+export interface PatientTimelineEvent {
+  id: string;
+  type: PatientTimelineEventType;
+  title: string;
+  description: string;
+  date: string;
+  createdBy: string;
+  sourceTable: string;
+}
+
+export interface PatientTimelineBundle {
+  patient: {
+    id: number;
+    fullName: string;
+    unifiedId?: string | null;
+    nationalId?: string | null;
+    phone: string;
+    gender: string;
+    dateOfBirth: string;
+    address: string;
+    bloodType?: string | null;
+    emergencyContact?: string | null;
+    allergies: string[];
+    chronicDiseases: string[];
+    centersSeenAt: Array<{
+      centerId: number;
+      centerCode: string;
+      centerName: string;
+    }>;
+    visitCount: number;
+    labResultsCount: number;
+    referralCount: number;
+    timelineCount: number;
+    lastEventAt?: string | null;
+  };
+  events: PatientTimelineEvent[];
+}
+
 export interface VisitRecord {
   id: number;
+  patientId: number;
+  doctorId?: number | null;
   patientName: string;
   patientUnifiedId?: string | null;
   doctorName: string;
@@ -248,6 +344,37 @@ export interface VisitRecord {
   syncedToCentral: boolean;
   prescriptionCount: number;
   invoiceStatus: string;
+  notes?: string | null;
+  reports: LocalVisitReportRecord[];
+  prescriptions: Array<{
+    id: number;
+    medicineName: string;
+    dosage: string;
+    duration: string;
+    instructions?: string | null;
+  }>;
+}
+
+export interface LocalVisitReportAttachment {
+  fileName: string;
+  mimeType: string;
+  contentBase64: string;
+}
+
+export interface LocalVisitReportRecord {
+  id: number;
+  title: string;
+  category: string;
+  summary: string;
+  findings?: string | null;
+  recommendations?: string | null;
+  recommendedFollowUp?: string | null;
+  shareWithPatient: boolean;
+  createdAt: string;
+  updatedAt: string;
+  authorName: string;
+  authorSpecialization?: string | null;
+  attachment?: LocalVisitReportAttachment | null;
 }
 
 export interface ReferralRecord {
@@ -328,6 +455,9 @@ export interface LabBundle {
   }>;
   requests: Array<{
     id: number;
+    patientId: number;
+    doctorId: number;
+    testId: number;
     patientName: string;
     doctorName: string;
     testName: string;
@@ -481,6 +611,8 @@ export interface PortalDoctorRecord {
   };
 }
 
+export type AppointmentPriority = "NORMAL" | "URGENT" | "EMERGENCY";
+
 export interface PortalAppointmentRecord {
   id: string;
   status: string;
@@ -507,6 +639,61 @@ export interface PortalAppointmentRecord {
     id: string;
     fullName: string;
     specialization: string;
+  };
+}
+
+export interface PortalReportAttachment {
+  fileName: string;
+  mimeType: string;
+  contentBase64?: string | null;
+}
+
+export interface PortalClinicalReportRecord {
+  id: string;
+  status: string;
+  type: string;
+  scheduledAt: string;
+  reason: string;
+  notes?: string | null;
+  source: "APPOINTMENT" | "RESULT_REPORT";
+  summary?: string | null;
+  findings?: string | null;
+  recommendations?: string | null;
+  recommendedFollowUp?: string | null;
+  attachment?: PortalReportAttachment | null;
+  center: {
+    id: string;
+    name: string;
+  };
+  department: {
+    id: string;
+    name: string;
+  };
+  patient: {
+    id: string;
+    fullName: string;
+    medicalRecordNumber: string;
+  };
+  doctor: {
+    id: string;
+    fullName: string;
+    specialization: string;
+  };
+}
+
+export interface PortalAppointmentSuggestionRecord {
+  scheduledAt: string;
+  type: "CLINIC" | "FOLLOW_UP" | "TELEMEDICINE" | "LAB";
+  priority: AppointmentPriority;
+  note: string;
+  doctor: {
+    id: string;
+    fullName: string;
+    specialization: string;
+    department: {
+      id: string;
+      name: string;
+    };
   };
 }
 
@@ -625,7 +812,7 @@ export interface PortalSummary {
     careTeamCount: number;
   };
   nextAppointment: PortalAppointmentRecord | null;
-  recentReports: PortalAppointmentRecord[];
+  recentReports: PortalClinicalReportRecord[];
   careTeam: PortalDoctorRecord[];
   recentThreads: PortalThreadRecord[];
   recentNotifications: PortalNotificationRecord[];
@@ -647,7 +834,7 @@ export interface PortalMedicalRecord {
       address: string;
     };
   };
-  clinicalReports: PortalAppointmentRecord[];
+  clinicalReports: PortalClinicalReportRecord[];
   upcomingAppointments: PortalAppointmentRecord[];
   referrals: PortalReferralRecord[];
   subscriptions: PortalSubscriptionRecord[];

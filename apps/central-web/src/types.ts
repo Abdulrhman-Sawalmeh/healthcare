@@ -114,6 +114,7 @@ export interface CenterWorkspaceData {
     role: Role;
     email?: string | null;
     phone?: string | null;
+    specialization?: string | null;
     isActive: boolean;
   }>;
   recentVisits: Array<{
@@ -225,8 +226,56 @@ export interface LocalPatientRecord {
   }>;
 }
 
+export type PatientTimelineEventType =
+  | "appointment"
+  | "diagnosis"
+  | "prescription"
+  | "lab_result"
+  | "referral"
+  | "note";
+
+export interface PatientTimelineEvent {
+  id: string;
+  type: PatientTimelineEventType;
+  title: string;
+  description: string;
+  date: string;
+  createdBy: string;
+  sourceTable: string;
+}
+
+export interface PatientTimelineBundle {
+  patient: {
+    id: number;
+    fullName: string;
+    unifiedId?: string | null;
+    nationalId?: string | null;
+    phone: string;
+    gender: string;
+    dateOfBirth: string;
+    address: string;
+    bloodType?: string | null;
+    emergencyContact?: string | null;
+    allergies: string[];
+    chronicDiseases: string[];
+    centersSeenAt: Array<{
+      centerId: number;
+      centerCode: string;
+      centerName: string;
+    }>;
+    visitCount: number;
+    labResultsCount: number;
+    referralCount: number;
+    timelineCount: number;
+    lastEventAt?: string | null;
+  };
+  events: PatientTimelineEvent[];
+}
+
 export interface VisitRecord {
   id: number;
+  patientId: number;
+  doctorId?: number | null;
   patientName: string;
   patientUnifiedId?: string | null;
   doctorName: string;
@@ -242,6 +291,14 @@ export interface VisitRecord {
   syncedToCentral: boolean;
   prescriptionCount: number;
   invoiceStatus: string;
+  notes?: string | null;
+  prescriptions: Array<{
+    id: number;
+    medicineName: string;
+    dosage: string;
+    duration: string;
+    instructions?: string | null;
+  }>;
 }
 
 export interface ReferralRecord {
@@ -322,6 +379,9 @@ export interface LabBundle {
   }>;
   requests: Array<{
     id: number;
+    patientId: number;
+    doctorId: number;
+    testId: number;
     patientName: string;
     doctorName: string;
     testName: string;

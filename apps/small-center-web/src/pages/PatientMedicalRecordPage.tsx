@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { formatDate, formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
-import { PortalAppointmentRecord, PortalMedicalRecord } from "../types";
+import { PortalClinicalReportRecord, PortalMedicalRecord, PortalReportAttachment } from "../types";
 
 type ActivePanel =
   | { kind: "profile" }
@@ -31,7 +31,34 @@ function formatAmount(amountInCents: number, currency: string) {
   return `${(amountInCents / 100).toFixed(2)} ${currency}`;
 }
 
-function openPrintableReport(record: PortalMedicalRecord, report: PortalAppointmentRecord) {
+function getReportSourceLabel(report: PortalClinicalReportRecord) {
+  return report.source === "RESULT_REPORT" ? "تقرير نتائج" : "ملخص زيارة";
+}
+
+function getReportTypeLabel(report: PortalClinicalReportRecord) {
+  const reportTypeLabels: Record<string, string> = {
+    GENERAL: "تقرير عام",
+    LAB: "نتائج مخبرية",
+    IMAGING: "نتائج تصوير",
+    FOLLOW_UP: "خطة متابعة",
+    DISCHARGE: "خلاصة خروج"
+  };
+
+  return reportTypeLabels[report.type] ?? toArabicLabel(report.type);
+}
+
+function downloadAttachment(attachment: PortalReportAttachment) {
+  if (!attachment.contentBase64) {
+    return;
+  }
+
+  const link = document.createElement("a");
+  link.href = `data:${attachment.mimeType};base64,${attachment.contentBase64}`;
+  link.download = attachment.fileName;
+  link.click();
+}
+
+function openPrintableReport(record: PortalMedicalRecord, report: PortalClinicalReportRecord) {
   const reportWindow = window.open("", "_blank", "width=980,height=720");
 
   if (!reportWindow) {
@@ -163,7 +190,7 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalAppointm
       <body>
         <main>
           <header>
-            <p class="eyebrow">السجل الصحي والتقرير الطبي</p>
+            <p class="eyebrow">${escapeHtml(getReportSourceLabel(report))}</p>
             <h1>${escapeHtml(report.reason)}</h1>
             <p class="muted">${escapeHtml(
               joinMeta([
@@ -172,7 +199,9 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalAppointm
                 formatDateTime(report.scheduledAt)
               ])
             )}</p>
-            <p class="lead">${escapeHtml(report.notes ?? "تم توثيق الزيارة داخل السجل الصحي دون ملاحظات إضافية.")}</p>
+            <p class="lead">${escapeHtml(
+              report.summary ?? report.notes ?? "تم توثيق الزيارة داخل السجل الصحي دون ملاحظات إضافية."
+            )}</p>
           </header>
 
           <section>
@@ -198,7 +227,7 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalAppointm
           </section>
 
           <section>
-            <h2>تفاصيل الزيارة</h2>
+            <h2>تفاصيل التقرير</h2>
             <div class="grid">
               <div class="field">
                 <span>الطبيب</span>
@@ -213,8 +242,8 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalAppointm
                 <strong>${escapeHtml(report.department.name)}</strong>
               </div>
               <div class="field">
-                <span>نوع الزيارة</span>
-                <strong>${escapeHtml(toArabicLabel(report.type))}</strong>
+                <span>نوع التقرير</span>
+                <strong>${escapeHtml(getReportTypeLabel(report))}</strong>
               </div>
               <div class="field">
                 <span>الحالة</span>
@@ -225,6 +254,21 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalAppointm
                 <strong>${escapeHtml(report.center.name)}</strong>
               </div>
             </div>
+            ${
+              report.findings
+                ? `<p class="helper"><strong>النتائج:</strong> ${escapeHtml(report.findings)}</p>`
+                : ""
+            }
+            ${
+              report.recommendations
+                ? `<p class="helper"><strong>التوصيات:</strong> ${escapeHtml(report.recommendations)}</p>`
+                : ""
+            }
+            ${
+              report.recommendedFollowUp
+                ? `<p class="helper"><strong>المتابعة المقترحة:</strong> ${escapeHtml(report.recommendedFollowUp)}</p>`
+                : ""
+            }
             <p class="helper">يمكنك اختيار Save as PDF من نافذة الطباعة للاحتفاظ بالتقرير كملف PDF.</p>
           </section>
         </main>
@@ -448,7 +492,7 @@ export function PatientMedicalRecordPage() {
         <section className="section-card detail-panel" ref={detailPanelRef}>
           <div className="section-header">
             <div>
-              <p className="eyebrow">التقرير الطبي</p>
+              <p className="eyebrow">{getReportSourceLabel(activeReport)}</p>
               <h3>{activeReport.reason}</h3>
             </div>
             <button className="ghost-button" type="button" onClick={() => setActivePanel(null)}>
@@ -457,11 +501,11 @@ export function PatientMedicalRecordPage() {
           </div>
           <div className="stack-item">
             <strong>{activeReport.doctor.fullName}</strong>
-            <p>{activeReport.notes ?? "تم توثيق الزيارة ضمن السجل الصحي دون ملاحظات إضافية."}</p>
+            <p>{activeReport.summary ?? activeReport.notes ?? "تم توثيق الزيارة ضمن السجل الصحي دون ملاحظات إضافية."}</p>
             <div className="tile-stats">
               <span>{formatDateTime(activeReport.scheduledAt)}</span>
               <span>{activeReport.department.name}</span>
-              <span>{toArabicLabel(activeReport.type)}</span>
+              <span>{getReportTypeLabel(activeReport)}</span>
               <span>{toArabicLabel(activeReport.status)}</span>
             </div>
           </div>
@@ -475,19 +519,54 @@ export function PatientMedicalRecordPage() {
               <strong>{activeReport.doctor.specialization}</strong>
             </div>
             <div className="detail-field">
-              <span>القسم</span>
+              <span>القسم أو التخصص</span>
               <strong>{activeReport.department.name}</strong>
             </div>
             <div className="detail-field">
               <span>المركز</span>
               <strong>{activeReport.center.name}</strong>
             </div>
+            <div className="detail-field">
+              <span>مصدر التقرير</span>
+              <strong>{getReportSourceLabel(activeReport)}</strong>
+            </div>
+            <div className="detail-field">
+              <span>نوع التقرير</span>
+              <strong>{getReportTypeLabel(activeReport)}</strong>
+            </div>
           </div>
+          {activeReport.findings ? (
+            <div className="stack-item report-focus-card">
+              <strong>النتائج الأساسية</strong>
+              <p>{activeReport.findings}</p>
+            </div>
+          ) : null}
+          {activeReport.recommendations ? (
+            <div className="stack-item report-focus-card">
+              <strong>التوصيات العلاجية</strong>
+              <p>{activeReport.recommendations}</p>
+            </div>
+          ) : null}
+          {activeReport.recommendedFollowUp ? (
+            <div className="stack-item report-focus-card">
+              <strong>خطة المتابعة</strong>
+              <p>{activeReport.recommendedFollowUp}</p>
+            </div>
+          ) : null}
           <p className="inline-note">زر الطباعة يفتح نسخة مناسبة للطباعة ويمكن حفظها من المتصفح كملف PDF.</p>
           <div className="chip-row">
             <button className="primary-button" type="button" onClick={() => openPrintableReport(record, activeReport)}>
               طباعة أو حفظ PDF
             </button>
+            {activeReport.attachment ? (
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => downloadAttachment(activeReport.attachment!)}
+              >
+                تنزيل المرفق
+              </button>
+            ) : null}
             <Link className="ghost-button" to="/messages">
               مراسلة الطبيب
             </Link>
@@ -649,6 +728,24 @@ export function PatientMedicalRecordPage() {
         </div>
       </section>
 
+      <section className="metric-grid">
+        <article className="metric-card">
+          <span className="eyebrow">إجمالي التقارير</span>
+          <h3>{record.clinicalReports.length}</h3>
+          <p className="muted">كل التقارير السريرية ونتائج الطبيب المتاحة داخل السجل الصحي.</p>
+        </article>
+        <article className="metric-card">
+          <span className="eyebrow">تقارير مع مرفقات</span>
+          <h3>{record.clinicalReports.filter((report) => report.attachment).length}</h3>
+          <p className="muted">يمكن تنزيل هذه النتائج مباشرة من صفحة التقرير.</p>
+        </article>
+        <article className="metric-card">
+          <span className="eyebrow">متابعة مقترحة</span>
+          <h3>{record.clinicalReports.filter((report) => report.recommendedFollowUp).length}</h3>
+          <p className="muted">تقارير تتضمن خطة متابعة أو تعليمات للزيارة القادمة.</p>
+        </article>
+      </section>
+
       <section className="card-grid">
         <article
           className="profile-tile interactive-card"
@@ -701,7 +798,7 @@ export function PatientMedicalRecordPage() {
           <div className="section-header">
             <div>
               <p className="eyebrow">التقارير السريرية</p>
-              <h3>ملخصات الزيارات المكتملة</h3>
+              <h3>التقارير الطبية والنتائج المنشورة</h3>
             </div>
           </div>
           <div className="stack-list">
@@ -715,13 +812,16 @@ export function PatientMedicalRecordPage() {
                 onKeyDown={(event) => handlePanelActivation(event, { kind: "report", id: report.id })}
               >
                 <strong>{report.reason}</strong>
-                <p>{report.notes ?? "لا توجد ملاحظات سريرية إضافية."}</p>
+                <p>{report.summary ?? report.notes ?? "لا توجد ملاحظات سريرية إضافية."}</p>
                 <div className="tile-stats">
                   <span>{report.doctor.fullName}</span>
-                  <span>{report.department.name}</span>
+                  <span>{getReportSourceLabel(report)}</span>
+                  <span>{getReportTypeLabel(report)}</span>
                   <span>{formatDateTime(report.scheduledAt)}</span>
                 </div>
-                <p className="action-hint">اضغط لفتح التقرير وطباعة نسخة PDF.</p>
+                <p className="action-hint">
+                  {report.attachment ? "يحتوي هذا التقرير على مرفق قابل للتنزيل." : "اضغط لفتح التقرير وطباعة نسخة PDF."}
+                </p>
               </article>
             ))}
             {record.clinicalReports.length === 0 ? (

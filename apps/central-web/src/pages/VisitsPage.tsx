@@ -7,29 +7,35 @@ import { useAuth } from "../context/AuthContext";
 import { formatDateTime, toArabicLabel } from "../lib/arabic";
 import { CenterWorkspaceData, LocalPatientRecord, VisitRecord } from "../types";
 
+const defaultForm = {
+  patientId: "",
+  doctorId: "",
+  visitDate: "",
+  visitTime: "",
+  visitType: "CONSULTATION",
+  symptoms: "",
+  bloodPressure: "",
+  temperature: "",
+  heartRate: "",
+  diagnosis: "",
+  notes: "",
+  prescriptionMedicine: "",
+  prescriptionDosage: "",
+  prescriptionDuration: "",
+  prescriptionInstructions: ""
+};
+
 export function VisitsPage() {
   const { user } = useAuth();
   const [visits, setVisits] = useState<VisitRecord[]>([]);
   const [patients, setPatients] = useState<LocalPatientRecord[]>([]);
   const [workspace, setWorkspace] = useState<CenterWorkspaceData | null>(null);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({
-    patientId: "",
-    doctorId: "",
-    visitDate: "",
-    visitTime: "",
-    visitType: "CONSULTATION",
-    symptoms: "",
-    bloodPressure: "",
-    temperature: "",
-    heartRate: "",
-    diagnosis: "",
-    notes: "",
-    prescriptionMedicine: "",
-    prescriptionDosage: "",
-    prescriptionDuration: "",
-    prescriptionInstructions: ""
-  });
+  const [successMessage, setSuccessMessage] = useState("");
+  const [editingVisitId, setEditingVisitId] = useState<number | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [deletingVisitId, setDeletingVisitId] = useState<number | null>(null);
+  const [form, setForm] = useState(defaultForm);
 
   async function loadPage() {
     const [visitsPayload, patientsPayload, workspacePayload] = await Promise.all([
@@ -47,6 +53,36 @@ export function VisitsPage() {
     loadPage().catch((cause: Error) => setError(cause.message));
   }, []);
 
+  function resetForm() {
+    setForm(defaultForm);
+    setEditingVisitId(null);
+  }
+
+  function hydrateForm(visit: VisitRecord) {
+    const prescription = visit.prescriptions[0];
+
+    setForm({
+      patientId: String(visit.patientId),
+      doctorId: visit.doctorId ? String(visit.doctorId) : "",
+      visitDate: visit.visitDate.slice(0, 16),
+      visitTime: visit.visitTime ?? "",
+      visitType: visit.visitType,
+      symptoms: visit.symptoms ?? "",
+      bloodPressure: visit.bloodPressure ?? "",
+      temperature: visit.temperature != null ? String(visit.temperature) : "",
+      heartRate: visit.heartRate != null ? String(visit.heartRate) : "",
+      diagnosis: visit.diagnosis,
+      notes: visit.notes ?? "",
+      prescriptionMedicine: prescription?.medicineName ?? "",
+      prescriptionDosage: prescription?.dosage ?? "",
+      prescriptionDuration: prescription?.duration ?? "",
+      prescriptionInstructions: prescription?.instructions ?? ""
+    });
+    setEditingVisitId(visit.id);
+    setSuccessMessage("");
+    setError("");
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -62,9 +98,13 @@ export function VisitsPage() {
           ]
         : [];
 
+    const method = editingVisitId ? "PUT" : "POST";
+    const path = editingVisitId ? `/center/visits/${editingVisitId}` : "/center/visits";
+
     try {
-      await apiRequest("/center/visits", {
-        method: "POST",
+      setSubmitting(true);
+      await apiRequest(path, {
+        method,
         body: JSON.stringify({
           patientId: Number(form.patientId),
           doctorId: form.doctorId ? Number(form.doctorId) : undefined,
@@ -81,27 +121,39 @@ export function VisitsPage() {
         })
       });
 
-      setForm({
-        patientId: "",
-        doctorId: "",
-        visitDate: "",
-        visitTime: "",
-        visitType: "CONSULTATION",
-        symptoms: "",
-        bloodPressure: "",
-        temperature: "",
-        heartRate: "",
-        diagnosis: "",
-        notes: "",
-        prescriptionMedicine: "",
-        prescriptionDosage: "",
-        prescriptionDuration: "",
-        prescriptionInstructions: ""
-      });
+      resetForm();
       await loadPage();
       setError("");
+      setSuccessMessage(editingVisitId ? "تم تحديث الزيارة المحلية." : "تم حفظ الزيارة المحلية.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر حفظ الزيارة.");
+      setSuccessMessage("");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDelete(visit: VisitRecord) {
+    if (!window.confirm("هل تريد حذف هذه الزيارة المحلية؟")) {
+      return;
+    }
+
+    try {
+      setDeletingVisitId(visit.id);
+      await apiRequest(`/center/visits/${visit.id}`, {
+        method: "DELETE"
+      });
+      if (editingVisitId === visit.id) {
+        resetForm();
+      }
+      await loadPage();
+      setError("");
+      setSuccessMessage("تم حذف الزيارة المحلية.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "تعذر حذف الزيارة.");
+      setSuccessMessage("");
+    } finally {
+      setDeletingVisitId(null);
     }
   }
 
@@ -109,10 +161,16 @@ export function VisitsPage() {
 
   return (
     <div className="page-stack">
+      {successMessage ? <div className="empty-state compact">{successMessage}</div> : null}
+
       {canCreate ? (
         <SectionCard
-          title="تسجيل زيارة محلية"
-          subtitle="تُحفظ الزيارة أولًا داخل المركز ثم تُزامن مع النظام المركزي عند معالجة الطوابير."
+          title={editingVisitId ? "تعديل زيارة محلية" : "تسجيل زيارة محلية"}
+          subtitle={
+            editingVisitId
+              ? "يمكنك تعديل الزيارات المحلية غير المتزامنة فقط."
+              : "تُحفظ الزيارة أولًا داخل المركز ثم تُزامن مع النظام المركزي عند معالجة الطوابير."
+          }
         >
           <form className="form-grid" onSubmit={handleSubmit}>
             <label className="field">
@@ -137,10 +195,10 @@ export function VisitsPage() {
               >
                 <option value="">استخدم المستخدم الحالي</option>
                 {workspace?.team
-                  .filter((member) => member.role === "DOCTOR" || member.role === "NURSE")
+                  .filter((member) => member.role === "DOCTOR")
                   .map((member) => (
                     <option key={member.id} value={member.id}>
-                      {member.fullName}
+                      {member.specialization ? `${member.fullName} - ${member.specialization}` : member.fullName}
                     </option>
                   ))}
               </select>
@@ -177,9 +235,7 @@ export function VisitsPage() {
               <span>الضغط الشرياني</span>
               <input
                 value={form.bloodPressure}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, bloodPressure: event.target.value }))
-                }
+                onChange={(event) => setForm((current) => ({ ...current, bloodPressure: event.target.value }))}
                 placeholder="120/80"
               />
             </label>
@@ -194,18 +250,14 @@ export function VisitsPage() {
               <span>درجة الحرارة</span>
               <input
                 value={form.temperature}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, temperature: event.target.value }))
-                }
+                onChange={(event) => setForm((current) => ({ ...current, temperature: event.target.value }))}
               />
             </label>
             <label className="field">
               <span>معدل النبض</span>
               <input
                 value={form.heartRate}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, heartRate: event.target.value }))
-                }
+                onChange={(event) => setForm((current) => ({ ...current, heartRate: event.target.value }))}
               />
             </label>
             <label className="field field-span-2">
@@ -261,9 +313,16 @@ export function VisitsPage() {
                 }
               />
             </label>
-            <button className="primary-button field-span-2" type="submit">
-              حفظ الزيارة
-            </button>
+            <div className="field-span-2 button-row">
+              <button className="primary-button" disabled={submitting} type="submit">
+                {submitting ? "جارٍ الحفظ..." : editingVisitId ? "حفظ التعديلات" : "حفظ الزيارة"}
+              </button>
+              {editingVisitId ? (
+                <button className="ghost-button" onClick={resetForm} type="button">
+                  إلغاء التعديل
+                </button>
+              ) : null}
+            </div>
           </form>
         </SectionCard>
       ) : null}
@@ -279,26 +338,52 @@ export function VisitsPage() {
                 <th>التشخيص</th>
                 <th>المزامنة</th>
                 <th>التوقيت</th>
+                <th>الإجراءات</th>
               </tr>
             </thead>
             <tbody>
-              {visits.map((visit) => (
-                <tr key={visit.id}>
-                  <td>
-                    <strong>{visit.patientName}</strong>
-                    <span>{toArabicLabel(visit.visitType)}</span>
-                  </td>
-                  <td>{visit.doctorName}</td>
-                  <td>
-                    <strong>{visit.diagnosis}</strong>
-                    <span>{visit.prescriptionCount} وصفات دوائية</span>
-                  </td>
-                  <td>
-                    <StatusBadge status={visit.syncState} />
-                  </td>
-                  <td>{formatDateTime(visit.visitDate)}</td>
-                </tr>
-              ))}
+              {visits.map((visit) => {
+                const canMutate = !visit.syncedToCentral && visit.syncState !== "SYNCED";
+
+                return (
+                  <tr key={visit.id}>
+                    <td>
+                      <strong>{visit.patientName}</strong>
+                      <span>{toArabicLabel(visit.visitType)}</span>
+                    </td>
+                    <td>{visit.doctorName}</td>
+                    <td>
+                      <strong>{visit.diagnosis}</strong>
+                      <span>{visit.prescriptionCount} وصفات دوائية</span>
+                    </td>
+                    <td>
+                      <StatusBadge status={visit.syncState} />
+                    </td>
+                    <td>{formatDateTime(visit.visitDate)}</td>
+                    <td>
+                      <div className="button-row table-actions">
+                        {canMutate ? (
+                          <>
+                            <button className="ghost-button" onClick={() => hydrateForm(visit)} type="button">
+                              تعديل
+                            </button>
+                            <button
+                              className="danger-button"
+                              disabled={deletingVisitId === visit.id}
+                              onClick={() => void handleDelete(visit)}
+                              type="button"
+                            >
+                              {deletingVisitId === visit.id ? "جارٍ الحذف..." : "حذف"}
+                            </button>
+                          </>
+                        ) : (
+                          <span className="muted">الزيارة المتزامنة للعرض فقط</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

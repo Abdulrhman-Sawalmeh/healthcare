@@ -422,7 +422,7 @@ export function DashboardPage() {
                     <div className="info-row">
                       <div>
                         <strong>{member.fullName}</strong>
-                        <p className="muted">{toArabicLabel(member.role)}</p>
+                        <p className="muted">{joinMeta([toArabicLabel(member.role), member.specialization])}</p>
                       </div>
                       <StatusBadge status={member.isActive ? "active" : "inactive"} />
                     </div>
@@ -435,7 +435,7 @@ export function DashboardPage() {
                 <div key={member.id} className="info-row">
                   <div>
                     <strong>{member.fullName}</strong>
-                    <p className="muted">{toArabicLabel(member.role)}</p>
+                    <p className="muted">{joinMeta([toArabicLabel(member.role), member.specialization])}</p>
                   </div>
                   <StatusBadge status={member.isActive ? "active" : "inactive"} />
                 </div>

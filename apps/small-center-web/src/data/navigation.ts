@@ -27,7 +27,7 @@ export const navigationItems: NavigationItem[] = [
   {
     to: "/doctors",
     label: "الأطباء",
-    roles: ["PATIENT"]
+    roles: ["PATIENT", "CENTER_MANAGER"]
   },
   {
     to: "/messages",
