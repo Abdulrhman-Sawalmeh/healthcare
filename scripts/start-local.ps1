@@ -68,9 +68,7 @@ function Ensure-LocalPostgres {
 }
 
 function Ensure-Api($port, $workspace, $logPrefix) {
-  if (Get-Listener $port) {
-    return
-  }
+  Stop-PortProcess $port
 
   Start-LoggedProcess $npm @("--workspace", $workspace, "run", "dev") $repoRoot $logPrefix
 }
