@@ -1,4 +1,4 @@
-import { Prisma, UserRole } from "@prisma/client";
+import { Prisma, SubscriptionStatus, UserRole } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
 
@@ -80,6 +80,29 @@ async function createMessageNotification(userId: string) {
   });
 }
 
+async function assertPatientMessagingSubscription(actor: Awaited<ReturnType<typeof resolvePortalActor>>) {
+  if (actor.role !== UserRole.PATIENT) {
+    return;
+  }
+
+  const activeSubscription = await prisma.subscription.findFirst({
+    where: {
+      patientId: actor.patientProfileId,
+      status: SubscriptionStatus.ACTIVE,
+      endsAt: {
+        gte: new Date()
+      }
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (!activeSubscription) {
+    throw new AppError("Doctor messaging is available after activating a patient subscription.", 402);
+  }
+}
+
 router.get(
   "/threads",
   authenticate,
@@ -126,6 +149,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const payload = createThreadSchema.parse(req.body);
     const actor = await resolvePortalActor(req.auth!);
+    await assertPatientMessagingSubscription(actor);
 
     const patientId = actor.role === UserRole.PATIENT ? actor.patientProfileId : payload.patientId;
     const doctorId = actor.role === UserRole.DOCTOR ? actor.doctorProfileId : payload.doctorId;
@@ -180,6 +204,7 @@ router.post(
     const { content } = sendMessageSchema.parse(req.body);
     const threadId = getSingleParam(req.params.threadId, "Thread ID");
     const actor = await resolvePortalActor(req.auth!);
+    await assertPatientMessagingSubscription(actor);
     const thread = await prisma.messageThread.findUnique({
       where: { id: threadId },
       include: {

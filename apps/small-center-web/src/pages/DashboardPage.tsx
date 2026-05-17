@@ -78,6 +78,10 @@ export function DashboardPage() {
     }
   }
 
+  function formatCurrency(value: number) {
+    return `${Math.round(value).toLocaleString()} ILS`;
+  }
+
   if (loading) {
     return <div className="empty-state">جارٍ تحميل لوحة المتابعة...</div>;
   }
@@ -366,6 +370,67 @@ export function DashboardPage() {
           actionHint={user?.center?.hasLabModule ? "اضغط لفتح صفحة المتابعة المناسبة." : "اضغط لفتح صفحة المتابعة المناسبة."}
         />
       </div>
+
+      <SectionCard
+        title="Financial administration"
+        subtitle="Invoices, budget utilization, and operating cost categories for this center."
+      >
+        <div className="metric-grid">
+          <MetricCard
+            label="Invoice total"
+            value={formatCurrency(centerData.financial.invoices.total)}
+            helper={`${centerData.financial.invoices.count} invoices recorded for patients.`}
+          />
+          <MetricCard
+            label="Outstanding invoices"
+            value={formatCurrency(centerData.financial.invoices.outstanding)}
+            helper={`${centerData.financial.invoices.unpaidCount} invoices still unpaid or partially paid.`}
+          />
+          <MetricCard
+            label="Budget used"
+            value={`${centerData.financial.budget.utilizationRate}%`}
+            helper={`${formatCurrency(centerData.financial.budget.projectedSpend)} projected from ${formatCurrency(centerData.financial.budget.monthlyLimit)} monthly budget.`}
+          />
+          <MetricCard
+            label="Budget remaining"
+            value={formatCurrency(centerData.financial.budget.remaining)}
+            helper="Remaining budget after staff, medications, equipment, and patient load."
+          />
+        </div>
+        <div className="table-shell">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Amount</th>
+                <th>Budget basis</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Staff</td>
+                <td>{formatCurrency(centerData.financial.expenses.staff)}</td>
+                <td>Active administrators, doctors, reception, and care team users.</td>
+              </tr>
+              <tr>
+                <td>Medications</td>
+                <td>{formatCurrency(centerData.financial.expenses.medications)}</td>
+                <td>Current pharmacy stock value.</td>
+              </tr>
+              <tr>
+                <td>Equipment</td>
+                <td>{formatCurrency(centerData.financial.expenses.equipment)}</td>
+                <td>Lab catalog and available operating room capacity.</td>
+              </tr>
+              <tr>
+                <td>Patients</td>
+                <td>{formatCurrency(centerData.financial.expenses.patients)}</td>
+                <td>Operational cost estimate for the local patient load.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
 
       <div className="split-grid">
         <SectionCard

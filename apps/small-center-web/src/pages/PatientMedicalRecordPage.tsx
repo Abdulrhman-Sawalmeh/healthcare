@@ -3,7 +3,12 @@ import { Link } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { formatDate, formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
-import { PortalClinicalReportRecord, PortalMedicalRecord, PortalReportAttachment } from "../types";
+import {
+  PortalAppointmentRecord,
+  PortalMedicalRecord,
+  PortalSubscriptionPlanRecord,
+  PortalSubscriptionRecord
+} from "../types";
 
 type ActivePanel =
   | { kind: "profile" }
@@ -31,34 +36,7 @@ function formatAmount(amountInCents: number, currency: string) {
   return `${(amountInCents / 100).toFixed(2)} ${currency}`;
 }
 
-function getReportSourceLabel(report: PortalClinicalReportRecord) {
-  return report.source === "RESULT_REPORT" ? "تقرير نتائج" : "ملخص زيارة";
-}
-
-function getReportTypeLabel(report: PortalClinicalReportRecord) {
-  const reportTypeLabels: Record<string, string> = {
-    GENERAL: "تقرير عام",
-    LAB: "نتائج مخبرية",
-    IMAGING: "نتائج تصوير",
-    FOLLOW_UP: "خطة متابعة",
-    DISCHARGE: "خلاصة خروج"
-  };
-
-  return reportTypeLabels[report.type] ?? toArabicLabel(report.type);
-}
-
-function downloadAttachment(attachment: PortalReportAttachment) {
-  if (!attachment.contentBase64) {
-    return;
-  }
-
-  const link = document.createElement("a");
-  link.href = `data:${attachment.mimeType};base64,${attachment.contentBase64}`;
-  link.download = attachment.fileName;
-  link.click();
-}
-
-function openPrintableReport(record: PortalMedicalRecord, report: PortalClinicalReportRecord) {
+function openPrintableReport(record: PortalMedicalRecord, report: PortalAppointmentRecord) {
   const reportWindow = window.open("", "_blank", "width=980,height=720");
 
   if (!reportWindow) {
@@ -190,7 +168,7 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalClinical
       <body>
         <main>
           <header>
-            <p class="eyebrow">${escapeHtml(getReportSourceLabel(report))}</p>
+            <p class="eyebrow">السجل الصحي والتقرير الطبي</p>
             <h1>${escapeHtml(report.reason)}</h1>
             <p class="muted">${escapeHtml(
               joinMeta([
@@ -199,9 +177,7 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalClinical
                 formatDateTime(report.scheduledAt)
               ])
             )}</p>
-            <p class="lead">${escapeHtml(
-              report.summary ?? report.notes ?? "تم توثيق الزيارة داخل السجل الصحي دون ملاحظات إضافية."
-            )}</p>
+            <p class="lead">${escapeHtml(report.notes ?? "تم توثيق الزيارة داخل السجل الصحي دون ملاحظات إضافية.")}</p>
           </header>
 
           <section>
@@ -227,7 +203,7 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalClinical
           </section>
 
           <section>
-            <h2>تفاصيل التقرير</h2>
+            <h2>تفاصيل الزيارة</h2>
             <div class="grid">
               <div class="field">
                 <span>الطبيب</span>
@@ -242,8 +218,8 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalClinical
                 <strong>${escapeHtml(report.department.name)}</strong>
               </div>
               <div class="field">
-                <span>نوع التقرير</span>
-                <strong>${escapeHtml(getReportTypeLabel(report))}</strong>
+                <span>نوع الزيارة</span>
+                <strong>${escapeHtml(toArabicLabel(report.type))}</strong>
               </div>
               <div class="field">
                 <span>الحالة</span>
@@ -254,21 +230,6 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalClinical
                 <strong>${escapeHtml(report.center.name)}</strong>
               </div>
             </div>
-            ${
-              report.findings
-                ? `<p class="helper"><strong>النتائج:</strong> ${escapeHtml(report.findings)}</p>`
-                : ""
-            }
-            ${
-              report.recommendations
-                ? `<p class="helper"><strong>التوصيات:</strong> ${escapeHtml(report.recommendations)}</p>`
-                : ""
-            }
-            ${
-              report.recommendedFollowUp
-                ? `<p class="helper"><strong>المتابعة المقترحة:</strong> ${escapeHtml(report.recommendedFollowUp)}</p>`
-                : ""
-            }
             <p class="helper">يمكنك اختيار Save as PDF من نافذة الطباعة للاحتفاظ بالتقرير كملف PDF.</p>
           </section>
         </main>
@@ -289,16 +250,34 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalClinical
 
 export function PatientMedicalRecordPage() {
   const [record, setRecord] = useState<PortalMedicalRecord | null>(null);
+  const [plans, setPlans] = useState<PortalSubscriptionPlanRecord[]>([]);
+  const [selectedPlanId, setSelectedPlanId] = useState("");
+  const [paymentToken, setPaymentToken] = useState("");
+  const [subscriptionMessage, setSubscriptionMessage] = useState("");
+  const [activatingSubscription, setActivatingSubscription] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
   const detailPanelRef = useRef<HTMLElement | null>(null);
 
+  async function loadRecord() {
+    const payload = await apiRequest<PortalMedicalRecord>("/portal/medical-record");
+    setRecord(payload);
+  }
+
   useEffect(() => {
-    apiRequest<PortalMedicalRecord>("/portal/medical-record")
-      .then(setRecord)
+    loadRecord()
       .finally(() => {
         setLoading(false);
       });
+  }, []);
+
+  useEffect(() => {
+    apiRequest<PortalSubscriptionPlanRecord[]>("/portal/subscriptions/plans")
+      .then((payload) => {
+        setPlans(payload);
+        setSelectedPlanId((current) => current || payload[0]?.id || "");
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -347,6 +326,36 @@ export function PatientMedicalRecordPage() {
 
     event.preventDefault();
     openPanel(nextPanel);
+  }
+
+  async function handleActivateSubscription() {
+    if (!selectedPlanId || paymentToken.trim().length < 12) {
+      setSubscriptionMessage("Enter a secure payment token with at least 12 characters.");
+      return;
+    }
+
+    setActivatingSubscription(true);
+    setSubscriptionMessage("");
+
+    try {
+      const subscription = await apiRequest<PortalSubscriptionRecord>("/portal/subscriptions/activate", {
+        method: "POST",
+        body: JSON.stringify({
+          planId: selectedPlanId,
+          securePaymentToken: paymentToken,
+          autoRenew: true
+        })
+      });
+
+      setPaymentToken("");
+      setSubscriptionMessage("Subscription activated. Follow-up reminders and doctor messaging are available.");
+      await loadRecord();
+      setActivePanel({ kind: "subscription", id: subscription.id });
+    } catch (cause) {
+      setSubscriptionMessage(cause instanceof Error ? cause.message : "Subscription activation failed.");
+    } finally {
+      setActivatingSubscription(false);
+    }
   }
 
   function renderDetailPanel() {
@@ -492,7 +501,7 @@ export function PatientMedicalRecordPage() {
         <section className="section-card detail-panel" ref={detailPanelRef}>
           <div className="section-header">
             <div>
-              <p className="eyebrow">{getReportSourceLabel(activeReport)}</p>
+              <p className="eyebrow">التقرير الطبي</p>
               <h3>{activeReport.reason}</h3>
             </div>
             <button className="ghost-button" type="button" onClick={() => setActivePanel(null)}>
@@ -501,11 +510,11 @@ export function PatientMedicalRecordPage() {
           </div>
           <div className="stack-item">
             <strong>{activeReport.doctor.fullName}</strong>
-            <p>{activeReport.summary ?? activeReport.notes ?? "تم توثيق الزيارة ضمن السجل الصحي دون ملاحظات إضافية."}</p>
+            <p>{activeReport.notes ?? "تم توثيق الزيارة ضمن السجل الصحي دون ملاحظات إضافية."}</p>
             <div className="tile-stats">
               <span>{formatDateTime(activeReport.scheduledAt)}</span>
               <span>{activeReport.department.name}</span>
-              <span>{getReportTypeLabel(activeReport)}</span>
+              <span>{toArabicLabel(activeReport.type)}</span>
               <span>{toArabicLabel(activeReport.status)}</span>
             </div>
           </div>
@@ -519,54 +528,19 @@ export function PatientMedicalRecordPage() {
               <strong>{activeReport.doctor.specialization}</strong>
             </div>
             <div className="detail-field">
-              <span>القسم أو التخصص</span>
+              <span>القسم</span>
               <strong>{activeReport.department.name}</strong>
             </div>
             <div className="detail-field">
               <span>المركز</span>
               <strong>{activeReport.center.name}</strong>
             </div>
-            <div className="detail-field">
-              <span>مصدر التقرير</span>
-              <strong>{getReportSourceLabel(activeReport)}</strong>
-            </div>
-            <div className="detail-field">
-              <span>نوع التقرير</span>
-              <strong>{getReportTypeLabel(activeReport)}</strong>
-            </div>
           </div>
-          {activeReport.findings ? (
-            <div className="stack-item report-focus-card">
-              <strong>النتائج الأساسية</strong>
-              <p>{activeReport.findings}</p>
-            </div>
-          ) : null}
-          {activeReport.recommendations ? (
-            <div className="stack-item report-focus-card">
-              <strong>التوصيات العلاجية</strong>
-              <p>{activeReport.recommendations}</p>
-            </div>
-          ) : null}
-          {activeReport.recommendedFollowUp ? (
-            <div className="stack-item report-focus-card">
-              <strong>خطة المتابعة</strong>
-              <p>{activeReport.recommendedFollowUp}</p>
-            </div>
-          ) : null}
           <p className="inline-note">زر الطباعة يفتح نسخة مناسبة للطباعة ويمكن حفظها من المتصفح كملف PDF.</p>
           <div className="chip-row">
             <button className="primary-button" type="button" onClick={() => openPrintableReport(record, activeReport)}>
               طباعة أو حفظ PDF
             </button>
-            {activeReport.attachment ? (
-              <button
-                className="ghost-button"
-                type="button"
-                onClick={() => downloadAttachment(activeReport.attachment!)}
-              >
-                تنزيل المرفق
-              </button>
-            ) : null}
             <Link className="ghost-button" to="/messages">
               مراسلة الطبيب
             </Link>
@@ -728,24 +702,6 @@ export function PatientMedicalRecordPage() {
         </div>
       </section>
 
-      <section className="metric-grid">
-        <article className="metric-card">
-          <span className="eyebrow">إجمالي التقارير</span>
-          <h3>{record.clinicalReports.length}</h3>
-          <p className="muted">كل التقارير السريرية ونتائج الطبيب المتاحة داخل السجل الصحي.</p>
-        </article>
-        <article className="metric-card">
-          <span className="eyebrow">تقارير مع مرفقات</span>
-          <h3>{record.clinicalReports.filter((report) => report.attachment).length}</h3>
-          <p className="muted">يمكن تنزيل هذه النتائج مباشرة من صفحة التقرير.</p>
-        </article>
-        <article className="metric-card">
-          <span className="eyebrow">متابعة مقترحة</span>
-          <h3>{record.clinicalReports.filter((report) => report.recommendedFollowUp).length}</h3>
-          <p className="muted">تقارير تتضمن خطة متابعة أو تعليمات للزيارة القادمة.</p>
-        </article>
-      </section>
-
       <section className="card-grid">
         <article
           className="profile-tile interactive-card"
@@ -798,7 +754,7 @@ export function PatientMedicalRecordPage() {
           <div className="section-header">
             <div>
               <p className="eyebrow">التقارير السريرية</p>
-              <h3>التقارير الطبية والنتائج المنشورة</h3>
+              <h3>ملخصات الزيارات المكتملة</h3>
             </div>
           </div>
           <div className="stack-list">
@@ -812,16 +768,13 @@ export function PatientMedicalRecordPage() {
                 onKeyDown={(event) => handlePanelActivation(event, { kind: "report", id: report.id })}
               >
                 <strong>{report.reason}</strong>
-                <p>{report.summary ?? report.notes ?? "لا توجد ملاحظات سريرية إضافية."}</p>
+                <p>{report.notes ?? "لا توجد ملاحظات سريرية إضافية."}</p>
                 <div className="tile-stats">
                   <span>{report.doctor.fullName}</span>
-                  <span>{getReportSourceLabel(report)}</span>
-                  <span>{getReportTypeLabel(report)}</span>
+                  <span>{report.department.name}</span>
                   <span>{formatDateTime(report.scheduledAt)}</span>
                 </div>
-                <p className="action-hint">
-                  {report.attachment ? "يحتوي هذا التقرير على مرفق قابل للتنزيل." : "اضغط لفتح التقرير وطباعة نسخة PDF."}
-                </p>
+                <p className="action-hint">اضغط لفتح التقرير وطباعة نسخة PDF.</p>
               </article>
             ))}
             {record.clinicalReports.length === 0 ? (
@@ -872,6 +825,38 @@ export function PatientMedicalRecordPage() {
             <p className="eyebrow">خطط المتابعة</p>
             <h3>الاشتراكات والفواتير</h3>
           </div>
+        </div>
+        <div className="form-grid">
+          <label className="field">
+            <span>Subscription plan</span>
+            <select value={selectedPlanId} onChange={(event) => setSelectedPlanId(event.target.value)}>
+              {plans.map((plan) => (
+                <option key={plan.id} value={plan.id}>
+                  {plan.name} - {formatAmount(plan.priceInCents, "ILS")}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Secure payment token</span>
+            <input
+              value={paymentToken}
+              onChange={(event) => setPaymentToken(event.target.value)}
+              placeholder="SECURE-CARD-TOKEN"
+              type="password"
+            />
+          </label>
+          <div className="field-span-2">
+            <button
+              className="primary-button"
+              disabled={activatingSubscription || plans.length === 0}
+              type="button"
+              onClick={handleActivateSubscription}
+            >
+              {activatingSubscription ? "Activating..." : "Activate subscription by secure payment"}
+            </button>
+          </div>
+          {subscriptionMessage ? <div className="field-span-2 inline-note">{subscriptionMessage}</div> : null}
         </div>
         <div className="stack-list compact">
           {record.subscriptions.map((subscription) => (

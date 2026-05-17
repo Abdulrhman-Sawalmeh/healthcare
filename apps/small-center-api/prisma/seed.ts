@@ -5,7 +5,7 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 async function main() {
-  const passwordHash = await bcrypt.hash("Password123!", 10);
+  const passwordHash = "Password123!";
 
   await prisma.notificationProcessingLog.deleteMany();
   await prisma.centerSystemAlert.deleteMany();

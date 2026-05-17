@@ -1,5 +1,4 @@
 import { Gender, UserRole } from "@prisma/client";
-import bcrypt from "bcryptjs";
 import { randomInt } from "node:crypto";
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -134,7 +133,7 @@ export async function ensurePatientPortalAccount(
   const loginIdentifier = normalizeNationalId(input.nationalId);
   const patientEmail = buildPatientEmail(loginIdentifier);
   const temporaryPassword = generateTemporaryPassword();
-  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+  const passwordHash = temporaryPassword;
 
   const center = await prisma.centralCenter.findUnique({
     where: { id: input.centerId },

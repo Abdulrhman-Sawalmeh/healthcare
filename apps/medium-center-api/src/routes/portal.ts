@@ -371,7 +371,8 @@ router.get(
       recentReports: clinicalReports.slice(0, 3),
       careTeam: doctors.slice(0, 4).map(mapDoctor),
       recentThreads: threads.slice(0, 3).map(mapThread),
-      recentNotifications: notifications
+      recentNotifications: notifications,
+      subscriptions: subscriptions.map(mapSubscription)
     });
   })
 );

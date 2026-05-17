@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
-import { Link, NavLink, Navigate, Outlet } from "react-router-dom";
+import { type CSSProperties, type WheelEvent as ReactWheelEvent, useEffect, useState } from "react";
+import { NavLink, Navigate, Outlet, useNavigate } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { systemConfig } from "../config/system";
 import { useAuth } from "../context/AuthContext";
+import { useLanguage } from "../context/LanguageContext";
 import { navigationItems } from "../data/navigation";
 import { formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
 import { CenterNotificationsBundle, CentralNotificationsBundle } from "../types";
@@ -14,25 +15,15 @@ type SidebarAlert = {
   helper: string;
   status: string;
   createdAt: string;
-  to: string;
 };
-
-function buildPath(path: string, params: Record<string, string | undefined>) {
-  const searchParams = new URLSearchParams();
-
-  for (const [key, value] of Object.entries(params)) {
-    if (value) {
-      searchParams.set(key, value);
-    }
-  }
-
-  const query = searchParams.toString();
-  return query ? `${path}?${query}` : path;
-}
 
 export function AppShell() {
   const { user, loading, logout } = useAuth();
+  const navigate = useNavigate();
+  const { isEnglish, t, toggleLanguage } = useLanguage();
   const [alerts, setAlerts] = useState<SidebarAlert[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [contentZoom, setContentZoom] = useState(0.9);
 
   useEffect(() => {
     if (!user) {
@@ -51,13 +42,7 @@ export function AppShell() {
               title: toArabicLabel(item.notificationType),
               helper: item.targetCenter.centerName,
               status: item.status,
-              createdAt: item.createdAt,
-              to: buildPath("/notifications", {
-                view: "outgoing",
-                status: item.status,
-                type: item.notificationType,
-                centerCode: item.targetCenter.centerCode
-              })
+              createdAt: item.createdAt
             }))
           );
           return;
@@ -71,20 +56,14 @@ export function AppShell() {
               title: alert.title,
               helper: alert.message,
               status: alert.severity,
-              createdAt: alert.createdAt,
-              to: "/notifications"
+              createdAt: alert.createdAt
             })),
             ...centerPayload.outgoing.map((item) => ({
               id: `out-${item.id}`,
               title: toArabicLabel(item.notificationType),
               helper: `المحاولات ${item.retryCount}/${item.maxRetries}`,
               status: item.status,
-              createdAt: item.createdAt,
-              to: buildPath("/notifications", {
-                view: "outgoing",
-                status: item.status,
-                type: item.notificationType
-              })
+              createdAt: item.createdAt
             }))
           ].slice(0, 5)
         );
@@ -94,6 +73,30 @@ export function AppShell() {
       });
   }, [user]);
 
+  useEffect(() => {
+    function blockBrowserZoom(event: WheelEvent) {
+      if (event.ctrlKey) {
+        event.preventDefault();
+      }
+    }
+
+    function blockBrowserZoomKeys(event: KeyboardEvent) {
+      const isZoomShortcut =
+        (event.ctrlKey || event.metaKey) && ["+", "-", "=", "0"].includes(event.key);
+
+      if (isZoomShortcut) {
+        event.preventDefault();
+      }
+    }
+
+    window.addEventListener("wheel", blockBrowserZoom, { passive: false, capture: true });
+    window.addEventListener("keydown", blockBrowserZoomKeys, { capture: true });
+
+    return () => {
+      window.removeEventListener("wheel", blockBrowserZoom, { capture: true });
+      window.removeEventListener("keydown", blockBrowserZoomKeys, { capture: true });
+    };
+  }, []);
   if (loading) {
     return <div className="screen-center">جارٍ تحميل مساحة العمل...</div>;
   }
@@ -102,9 +105,33 @@ export function AppShell() {
     return <Navigate to="/login" replace />;
   }
 
+  function handleContentWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    if (!event.ctrlKey) {
+      return;
+    }
+
+    event.preventDefault();
+    const zoomStep = event.deltaY < 0 ? 0.05 : -0.05;
+    setContentZoom((current) =>
+      Math.min(1.3, Math.max(0.8, Number((current + zoomStep).toFixed(2))))
+    );
+  }
+
   const visibleNavigation = navigationItems.filter(
     (item) => item.roles.includes(user.role) && systemConfig.allowedRoutes.includes(item.to)
   );
+  const navLabels: Record<string, string> = {
+    "/": "Dashboard",
+    "/centers": "Centers",
+    "/patients": "Patients",
+    "/visits": "Visits",
+    "/referrals": "Referrals",
+    "/lab": "Lab",
+    "/pharmacy": "Pharmacy",
+    "/master-data": "Master data",
+    "/reports": "Reports",
+    "/notifications": "Notifications"
+  };
 
   return (
     <div className="app-shell">
@@ -127,14 +154,14 @@ export function AppShell() {
             <NavLink
               key={item.to}
               to={item.to}
+              replace
               end={item.to === "/"}
               className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
             >
-              {item.label}
+              {isEnglish ? navLabels[item.to] ?? item.label : item.label}
             </NavLink>
           ))}
         </nav>
-
         <div className="profile-card">
           <p className="eyebrow">{toArabicLabel(user.role)}</p>
           <h3>{user.fullName}</h3>
@@ -149,40 +176,67 @@ export function AppShell() {
 
       <main className="content-area">
         <header className="topbar">
+          <button
+            className="ghost-button dashboard-return-button"
+            type="button"
+            aria-label="Return to dashboard"
+            title="Return to dashboard"
+            onClick={() => navigate("/", { replace: true })}
+          >
+            ←
+          </button>
+          <button
+            className={showNotifications ? "topbar-icon-button active" : "topbar-icon-button"}
+            type="button"
+            aria-expanded={showNotifications}
+            aria-label={t("��� ��� ���������", "Open notification log")}
+            title={t("��� ���������", "Notification log")}
+            onClick={() => setShowNotifications((current) => !current)}
+          >
+            <span className="sidebar-icon-mark">!</span>
+            {alerts.length > 0 ? <span className="topbar-badge">{alerts.length}</span> : null}
+          </button>
+          <button className="ghost-button language-toggle" type="button" title={t("تغيير اللغة", "Change language")} onClick={toggleLanguage}>
+            {isEnglish ? "العربية" : "English"}
+          </button>
           <div>
-            <p className="eyebrow">{systemConfig.dashboardLabel}</p>
-            <h2>{user.workspace === "central" ? "منظومة التنسيق والإشراف المركزية" : user.center?.name}</h2>
+            <p className="eyebrow">{t(systemConfig.dashboardLabel, "")}</p>
+            <h2>{user.workspace === "central" ? "" : user.center?.name}</h2>
           </div>
           <div className="topbar-chip">
             <span>{user.username}</span>
           </div>
         </header>
 
-        <div className="content-grid">
+        <div className={showNotifications ? "content-grid with-notifications" : "content-grid"} style={{ "--content-zoom": contentZoom } as CSSProperties} onWheel={handleContentWheel}>
           <section className="page-panel">
             <Outlet />
           </section>
 
+          {showNotifications ? (
           <aside className="notification-panel">
             <div className="notification-header">
               <div>
                 <p className="eyebrow">{systemConfig.feedLabel}</p>
                 <h3>{systemConfig.feedTitle}</h3>
               </div>
+              <button className="ghost-button panel-close-button" type="button" onClick={() => setShowNotifications(false)}>
+                ×
+              </button>
             </div>
             <div className="notification-list">
               {alerts.map((alert) => (
-                <Link key={alert.id} className="notification-card interactive-card" to={alert.to}>
+                <article key={alert.id} className="notification-card">
                   <div className="notification-pill">{toArabicLabel(alert.status)}</div>
                   <h4>{alert.title}</h4>
                   <p>{alert.helper}</p>
-                  <span className="action-hint">فتح الإشعار المرتبط</span>
                   <span>{formatDateTime(alert.createdAt)}</span>
-                </Link>
+                </article>
               ))}
               {alerts.length === 0 ? <div className="empty-state">لا توجد إشعارات حاليًا.</div> : null}
             </div>
           </aside>
+          ) : null}
         </div>
       </main>
     </div>

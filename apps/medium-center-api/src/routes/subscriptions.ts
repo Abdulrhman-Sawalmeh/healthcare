@@ -27,6 +27,13 @@ const createPaymentSchema = z.object({
   method: z.string().default("CARD")
 });
 
+const activateSubscriptionSchema = z.object({
+  planId: z.string().uuid(),
+  securePaymentToken: z.string().min(12),
+  autoRenew: z.boolean().default(true),
+  method: z.string().default("SECURE_CARD")
+});
+
 const subscriptionInclude = {
   center: true,
   plan: true,
@@ -73,6 +80,41 @@ router.get(
   })
 );
 
+router.get(
+  "/plans",
+  authenticate,
+  authorize(UserRole.ADMIN, UserRole.PATIENT),
+  asyncHandler(async (req, res) => {
+    const centerId =
+      req.auth?.role === UserRole.PATIENT
+        ? (
+            await prisma.patientProfile.findUnique({
+              where: {
+                id: requireProfileId(req.auth.patientProfileId, "Patient profile is required.")
+              },
+              select: {
+                centerId: true
+              }
+            })
+          )?.centerId
+        : resolveCenterScope(
+            req,
+            typeof req.query.centerId === "string" ? req.query.centerId : undefined
+          );
+
+    if (!centerId) {
+      throw new AppError("A center is required to list subscription plans.", 400);
+    }
+
+    const plans = await prisma.subscriptionPlan.findMany({
+      where: { centerId },
+      orderBy: [{ priceInCents: "asc" }, { name: "asc" }]
+    });
+
+    res.json(plans);
+  })
+);
+
 router.post(
   "/",
   authenticate,
@@ -96,6 +138,79 @@ router.post(
         autoRenew: payload.autoRenew
       },
       include: subscriptionInclude
+    });
+
+    res.status(201).json(mapSubscription(subscription));
+  })
+);
+
+router.post(
+  "/activate",
+  authenticate,
+  authorize(UserRole.PATIENT),
+  asyncHandler(async (req, res) => {
+    const payload = activateSubscriptionSchema.parse(req.body);
+    const patientId = requireProfileId(req.auth?.patientProfileId, "Patient profile is required.");
+    const patient = await prisma.patientProfile.findUnique({
+      where: { id: patientId },
+      select: { centerId: true }
+    });
+
+    if (!patient) {
+      throw new AppError("Patient profile not found.", 404);
+    }
+
+    const plan = await prisma.subscriptionPlan.findFirst({
+      where: {
+        id: payload.planId,
+        centerId: patient.centerId
+      }
+    });
+
+    if (!plan) {
+      throw new AppError("Subscription plan not found for this center.", 404);
+    }
+
+    const now = new Date();
+    const endsAt = new Date(now);
+    if (plan.billingCycle === "YEARLY") {
+      endsAt.setFullYear(endsAt.getFullYear() + 1);
+    } else if (plan.billingCycle === "QUARTERLY") {
+      endsAt.setMonth(endsAt.getMonth() + 3);
+    } else {
+      endsAt.setMonth(endsAt.getMonth() + 1);
+    }
+
+    const subscription = await prisma.subscription.create({
+      data: {
+        patientId,
+        centerId: patient.centerId,
+        planId: plan.id,
+        status: SubscriptionStatus.ACTIVE,
+        startedAt: now,
+        endsAt,
+        autoRenew: payload.autoRenew,
+        payments: {
+          create: {
+            amountInCents: plan.priceInCents,
+            currency: "ILS",
+            status: PaymentStatus.PAID,
+            method: payload.method,
+            reference: `SEC-${Date.now()}`,
+            paidAt: now
+          }
+        }
+      },
+      include: subscriptionInclude
+    });
+
+    await prisma.notification.create({
+      data: {
+        userId: req.auth!.sub,
+        title: "Subscription activated",
+        body: "Your follow-up reminders and doctor messaging subscription is now active.",
+        type: "PAYMENT"
+      }
     });
 
     res.status(201).json(mapSubscription(subscription));

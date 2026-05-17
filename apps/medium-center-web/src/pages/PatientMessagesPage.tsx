@@ -3,7 +3,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { formatDateTime } from "../lib/arabic";
-import { PortalDoctorRecord, PortalThreadRecord } from "../types";
+import { PortalDoctorRecord, PortalSummary, PortalThreadRecord } from "../types";
 
 function sortThreads(threads: PortalThreadRecord[]) {
   return [...threads].sort(
@@ -33,6 +33,7 @@ export function PatientMessagesPage() {
   const [newDoctorId, setNewDoctorId] = useState("");
   const [newThreadMessage, setNewThreadMessage] = useState("");
   const [replyMessage, setReplyMessage] = useState("");
+  const [patientSubscriptionActive, setPatientSubscriptionActive] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const isDoctorView = user?.role === "DOCTOR";
@@ -45,15 +46,17 @@ export function PatientMessagesPage() {
     setError("");
 
     try {
-      const [threadsPayload, doctorsPayload] = await Promise.all([
+      const [threadsPayload, doctorsPayload, summaryPayload] = await Promise.all([
         apiRequest<PortalThreadRecord[]>("/portal/communications/threads"),
         isDoctorView
           ? Promise.resolve([] as PortalDoctorRecord[])
-          : apiRequest<PortalDoctorRecord[]>("/portal/doctors")
+          : apiRequest<PortalDoctorRecord[]>("/portal/doctors"),
+        isDoctorView ? Promise.resolve(null) : apiRequest<PortalSummary>("/portal/summary")
       ]);
 
       setThreads(sortThreads(threadsPayload));
       setDoctors(doctorsPayload);
+      setPatientSubscriptionActive(isDoctorView || (summaryPayload?.stats.activeSubscriptions ?? 0) > 0);
       setSelectedThreadId((currentThreadId) =>
         currentThreadId && threadsPayload.some((thread) => thread.id === currentThreadId)
           ? currentThreadId
@@ -195,7 +198,22 @@ export function PatientMessagesPage() {
 
       {error ? <div className="error-banner">{error}</div> : null}
 
-      {!isDoctorView ? (
+      {!isDoctorView && !patientSubscriptionActive ? (
+        <section className="section-card">
+          <div className="section-header">
+            <div>
+              <p className="eyebrow">Subscription required</p>
+              <h3>Activate follow-up support to contact your doctor</h3>
+            </div>
+          </div>
+          <p className="muted">
+            You can still view health history and prescriptions. Doctor messaging is included with
+            the subscription for reminders and follow-up care.
+          </p>
+        </section>
+      ) : null}
+
+      {!isDoctorView && patientSubscriptionActive ? (
         <section className="section-card">
           <div className="section-header">
             <div>
@@ -312,13 +330,14 @@ export function PatientMessagesPage() {
                 <textarea
                   value={replyMessage}
                   onChange={(event) => setReplyMessage(event.target.value)}
+                  disabled={!isDoctorView && !patientSubscriptionActive}
                   placeholder={
                     isDoctorView
                       ? "اكتب ردك للمريض هنا..."
                       : "اكتب رسالتك للطبيب هنا..."
                   }
                 />
-                <button className="primary-button" type="submit">
+                <button className="primary-button" disabled={!isDoctorView && !patientSubscriptionActive} type="submit">
                   إرسال الرسالة
                 </button>
               </form>

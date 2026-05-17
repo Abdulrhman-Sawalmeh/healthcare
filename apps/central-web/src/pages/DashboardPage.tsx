@@ -93,13 +93,9 @@ export function DashboardPage() {
       <div className="page-stack">
         <div className="hero-strip">
           <div>
-            <p className="eyebrow">النظام المركزي</p>
-            <h1>لوحة متابعة مركزية موحدة للشبكة الصحية</h1>
+            <h1>لوحة المتابعة</h1>
           </div>
-          <p className="muted">
-            تتبع هذه اللوحة اتصال المراكز، ومسار الإحالات الطبية، وتغطية السجل الموحد للمرضى، وحالة طوابير الإشعارات
-            بين الأنظمة من نقطة إشراف واحدة.
-          </p>
+         
         </div>
 
         <div className="metric-grid">

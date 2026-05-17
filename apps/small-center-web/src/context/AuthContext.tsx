@@ -70,6 +70,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
   function logout() {
     setApiToken(null);
     setUser(null);
+    document.cookie.split(";").forEach((cookie) => {
+      const name = cookie.split("=")[0]?.trim();
+      if (name) {
+        document.cookie = `${name}=; Max-Age=0; path=/; SameSite=Strict`;
+      }
+    });
   }
 
   return (

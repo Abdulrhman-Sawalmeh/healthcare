@@ -5,10 +5,12 @@ import { ApiError } from "../api/client";
 import { LoginScene3D } from "../components/LoginScene3D";
 import { systemConfig } from "../config/system";
 import { useAuth } from "../context/AuthContext";
+import { useLanguage } from "../context/LanguageContext";
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
+  const { isEnglish, t, toggleLanguage } = useLanguage();
   const [identifier, setIdentifier] = useState(systemConfig.demoAccounts[0].identifier);
   const [password, setPassword] = useState(systemConfig.demoAccounts[0].password);
   const [error, setError] = useState("");
@@ -31,12 +33,15 @@ export function LoginPage() {
 
   return (
     <div className="login-shell">
+      <button className="ghost-button language-toggle login-language-toggle" type="button" onClick={toggleLanguage}>
+        {isEnglish ? "العربية" : "English"}
+      </button>
       <div className="login-panel hero">
         <LoginScene3D />
         <div className="hero-copy">
-          <p className="eyebrow">{systemConfig.loginEyebrow}</p>
-          <h1>{systemConfig.loginTitle}</h1>
-          <p className="muted">{systemConfig.loginDescription}</p>
+          <p className="eyebrow">{t(systemConfig.loginEyebrow, "")}</p>
+          <h1>{t(systemConfig.loginTitle, "")}</h1>
+          <p className="muted">{t(systemConfig.loginDescription, "")}</p>
         </div>
 
         <div className="demo-grid">
@@ -58,10 +63,9 @@ export function LoginPage() {
         </div>
       </div>
 
-      <form className="login-panel form-panel" onSubmit={handleSubmit}>
+      <form className="login-panel form-panel" autoComplete="off" onSubmit={handleSubmit}>
         <div>
-          <p className="eyebrow">تسجيل الدخول بحسب النظام</p>
-          <h2>افتح الواجهة الصحيحة</h2>
+         
         </div>
 
         <label className="field">
@@ -69,6 +73,7 @@ export function LoginPage() {
           <input
             value={identifier}
             onChange={(event) => setIdentifier(event.target.value)}
+            autoComplete="off"
             type="text"
           />
         </label>
@@ -78,6 +83,7 @@ export function LoginPage() {
           <input
             value={password}
             onChange={(event) => setPassword(event.target.value)}
+            autoComplete="new-password"
             type="password"
           />
         </label>

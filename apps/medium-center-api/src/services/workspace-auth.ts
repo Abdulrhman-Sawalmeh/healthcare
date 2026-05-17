@@ -153,6 +153,18 @@ function mapLegacySession(user: LegacyPortalUser): SessionUser {
   };
 }
 
+async function passwordMatches(password: string, storedPassword: string) {
+  if (password === storedPassword) {
+    return true;
+  }
+
+  if (!storedPassword.startsWith("$2")) {
+    return false;
+  }
+
+  return bcrypt.compare(password, storedPassword);
+}
+
 async function loadLegacyUser(where: Prisma.UserWhereInput) {
   return prisma.user.findFirst({
     where: {
@@ -332,7 +344,7 @@ export async function loginWorkspaceUser(identifier: string, password: string) {
       }
     });
 
-    if (centralUser && centralUser.isActive && (await bcrypt.compare(password, centralUser.passwordHash))) {
+    if (centralUser && centralUser.isActive && (await passwordMatches(password, centralUser.passwordHash))) {
       await prisma.centralUser.update({
         where: { id: centralUser.id },
         data: { lastLogin: new Date() }
@@ -366,7 +378,7 @@ export async function loginWorkspaceUser(identifier: string, password: string) {
       centerUser &&
       centerUser.isActive &&
       !hiddenCenterRoles.has(centerUser.role) &&
-      (await bcrypt.compare(password, centerUser.passwordHash))
+      (await passwordMatches(password, centerUser.passwordHash))
     ) {
       await prisma.centerUserAccount.update({
         where: { id: centerUser.id },
@@ -385,7 +397,7 @@ export async function loginWorkspaceUser(identifier: string, password: string) {
       legacyUser &&
       legacyUser.patientProfile &&
       isWorkspaceAllowed("legacy", legacyUser.patientProfile.center.code) &&
-      (await bcrypt.compare(password, legacyUser.passwordHash))
+      (await passwordMatches(password, legacyUser.passwordHash))
     ) {
       return {
         workspace: "legacy" as const,

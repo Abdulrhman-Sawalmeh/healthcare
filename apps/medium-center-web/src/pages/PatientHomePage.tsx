@@ -25,6 +25,8 @@ export function PatientHomePage() {
     return <div className="empty-state">تعذر تحميل ملخص الرعاية الصحية.</div>;
   }
 
+  const hasActiveSubscription = summary.stats.activeSubscriptions > 0;
+
   return (
     <div className="page-stack">
       <section className="hero-strip">
@@ -46,7 +48,31 @@ export function PatientHomePage() {
           <Link className="ghost-button" to="/medical-record">
             فتح السجل الصحي
           </Link>
+          <Link className={hasActiveSubscription ? "ghost-button" : "primary-button"} to="/medical-record">
+            {hasActiveSubscription ? "Manage subscription" : "Activate subscription"}
+          </Link>
         </div>
+      </section>
+
+      <section className="section-card">
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">Patient subscription</p>
+            <h3>{hasActiveSubscription ? "Follow-up support is active" : "Add follow-up support"}</h3>
+          </div>
+          <Link className="ghost-button" to="/medical-record">
+            {hasActiveSubscription ? "View invoices" : "Secure payment"}
+          </Link>
+        </div>
+        <div className="tile-stats">
+          <span>Appointment reminders</span>
+          <span>Medication reminders</span>
+          <span>Contact your doctor</span>
+        </div>
+        <p className="muted">
+          Non-subscribers can still view health history and prescriptions. The subscription adds
+          follow-up reminders and secure doctor messaging.
+        </p>
       </section>
 
       <section className="metric-grid">
@@ -166,7 +192,7 @@ export function PatientHomePage() {
               <h3>آخر التحديثات من الطبيب</h3>
             </div>
             <Link className="ghost-button" to="/messages">
-              فتح المحادثات
+              {hasActiveSubscription ? "فتح المحادثات" : "Activate to contact doctor"}
             </Link>
           </div>
           <div className="stack-list compact">

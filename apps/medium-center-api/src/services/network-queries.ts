@@ -373,7 +373,8 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
         where: { id: centerId },
         include: {
           loadSnapshots: true,
-          doctorAvailability: true
+          doctorAvailability: true,
+          operatingRoomStatus: true
         }
       }),
       prisma.centerUserAccount.findMany({
@@ -443,7 +444,7 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
     throw new AppError("تعذر العثور على مساحة عمل المركز.", 404);
   }
 
-  const [labOpenRequests, lowStockItems] = await Promise.all([
+  const [labOpenRequests, lowStockItems, invoiceTotals, invoices, inventory, labCatalog] = await Promise.all([
     prisma.labRequestLocal.count({
       where: {
         centerId,
@@ -459,8 +460,53 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
           lte: 25
         }
       }
+    }),
+    prisma.localInvoice.aggregate({
+      where: { centerId },
+      _sum: {
+        amount: true,
+        paidAmount: true
+      },
+      _count: {
+        _all: true
+      }
+    }),
+    prisma.localInvoice.findMany({
+      where: { centerId },
+      select: {
+        status: true,
+        amount: true,
+        paidAmount: true
+      }
+    }),
+    prisma.pharmacyInventoryLocal.findMany({
+      where: { centerId },
+      select: {
+        quantity: true,
+        sellingPrice: true
+      }
+    }),
+    prisma.labTestLocal.findMany({
+      where: { centerId },
+      select: {
+        price: true
+      }
     })
   ]);
+
+  const invoiceTotal = invoiceTotals._sum.amount ?? 0;
+  const invoicePaid = invoiceTotals._sum.paidAmount ?? 0;
+  const invoiceOutstanding = Math.max(invoiceTotal - invoicePaid, 0);
+  const medicationValue = inventory.reduce(
+    (total, item) => total + item.quantity * item.sellingPrice,
+    0
+  );
+  const equipmentBudget = labCatalog.reduce((total, test) => total + test.price * 3, 0) +
+    (center.operatingRoomStatus[0]?.availableRooms ?? 0) * 2500;
+  const staffBudget = team.length * 5200;
+  const patientBudget = localPatients * 45;
+  const projectedSpend = staffBudget + medicationValue + equipmentBudget + patientBudget;
+  const monthlyLimit = Math.max(projectedSpend * 1.18, 25000);
 
   return {
     role,
@@ -485,6 +531,27 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
       openReferrals: referrals.filter((item) => item.status === "PENDING").length,
       labOpenRequests,
       lowStockItems
+    },
+    financial: {
+      invoices: {
+        total: invoiceTotal,
+        paid: invoicePaid,
+        outstanding: invoiceOutstanding,
+        count: invoiceTotals._count._all,
+        unpaidCount: invoices.filter((invoice) => invoice.status !== "PAID").length
+      },
+      budget: {
+        monthlyLimit,
+        projectedSpend,
+        remaining: Math.max(monthlyLimit - projectedSpend, 0),
+        utilizationRate: Math.round((projectedSpend / monthlyLimit) * 100)
+      },
+      expenses: {
+        staff: staffBudget,
+        medications: medicationValue,
+        equipment: equipmentBudget,
+        patients: patientBudget
+      }
     },
     team: team.map((member) => ({
       id: member.id,

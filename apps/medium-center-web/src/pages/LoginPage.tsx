@@ -5,10 +5,12 @@ import { ApiError } from "../api/client";
 import { LoginScene3D } from "../components/LoginScene3D";
 import { systemConfig } from "../config/system";
 import { useAuth } from "../context/AuthContext";
+import { useLanguage } from "../context/LanguageContext";
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
+  const { isEnglish, t, toggleLanguage } = useLanguage();
   const [identifier, setIdentifier] = useState(systemConfig.demoAccounts[0].identifier);
   const [password, setPassword] = useState(systemConfig.demoAccounts[0].password);
   const [error, setError] = useState("");
@@ -31,34 +33,39 @@ export function LoginPage() {
 
   return (
     <div className="login-shell">
+      <button className="ghost-button language-toggle login-language-toggle" type="button" onClick={toggleLanguage}>
+        {isEnglish ? "العربية" : "English"}
+      </button>
       <div className="login-panel hero">
         <LoginScene3D />
         <div className="hero-copy">
-          <p className="eyebrow">{systemConfig.loginEyebrow}</p>
-          <h1>{systemConfig.loginTitle}</h1>
-          <p className="muted">{systemConfig.loginDescription}</p>
+          <p className="eyebrow">{t(systemConfig.loginEyebrow, "Medium health center")}</p>
+          <h1>{t(systemConfig.loginTitle, "Coordinated clinical operations and patient portal")}</h1>
+          <p className="muted">{t(systemConfig.loginDescription, "Sign in once and the system opens the right workspace from your registered account.")}</p>
         </div>
 
         <div className="demo-grid">
-          {systemConfig.demoAccounts.map((account) => (
-            <button
-              key={account.identifier}
-              className="demo-card"
-              type="button"
-              onClick={() => {
-                setIdentifier(account.identifier);
-                setPassword(account.password);
-              }}
-            >
-              <span>{account.group}</span>
-              <strong>{account.roleLabel}</strong>
-              <small>{account.identifier}</small>
-            </button>
-          ))}
+          <div className="demo-card">
+            <span>{t("توجيه الدخول", "Login routing")}</span>
+            <strong>{t("تسجيل دخول موحد وآمن", "One secure sign-in")}</strong>
+            <small>
+              {t("أدخل البريد أو اسم المستخدم أو الهاتف أو رقم المريض المسجل. يفتح النظام مساحة العمل المناسبة تلقائياً.", "Enter the registered email, username, phone, or patient ID. The system opens the right workspace automatically from the account record.")}
+            </small>
+          </div>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => {
+              setIdentifier(systemConfig.demoAccounts[0].identifier);
+              setPassword(systemConfig.demoAccounts[0].password);
+            }}
+          >
+            {t("تعبئة بيانات تجريبية", "Fill demo credentials")}
+          </button>
         </div>
       </div>
 
-      <form className="login-panel form-panel" onSubmit={handleSubmit}>
+      <form className="login-panel form-panel" autoComplete="off" onSubmit={handleSubmit}>
         <div>
           <p className="eyebrow">تسجيل الدخول بحسب النظام</p>
           <h2>افتح الواجهة الصحيحة</h2>
@@ -69,6 +76,7 @@ export function LoginPage() {
           <input
             value={identifier}
             onChange={(event) => setIdentifier(event.target.value)}
+            autoComplete="off"
             type="text"
           />
         </label>
@@ -78,6 +86,7 @@ export function LoginPage() {
           <input
             value={password}
             onChange={(event) => setPassword(event.target.value)}
+            autoComplete="new-password"
             type="password"
           />
         </label>

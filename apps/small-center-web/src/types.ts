@@ -122,6 +122,27 @@ export interface CenterWorkspaceData {
     labOpenRequests: number;
     lowStockItems: number;
   };
+  financial: {
+    invoices: {
+      total: number;
+      paid: number;
+      outstanding: number;
+      count: number;
+      unpaidCount: number;
+    };
+    budget: {
+      monthlyLimit: number;
+      projectedSpend: number;
+      remaining: number;
+      utilizationRate: number;
+    };
+    expenses: {
+      staff: number;
+      medications: number;
+      equipment: number;
+      patients: number;
+    };
+  };
   team: Array<{
     id: number;
     fullName: string;
@@ -801,6 +822,17 @@ export interface PortalSubscriptionRecord {
   }>;
 }
 
+export interface PortalSubscriptionPlanRecord {
+  id: string;
+  centerId: string;
+  name: string;
+  description?: string | null;
+  billingCycle: string;
+  priceInCents: number;
+  maxVisits: number;
+  createdAt: string;
+}
+
 export interface PortalSummary {
   patient: PortalPatientRecord;
   stats: {
@@ -816,6 +848,7 @@ export interface PortalSummary {
   careTeam: PortalDoctorRecord[];
   recentThreads: PortalThreadRecord[];
   recentNotifications: PortalNotificationRecord[];
+  subscriptions: PortalSubscriptionRecord[];
 }
 
 export interface PortalMedicalRecord {
