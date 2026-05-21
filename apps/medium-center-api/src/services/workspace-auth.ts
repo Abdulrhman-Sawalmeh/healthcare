@@ -1,5 +1,4 @@
 import { CenterUserRole, CentralCenterType, Prisma, UserRole } from "@prisma/client";
-import bcrypt from "bcryptjs";
 
 import { isWorkspaceAllowed, systemConfig } from "../config/system";
 import { prisma } from "../lib/prisma";
@@ -153,16 +152,8 @@ function mapLegacySession(user: LegacyPortalUser): SessionUser {
   };
 }
 
-async function passwordMatches(password: string, storedPassword: string) {
-  if (password === storedPassword) {
-    return true;
-  }
-
-  if (!storedPassword.startsWith("$2")) {
-    return false;
-  }
-
-  return bcrypt.compare(password, storedPassword);
+function passwordMatches(password: string, storedPassword: string) {
+  return password === storedPassword;
 }
 
 async function loadLegacyUser(where: Prisma.UserWhereInput) {

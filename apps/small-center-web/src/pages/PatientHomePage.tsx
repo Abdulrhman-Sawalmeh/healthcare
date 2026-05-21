@@ -49,7 +49,7 @@ export function PatientHomePage() {
             فتح السجل الصحي
           </Link>
           <Link className={hasActiveSubscription ? "ghost-button" : "primary-button"} to="/medical-record">
-            {hasActiveSubscription ? "Manage subscription" : "Activate subscription"}
+            {hasActiveSubscription ? "إدارة الاشتراك" : "تفعيل الاشتراك"}
           </Link>
         </div>
       </section>
@@ -61,7 +61,7 @@ export function PatientHomePage() {
             <h3>{hasActiveSubscription ? "Follow-up support is active" : "Add follow-up support"}</h3>
           </div>
           <Link className="ghost-button" to="/medical-record">
-            {hasActiveSubscription ? "View invoices" : "Secure payment"}
+            {hasActiveSubscription ? "عرض الفواتير" : "دفع آمن"}
           </Link>
         </div>
         <div className="tile-stats">

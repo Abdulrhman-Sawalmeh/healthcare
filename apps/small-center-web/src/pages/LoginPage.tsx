@@ -1,20 +1,41 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { ApiError } from "../api/client";
-import { LoginScene3D } from "../components/LoginScene3D";
-import { systemConfig } from "../config/system";
+import { ApiError, apiRequest } from "../api/client";
+import { DemoAccount, systemConfig } from "../config/system";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
+
+const accountArabicLabels: Record<string, string> = {
+  CENTER_MANAGER: "مدير المركز",
+  DOCTOR: "طبيب",
+  PATIENT: "مريض",
+  RECEPTIONIST: "موظف الاستقبال"
+};
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const { isEnglish, t, toggleLanguage } = useLanguage();
-  const [identifier, setIdentifier] = useState(systemConfig.demoAccounts[0].identifier);
-  const [password, setPassword] = useState(systemConfig.demoAccounts[0].password);
+  const { t } = useLanguage();
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [demoAccounts, setDemoAccounts] = useState<DemoAccount[]>(systemConfig.demoAccounts);
+
+  useEffect(() => {
+    document.title = "المركز الصحي الصغير";
+  }, []);
+
+  useEffect(() => {
+    apiRequest<DemoAccount[]>("/auth/demo-accounts")
+      .then((accounts) => {
+        if (accounts.length > 0) {
+          setDemoAccounts(accounts);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -25,60 +46,40 @@ export function LoginPage() {
       await login(identifier, password);
       navigate("/", { replace: true });
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : "تعذر تسجيل الدخول.");
+      setError(
+        cause instanceof ApiError && cause.status !== 401
+          ? cause.message
+          : "بيانات الدخول غير صحيحة أو لا تنتمي لهذا النظام."
+      );
     } finally {
       setSubmitting(false);
     }
   }
 
+  function fillAccount(account: DemoAccount) {
+    setIdentifier(account.identifier);
+    setPassword(account.password);
+    setError("");
+  }
+
   return (
     <div className="login-shell">
-      <button className="ghost-button language-toggle login-language-toggle" type="button" onClick={toggleLanguage}>
-        {isEnglish ? "العربية" : "English"}
-      </button>
       <div className="login-panel hero">
-        <LoginScene3D />
-        <div className="hero-copy">
-          <p className="eyebrow">{t(systemConfig.loginEyebrow, "Small health center")}</p>
-          <h1>{t(systemConfig.loginTitle, "Daily operations and patient portal")}</h1>
-          <p className="muted">{t(systemConfig.loginDescription, "Sign in once and the system opens the right workspace from your registered account.")}</p>
-        </div>
-
-        <div className="demo-grid">
-          <div className="demo-card">
-            <span>{t("توجيه الدخول", "Login routing")}</span>
-            <strong>{t("تسجيل دخول موحد وآمن", "One secure sign-in")}</strong>
-            <small>
-              {t("أدخل البريد أو اسم المستخدم أو الهاتف أو رقم المريض المسجل. يفتح النظام مساحة العمل المناسبة تلقائياً.", "Enter the registered email, username, phone, or patient ID. The system opens the right workspace automatically from the account record.")}
-            </small>
-          </div>
-          <button
-            className="primary-button"
-            type="button"
-            onClick={() => {
-              setIdentifier(systemConfig.demoAccounts[0].identifier);
-              setPassword(systemConfig.demoAccounts[0].password);
-            }}
-          >
-            {t("تعبئة بيانات تجريبية", "Fill demo credentials")}
-          </button>
+        <div className="login-brand-panel" data-localized="true">
+          <p>بوابة المركز</p>
+          <h1>المركز الصحي الصغير</h1>
         </div>
       </div>
 
-      <form className="login-panel form-panel" autoComplete="off" onSubmit={handleSubmit}>
+      <form className="login-panel form-panel" autoComplete="off" data-localized="true" onSubmit={handleSubmit}>
         <div>
-          <p className="eyebrow">تسجيل الدخول بحسب النظام</p>
-          <h2>افتح الواجهة الصحيحة</h2>
+          <p className="eyebrow">تسجيل الدخول</p>
+          <h2>بيانات الحساب</h2>
         </div>
 
         <label className="field">
           <span>اسم المستخدم أو رقم الهوية أو البريد الإلكتروني</span>
-          <input
-            value={identifier}
-            onChange={(event) => setIdentifier(event.target.value)}
-            autoComplete="off"
-            type="text"
-          />
+          <input value={identifier} onChange={(event) => setIdentifier(event.target.value)} autoComplete="off" type="text" />
         </label>
 
         <label className="field">
@@ -91,10 +92,21 @@ export function LoginPage() {
           />
         </label>
 
+        <div className="demo-login-panel">
+          <span>{t("تعبئة حساب تجريبي", "Demo account autofill")}</span>
+          <div className="demo-account-list">
+            {demoAccounts.map((account) => (
+              <button key={account.identifier} className="demo-account-button" type="button" onClick={() => fillAccount(account)}>
+                {accountArabicLabels[account.roleLabel] ?? account.roleLabel}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {error ? <div className="error-banner">{error}</div> : null}
 
         <button className="primary-button" disabled={submitting} type="submit">
-          {submitting ? "جارٍ فتح الواجهة..." : "دخول"}
+          {submitting ? "جاري الدخول..." : "دخول"}
         </button>
       </form>
     </div>

@@ -20,7 +20,7 @@ type SidebarAlert = {
 export function AppShell() {
   const { user, loading, logout } = useAuth();
   const navigate = useNavigate();
-  const { isEnglish, t, toggleLanguage } = useLanguage();
+  const { t } = useLanguage();
   const [alerts, setAlerts] = useState<SidebarAlert[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [contentZoom, setContentZoom] = useState(0.9);
@@ -120,19 +120,6 @@ export function AppShell() {
   const visibleNavigation = navigationItems.filter(
     (item) => item.roles.includes(user.role) && systemConfig.allowedRoutes.includes(item.to)
   );
-  const navLabels: Record<string, string> = {
-    "/": "Dashboard",
-    "/centers": "Centers",
-    "/patients": "Patients",
-    "/visits": "Visits",
-    "/referrals": "Referrals",
-    "/lab": "Lab",
-    "/pharmacy": "Pharmacy",
-    "/master-data": "Master data",
-    "/reports": "Reports",
-    "/notifications": "Notifications"
-  };
-
   return (
     <div className="app-shell">
       <div className="background-veil background-veil-a" />
@@ -158,7 +145,7 @@ export function AppShell() {
               end={item.to === "/"}
               className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
             >
-              {isEnglish ? navLabels[item.to] ?? item.label : item.label}
+              {item.label}
             </NavLink>
           ))}
         </nav>
@@ -195,9 +182,6 @@ export function AppShell() {
           >
             <span className="sidebar-icon-mark">!</span>
             {alerts.length > 0 ? <span className="topbar-badge">{alerts.length}</span> : null}
-          </button>
-          <button className="ghost-button language-toggle" type="button" title={t("تغيير اللغة", "Change language")} onClick={toggleLanguage}>
-            {isEnglish ? "العربية" : "English"}
           </button>
           <div>
             <p className="eyebrow">{t(systemConfig.dashboardLabel, "")}</p>

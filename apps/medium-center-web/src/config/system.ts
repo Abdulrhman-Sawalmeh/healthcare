@@ -36,8 +36,7 @@ export const systemConfig: FrontendSystemConfig = {
   key: "medium-center-system",
   name: "المركز الصحي المتوسط",
   shortName: "نظام المركز الصحي المتوسط",
-  description:
-    "نظام محلي مستقل لإدارة الاستقبال والعيادات والزيارات والإحالات، مع بوابة مريض يدخل إليها برقم الهوية وكلمة المرور المرسلة إليه.",
+  description: "نظام محلي لإدارة الاستقبال والعيادات والزيارات والإحالات مع بوابة مرضى.",
   workspace: "center",
   allowedRoles: ["CENTER_MANAGER", "DOCTOR", "PATIENT", "RECEPTIONIST"],
   allowedRoutes: ["/", "/appointments", "/medical-record", "/doctors", "/messages", "/patients", "/visits", "/referrals", "/notifications"],
@@ -45,9 +44,8 @@ export const systemConfig: FrontendSystemConfig = {
   apiUrl: "http://localhost:4100/api",
   storageKey: "healthcare.medium-center-web.token",
   loginEyebrow: "نظام المركز الصحي المتوسط",
-  loginTitle: "إدارة سريرية وتشغيلية متكاملة مع بوابة مريض واضحة وسهلة الاستخدام.",
-  loginDescription:
-    "تدعم هذه الواجهة فرق الاستقبال والعيادات في إنشاء حساب المريض وإرسال كلمة المرور عبر رسالة نصية، مع حجز المواعيد ومتابعة السجل الصحي والإحالات.",
+  loginTitle: "",
+  loginDescription: "",
   dashboardLabel: "تشغيل المركز المتوسط",
   feedLabel: "آخر المستجدات",
   feedTitle: "الإشعارات والتنبيهات",
@@ -55,26 +53,26 @@ export const systemConfig: FrontendSystemConfig = {
   demoAccounts: [
     {
       group: "المركز الصحي المتوسط",
-      roleLabel: "مدير المركز",
-      identifier: "manager.shifaa",
+      roleLabel: "CENTER_MANAGER",
+      identifier: "medium-manager",
       password: "Password123!"
     },
     {
       group: "المركز الصحي المتوسط",
-      roleLabel: "طبيب",
-      identifier: "doctor.shifaa",
+      roleLabel: "DOCTOR",
+      identifier: "medium-doctor",
       password: "Password123!"
     },
     {
       group: "المركز الصحي المتوسط",
-      roleLabel: "مريضة",
-      identifier: "402010102",
+      roleLabel: "PATIENT",
+      identifier: "medium-patient",
       password: "Password123!"
     },
     {
       group: "المركز الصحي المتوسط",
-      roleLabel: "موظف الاستقبال",
-      identifier: "reception.shifaa",
+      roleLabel: "RECEPTIONIST",
+      identifier: "medium-receptionist",
       password: "Password123!"
     }
   ]

@@ -36,8 +36,7 @@ export const systemConfig: FrontendSystemConfig = {
   key: "small-center-system",
   name: "المركز الصحي الصغير",
   shortName: "نظام المركز الصحي الصغير",
-  description:
-    "نظام محلي مستقل للمركز الصحي الصغير يربط بين الاستقبال والعيادات والإحالات، مع بوابة مريض لحجز المواعيد وتسجيل الدخول برقم الهوية.",
+  description: "نظام محلي لإدارة الاستقبال والعيادات والإحالات مع بوابة مرضى.",
   workspace: "center",
   allowedRoles: ["CENTER_MANAGER", "DOCTOR", "PATIENT", "RECEPTIONIST"],
   allowedRoutes: ["/", "/appointments", "/medical-record", "/doctors", "/messages", "/patients", "/visits", "/referrals", "/notifications"],
@@ -45,9 +44,8 @@ export const systemConfig: FrontendSystemConfig = {
   apiUrl: "http://localhost:4200/api",
   storageKey: "healthcare.small-center-web.token",
   loginEyebrow: "نظام المركز الصحي الصغير",
-  loginTitle: "واجهة خفيفة لإدارة العمل اليومي مع بوابة مريض مباشرة وواضحة.",
-  loginDescription:
-    "تخدم هذه الواجهة فرق الاستقبال والعيادات في إنشاء حساب المريض وإرسال كلمة المرور عبر رسالة نصية، مع حجز الموعد ومراجعة التقارير الطبية والإحالات.",
+  loginTitle: "",
+  loginDescription: "",
   dashboardLabel: "تشغيل المركز الصغير",
   feedLabel: "آخر المستجدات",
   feedTitle: "الإشعارات والتنبيهات",
@@ -55,26 +53,26 @@ export const systemConfig: FrontendSystemConfig = {
   demoAccounts: [
     {
       group: "المركز الصحي الصغير",
-      roleLabel: "مدير المركز",
-      identifier: "manager.hussein",
+      roleLabel: "CENTER_MANAGER",
+      identifier: "small-manager",
       password: "Password123!"
     },
     {
       group: "المركز الصحي الصغير",
-      roleLabel: "طبيب",
-      identifier: "doctor.hussein",
+      roleLabel: "DOCTOR",
+      identifier: "small-doctor",
       password: "Password123!"
     },
     {
       group: "المركز الصحي الصغير",
-      roleLabel: "مريض",
-      identifier: "402010101",
+      roleLabel: "PATIENT",
+      identifier: "small-patient",
       password: "Password123!"
     },
     {
       group: "المركز الصحي الصغير",
-      roleLabel: "موظف الاستقبال",
-      identifier: "reception.hussein",
+      roleLabel: "RECEPTIONIST",
+      identifier: "small-receptionist",
       password: "Password123!"
     }
   ]

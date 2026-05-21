@@ -2,17 +2,61 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { signAuthToken } from "../lib/jwt";
+import { prisma } from "../lib/prisma";
 import { authenticate } from "../middleware/auth";
 import { loginWorkspaceUser, resolveSessionUser } from "../services/workspace-auth";
 import { asyncHandler } from "../utils/async-handler";
 
 const router = Router();
+const CENTRAL_ADMIN_ALIAS = "central-admin";
 
 const loginSchema = z.object({
   identifier: z.string().min(3).optional(),
   email: z.string().min(3).optional(),
   password: z.string().min(8)
 });
+
+async function resolveDemoIdentifier(identifier: string) {
+  if (identifier !== CENTRAL_ADMIN_ALIAS) {
+    return identifier;
+  }
+
+  const user = await prisma.centralUser.findFirst({
+    where: { isActive: true },
+    orderBy: { id: "asc" },
+    select: { username: true }
+  });
+
+  return user?.username ?? identifier;
+}
+
+router.get(
+  "/demo-accounts",
+  asyncHandler(async (_req, res) => {
+    const user = await prisma.centralUser.findFirst({
+      where: { isActive: true },
+      orderBy: { id: "asc" },
+      select: {
+        passwordHash: true,
+        fullName: true
+      }
+    });
+
+    res.json(
+      user
+        ? [
+            {
+              group: "central",
+              roleLabel: "CENTRAL_ADMIN",
+              identifier: CENTRAL_ADMIN_ALIAS,
+              password: user.passwordHash,
+              fullName: user.fullName
+            }
+          ]
+        : []
+    );
+  })
+);
 
 router.post(
   "/login",
@@ -21,10 +65,11 @@ router.post(
     const identifier = payload.identifier ?? payload.email;
 
     if (!identifier) {
-      return res.status(400).json({ message: "اسم المستخدم أو البريد الإلكتروني مطلوب." });
+      return res.status(400).json({ message: "Username or email is required." });
     }
 
-    const result = await loginWorkspaceUser(identifier, payload.password);
+    const loginIdentifier = await resolveDemoIdentifier(identifier);
+    const result = await loginWorkspaceUser(loginIdentifier, payload.password);
 
     const token = signAuthToken({
       sub: result.user.id,

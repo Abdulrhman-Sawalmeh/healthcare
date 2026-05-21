@@ -42,111 +42,34 @@ body {
   color: var(--text);
   direction: rtl;
 }
-
-html[data-language="en"] body {
-  direction: ltr;
-  font-family: "Segoe UI", Arial, sans-serif;
-  letter-spacing: 0;
-}
-
-html[data-language="en"] .app-shell,
-html[data-language="en"] .login-shell,
-html[data-language="en"] .content-grid,
-html[data-language="en"] .split-grid {
-  direction: ltr;
-}
-
-html[data-language="ar"] .content-area,
-html[data-language="ar"] .content-grid,
-html[data-language="ar"] .page-panel,
-html[data-language="ar"] .notification-panel {
+.content-area,
+.content-grid,
+.page-panel,
+.notification-panel {
   direction: rtl;
   text-align: right;
 }
-
-html[data-language="en"] .content-area,
-html[data-language="en"] .content-grid,
-html[data-language="en"] .page-panel,
-html[data-language="en"] .notification-panel {
-  direction: ltr;
-  text-align: left;
-}
-
-html[data-language="en"] .sidebar,
-html[data-language="en"] .login-panel,
-html[data-language="en"] .page-panel,
-html[data-language="en"] .hero-strip,
-html[data-language="en"] .section-card,
-html[data-language="en"] .metric-card,
-html[data-language="en"] .profile-tile,
-html[data-language="en"] .notification-card,
-html[data-language="en"] .notification-card-button,
-html[data-language="en"] .empty-state,
-html[data-language="en"] .thread-item,
-html[data-language="en"] .message-bubble,
-html[data-language="en"] .demo-card,
-html[data-language="en"] .field input,
-html[data-language="en"] .field select,
-html[data-language="en"] .field textarea {
-  text-align: left;
-}
-
-html[data-language="ar"] .field,
-html[data-language="ar"] label,
-html[data-language="ar"] input,
-html[data-language="ar"] select,
-html[data-language="ar"] textarea {
+.field,
+label,
+input,
+select,
+textarea {
   direction: rtl;
   text-align: right;
 }
-
-html[data-language="en"] .field,
-html[data-language="en"] label,
-html[data-language="en"] input,
-html[data-language="en"] select,
-html[data-language="en"] textarea {
-  direction: ltr;
-  text-align: left;
-}
-
-html[data-language="en"] .primary-button,
-html[data-language="en"] .ghost-button,
-html[data-language="ar"] .primary-button,
-html[data-language="ar"] .ghost-button {
-  text-align: center;
-}
-
-html[data-language="en"] .data-table th,
-html[data-language="en"] .data-table td {
-  text-align: left;
-}
-
-html[data-language="ar"] .data-table th,
-html[data-language="ar"] .data-table td {
+.data-table th,
+.data-table td {
   text-align: right;
 }
-
-html[data-language="en"] .section-header,
-html[data-language="en"] .notification-header,
-html[data-language="en"] .hero-strip,
-html[data-language="en"] .detail-grid,
-html[data-language="en"] .card-grid,
-html[data-language="en"] .metric-grid,
-html[data-language="en"] .split-grid,
-html[data-language="en"] .messages-layout,
-html[data-language="en"] .form-grid {
-  direction: ltr;
-}
-
-html[data-language="ar"] .section-header,
-html[data-language="ar"] .notification-header,
-html[data-language="ar"] .hero-strip,
-html[data-language="ar"] .detail-grid,
-html[data-language="ar"] .card-grid,
-html[data-language="ar"] .metric-grid,
-html[data-language="ar"] .split-grid,
-html[data-language="ar"] .messages-layout,
-html[data-language="ar"] .form-grid {
+.section-header,
+.notification-header,
+.hero-strip,
+.detail-grid,
+.card-grid,
+.metric-grid,
+.split-grid,
+.messages-layout,
+.form-grid {
   direction: rtl;
 }
 
@@ -225,26 +148,8 @@ table {
   color: var(--accent);
 }
 
-.language-toggle {
-  position: fixed;
-  bottom: 1rem;
-  inset-inline-end: 1rem;
-  z-index: 30;
-  white-space: nowrap;
-  background: rgba(255, 255, 255, 0.28);
-  border: 0;
-  box-shadow: 0 18px 45px rgba(23, 50, 45, 0.16);
-  backdrop-filter: blur(18px) saturate(150%);
-  -webkit-backdrop-filter: blur(18px) saturate(150%);
-}
-
-.login-language-toggle {
-  z-index: 35;
-}
-
 .primary-button:hover,
 .ghost-button:hover,
-.demo-card:hover,
 .nav-link:hover,
 .thread-item:hover {
   transform: translateY(-1px);
@@ -252,67 +157,186 @@ table {
 
 .login-shell {
   min-height: 100vh;
+  position: relative;
   display: grid;
-  grid-template-columns: 1.25fr 0.9fr;
-  gap: 2rem;
-  padding: 2rem;
+  place-items: center;
+  padding: clamp(1.5rem, 4vw, 3rem);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 18% 82%, rgba(240, 143, 82, 0.12), transparent 22%),
+    radial-gradient(circle at 82% 18%, rgba(15, 118, 99, 0.14), transparent 24%),
+    linear-gradient(145deg, #eef7f2, #dceee7);
 }
 
 .login-panel {
   background: var(--surface);
   backdrop-filter: blur(14px);
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow);
+  box-shadow: 0 30px 90px rgba(15, 61, 54, 0.22);
 }
 
 .login-panel.hero {
-  padding: 3rem;
-  display: grid;
-  align-content: space-between;
-  gap: 2rem;
-  background:
-    linear-gradient(140deg, rgba(15, 118, 99, 0.92), rgba(15, 61, 54, 0.95)),
-    var(--surface);
+  position: relative;
+  width: min(84vw, 1120px);
+  height: min(72vh, 640px);
+  min-height: 520px;
+  padding: 0;
+  display: block;
+  overflow: hidden;
+  background: #ffffff;
   color: white;
 }
 
-.login-panel.hero .eyebrow,
-.login-panel.hero .muted {
-  color: rgba(255, 255, 255, 0.78);
+.login-panel.hero::before,
+.login-panel.hero::after {
+  content: "";
+  position: absolute;
 }
 
-.login-panel.hero h1 {
-  max-width: 14ch;
-  font-size: clamp(2.4rem, 4vw, 4.4rem);
-  line-height: 0.95;
+.login-panel.hero::before {
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 61%;
+  border-radius: inherit;
+  border-start-end-radius: 48% 100%;
+  border-end-end-radius: 18% 100%;
+  background:
+    radial-gradient(circle at 7% 96%, rgba(39, 178, 148, 0.86) 0 22%, transparent 22.5%),
+    radial-gradient(circle at 78% 73%, rgba(37, 166, 139, 0.9) 0 18%, transparent 18.5%),
+    linear-gradient(145deg, rgba(20, 147, 119, 0.96), rgba(15, 61, 54, 0.98));
+}
+
+.login-panel.hero::after {
+  border-radius: 50%;
+  width: 210px;
+  aspect-ratio: 1;
+  inset-block-end: 52px;
+  inset-inline-start: calc(50% - 145px);
+  background: linear-gradient(145deg, rgba(38, 177, 146, 0.86), rgba(15, 118, 99, 0.96));
+  box-shadow: inset 0 18px 42px rgba(255, 255, 255, 0.08);
 }
 
 .form-panel {
-  padding: 2rem;
+  position: absolute;
+  inset-block-start: 50%;
+  width: min(40vw, 440px);
+  min-width: 340px;
+  min-height: 430px;
+  padding: clamp(1.5rem, 3vw, 2.4rem);
   display: grid;
-  gap: 1rem;
+  gap: 1.05rem;
   align-content: center;
+  transform: translateY(-50%);
+  z-index: 2;
+  background: #ffffff;
+  overflow: hidden;
 }
 
-.demo-grid {
+.form-panel::before {
+  content: "";
+  position: absolute;
+  width: 190px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: linear-gradient(145deg, rgba(36, 166, 137, 0.24), rgba(15, 118, 99, 0.12));
+  inset-block-end: -94px;
+  inset-inline-end: -82px;
+}
+
+.form-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.form-panel h2 {
+  font-size: clamp(2rem, 3vw, 2.85rem);
+  text-align: center;
+}
+
+.form-panel .eyebrow {
+  text-align: center;
+}
+
+.login-brand-panel {
+  position: absolute;
+  z-index: 2;
+  inset-block-start: 50%;
+  inset-inline-start: 8%;
+  width: min(34%, 360px);
+  transform: translateY(-50%);
+  color: #ffffff;
+  text-align: center;
+}
+
+.login-brand-panel p {
+  margin: 0 0 0.7rem;
+  font-weight: 800;
+  opacity: 0.86;
+}
+
+.login-brand-panel h1 {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3.5rem);
+}
+
+.demo-login-panel {
   display: grid;
-  gap: 1rem;
+  gap: 0.55rem;
 }
 
-.demo-card {
-  display: grid;
-  gap: 0.35rem;
-  padding: 1rem 1.1rem;
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.08);
-  color: white;
-  text-align: right;
+.demo-login-panel > span {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 800;
 }
 
-.demo-card small {
-  color: rgba(255, 255, 255, 0.72);
+.demo-account-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.demo-account-button {
+  border: 1px solid rgba(15, 118, 99, 0.14);
+  border-radius: 999px;
+  background: rgba(15, 118, 99, 0.08);
+  color: var(--accent);
+  padding: 0.42rem 0.7rem;
+  font-weight: 800;
+  font-size: 0.82rem;
+}
+.login-panel.hero {
+  justify-self: center;
+}
+.form-panel {
+  inset-inline-start: auto;
+  inset-inline-end: calc(50% + 2.4rem);
+  border-start-end-radius: 100px;
+  border-end-end-radius: 100px;
+}
+
+.login-panel.hero::before {
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+  border-start-end-radius: inherit;
+  border-end-end-radius: inherit;
+  border-start-start-radius: 48% 100%;
+  border-end-start-radius: 18% 100%;
+  background:
+    radial-gradient(circle at 93% 96%, rgba(39, 178, 148, 0.86) 0 22%, transparent 22.5%),
+    radial-gradient(circle at 22% 73%, rgba(37, 166, 139, 0.9) 0 18%, transparent 18.5%),
+    linear-gradient(145deg, rgba(20, 147, 119, 0.96), rgba(15, 61, 54, 0.98));
+}
+
+.login-panel.hero::after {
+  inset-inline-start: auto;
+  inset-inline-end: calc(50% - 145px);
+}
+
+.login-brand-panel {
+  inset-inline-start: auto;
+  inset-inline-end: 8%;
 }
 
 .field {
@@ -1016,7 +1040,44 @@ table {
 }
 
 .messages-layout {
-  align-items: start;
+  align-items: stretch;
+  grid-template-columns: minmax(280px, 370px) minmax(0, 1fr);
+}
+
+.conversation-sidebar,
+.chat-panel {
+  min-height: 680px;
+}
+
+.conversation-sidebar {
+  align-content: start;
+}
+
+.conversation-tools {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.compact-field {
+  gap: 0.35rem;
+}
+
+.conversation-create {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border-radius: 20px;
+  background: rgba(15, 118, 99, 0.06);
+  border: 1px solid rgba(15, 118, 99, 0.12);
+}
+
+.conversation-create textarea {
+  min-height: 92px;
+}
+
+.active-filter {
+  background: rgba(240, 143, 82, 0.16);
+  color: #a35120;
 }
 
 .thread-list {
@@ -1024,7 +1085,14 @@ table {
   gap: 0.8rem;
 }
 
+.conversation-list {
+  max-height: 430px;
+  overflow: auto;
+  padding-inline-end: 0.15rem;
+}
+
 .thread-item {
+  width: 100%;
   border: 1px solid var(--border);
   background: var(--surface-muted);
   padding: 1rem;
@@ -1034,37 +1102,69 @@ table {
 
 .thread-item-top {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
 }
 
 .thread-unread-badge {
+  min-width: 1.75rem;
   margin-top: 0 !important;
-  padding: 0.18rem 0.6rem;
+  padding: 0.18rem 0.55rem;
   border-radius: 999px;
-  background: rgba(240, 143, 82, 0.16);
+  background: rgba(240, 143, 82, 0.2);
   color: #a35120 !important;
   font-size: 0.78rem !important;
   font-weight: 800;
+  text-align: center;
   white-space: nowrap;
 }
 
+.thread-preview {
+  color: var(--text) !important;
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.thread-meta,
+.thread-time {
+  font-size: 0.82rem !important;
+}
+
 .thread-item.active {
-  background: linear-gradient(135deg, rgba(15, 118, 99, 0.1), rgba(240, 143, 82, 0.16));
-  border-color: rgba(15, 118, 99, 0.16);
+  background: linear-gradient(135deg, rgba(15, 118, 99, 0.12), rgba(240, 143, 82, 0.16));
+  border-color: rgba(15, 118, 99, 0.35);
+  box-shadow: inset 4px 0 0 rgba(15, 118, 99, 0.42);
 }
 
 .chat-panel {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 1rem;
 }
 
+.chat-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.status-success {
+  background: rgba(15, 118, 99, 0.1);
+  color: var(--accent);
+}
+
 .message-stream {
+  align-content: start;
   display: grid;
   gap: 0.85rem;
-  max-height: 420px;
+  min-height: 0;
+  max-height: 520px;
   overflow: auto;
+  padding-inline-end: 0.2rem;
 }
 
 .message-bubble {
@@ -1156,6 +1256,38 @@ table {
     grid-template-columns: 1fr;
   }
 
+  .login-shell {
+    min-height: auto;
+    overflow: visible;
+    display: grid;
+  }
+
+  .login-panel.hero {
+    width: 100%;
+    height: auto;
+    min-height: 620px;
+    justify-self: stretch;
+  }
+
+  .form-panel {
+    position: relative;
+    inset: auto;
+    width: min(92%, 440px);
+    min-width: 0;
+    min-height: auto;
+    margin: -32rem auto 0;
+    transform: none;
+    border-radius: 34px;
+  }
+
+  .login-brand-panel,
+  .login-brand-panel {
+    inset-block-start: 4rem;
+    inset-inline: 2rem;
+    width: auto;
+    transform: none;
+  }
+
   .field-span-2 {
     grid-column: span 1;
   }
@@ -1187,5 +1319,10 @@ table {
   .login-panel.hero,
   .form-panel {
     padding: 1rem;
+  }
+
+  .login-panel.hero {
+    padding: 0;
+    min-height: 600px;
   }
 }

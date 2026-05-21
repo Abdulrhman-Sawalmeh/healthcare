@@ -275,7 +275,6 @@ export function CenterDoctorsPage() {
               <label className="field">
                 <span>البريد الإلكتروني</span>
                 <input
-                  type="email"
                   value={form.email}
                   onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
                 />

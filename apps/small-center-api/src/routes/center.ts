@@ -4,6 +4,12 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { authorize, authorizeWorkspace, authenticate } from "../middleware/auth";
 import {
+  createCenterDoctor,
+  deleteCenterDoctor,
+  getCenterDoctorsBundle,
+  updateCenterDoctor
+} from "../services/doctor-accounts";
+import {
   enqueueOutgoingNotification,
   processOutgoingNotifications,
   syncCenterVisitsNow
@@ -89,10 +95,80 @@ const labResultSchema = z.object({
   resultValue: z.string().optional()
 });
 
+const doctorAccountSchema = z.object({
+  username: z.string().optional(),
+  password: z.string().optional(),
+  fullName: z.string().min(2),
+  phone: z.string().min(5),
+  email: z.string().optional(),
+  nationalId: z.string().min(4),
+  gender: z.enum(["MALE", "FEMALE", "OTHER", "PREFER_NOT_TO_SAY"]),
+  specialization: z.string().min(2),
+  yearsExperience: z.coerce.number().int().min(0),
+  licenseNumber: z.string().min(2),
+  qualification: z.string().optional(),
+  shiftDays: z.array(z.enum(["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"])).default([]),
+  shiftStartTime: z.string().optional(),
+  shiftEndTime: z.string().optional(),
+  consultationRoom: z.string().optional(),
+  hireDate: z.coerce.date().optional(),
+  bio: z.string().optional(),
+  notes: z.string().optional(),
+  isActive: z.boolean().default(true)
+});
+
 router.get(
   "/dashboard",
   asyncHandler(async (req, res) => {
     res.json(await getCenterWorkspaceData(getCenterId(req), req.auth!.role));
+  })
+);
+
+router.get(
+  "/doctors",
+  authorize("CENTER_MANAGER"),
+  asyncHandler(async (req, res) => {
+    res.json(await getCenterDoctorsBundle(getCenterId(req)));
+  })
+);
+
+router.post(
+  "/doctors",
+  authorize("CENTER_MANAGER"),
+  asyncHandler(async (req, res) => {
+    const payload = doctorAccountSchema.extend({ password: z.string().min(6) }).parse(req.body);
+    res.status(201).json(
+      await createCenterDoctor({
+        ...payload,
+        centerId: getCenterId(req),
+        username: payload.username ?? "",
+        createdById: Number(req.auth!.sub)
+      })
+    );
+  })
+);
+
+router.put(
+  "/doctors/:doctorId",
+  authorize("CENTER_MANAGER"),
+  asyncHandler(async (req, res) => {
+    const payload = doctorAccountSchema.parse(req.body);
+    res.json(
+      await updateCenterDoctor({
+        ...payload,
+        centerId: getCenterId(req),
+        doctorId: Number(req.params.doctorId),
+        username: payload.username ?? ""
+      })
+    );
+  })
+);
+
+router.delete(
+  "/doctors/:doctorId",
+  authorize("CENTER_MANAGER"),
+  asyncHandler(async (req, res) => {
+    res.json(await deleteCenterDoctor(getCenterId(req), Number(req.params.doctorId)));
   })
 );
 

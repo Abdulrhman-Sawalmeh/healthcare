@@ -2,25 +2,43 @@ const labelMap: Record<string, string> = {
   CENTRAL_ADMIN: "مدير النظام المركزي",
   CENTER_MANAGER: "مدير المركز",
   DOCTOR: "طبيب",
+  PATIENT: "مريض",
   RECEPTIONIST: "موظف الاستقبال",
   LAB_TECH: "فني مختبر",
   PHARMACIST: "صيدلي",
   NURSE: "ممرض",
   central: "النظام المركزي",
   center: "المركز الصحي",
+  legacy: "بوابة المريض",
   CLINIC: "مركز صحي صغير",
   MEDICAL_CENTER: "مركز صحي متوسط",
   HOSPITAL: "مستشفى",
+  SCHEDULED: "مجدول",
+  CONFIRMED: "مؤكد",
+  COMPLETED: "مكتمل",
+  CANCELLED: "ملغى",
+  NO_SHOW: "لم يحضر",
   CONSULTATION: "استشارة",
-  EMERGENCY: "حالة طارئة",
+  CLINIC_VISIT: "زيارة عيادية",
+  TELEMEDICINE: "استشارة عن بعد",
   FOLLOW_UP: "متابعة",
+  EMERGENCY: "حالة طارئة",
   LAB: "مختبر",
   MALE: "ذكر",
   FEMALE: "أنثى",
   OTHER: "آخر",
   PREFER_NOT_TO_SAY: "يفضل عدم الإفصاح",
+  HIGH: "مرتفع",
   NORMAL: "عادي",
   URGENT: "عاجل",
+  APPOINTMENT: "موعد",
+  REFERRAL: "إحالة",
+  MESSAGE: "رسالة",
+  PAYMENT: "دفعة",
+  SYSTEM: "تنبيه نظامي",
+  MONTHLY: "شهري",
+  QUARTERLY: "ربع سنوي",
+  YEARLY: "سنوي",
   pending: "قيد الانتظار",
   processing: "قيد المعالجة",
   syncing: "قيد المزامنة",
@@ -44,7 +62,7 @@ const labelMap: Record<string, string> = {
   found: "تم العثور عليه",
   not_found: "غير موجود",
   unpaid: "غير مدفوع",
-  partial: "مدفوع جزئيًا",
+  partial: "مدفوع جزئياً",
   paid: "مدفوع",
   REQUEST_NEW_VISITS: "طلب مزامنة الزيارات الجديدة",
   REQUEST_PATIENT_DATA: "طلب بيانات مريض",
@@ -59,18 +77,9 @@ const labelMap: Record<string, string> = {
   FROM_CENTER: "من المركز إلى النظام المركزي"
 };
 
-const dateTimeFormatter = new Intl.DateTimeFormat("ar-EG", {
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit"
-});
-
-const dateFormatter = new Intl.DateTimeFormat("ar-EG", {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit"
-});
+function currentLocale() {
+  return document.documentElement.lang === "en" ? "en-US" : "ar-EG";
+}
 
 export function toArabicLabel(value?: string | null) {
   if (!value) {
@@ -92,7 +101,12 @@ export function formatDateTime(value?: string | Date | null) {
     return "-";
   }
 
-  return dateTimeFormatter.format(new Date(value));
+  return new Intl.DateTimeFormat(currentLocale(), {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(value));
 }
 
 export function formatDate(value?: string | Date | null) {
@@ -100,7 +114,11 @@ export function formatDate(value?: string | Date | null) {
     return "-";
   }
 
-  return dateFormatter.format(new Date(value));
+  return new Intl.DateTimeFormat(currentLocale(), {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date(value));
 }
 
 export function joinMeta(parts: Array<string | undefined | null>) {

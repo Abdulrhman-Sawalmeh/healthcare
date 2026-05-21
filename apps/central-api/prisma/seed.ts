@@ -1,11 +1,10 @@
-﻿import bcrypt from "bcryptjs";
-import { subDays } from "date-fns";
+﻿import { subDays } from "date-fns";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
 async function main() {
-  const passwordHash = await bcrypt.hash("Password123!", 10);
+  const passwordHash = "Password123!";
 
   await prisma.notificationProcessingLog.deleteMany();
   await prisma.centerSystemAlert.deleteMany();
@@ -55,23 +54,23 @@ async function main() {
 
   const centralAdmin = await prisma.centralUser.create({
     data: {
-      username: "central.admin",
+      username: "سلمى.أبوسمرة&001",
       passwordHash,
       fullName: "د. سلمى أبو سمرة",
-      email: "central.admin@shifaa.local"
+      email: "سلمى.أبوسمرة&001@central.org"
     }
   });
 
   const clinic = await prisma.centralCenter.create({
     data: {
       centerCode: "C001",
-      centerName: "مركز الحسين الصحي الصغير",
+      centerName: "مركز الحسين الصحي",
       centerType: "CLINIC",
       region: "القدس",
       city: "القدس",
       address: "شارع البلدية 12",
       phone: "+970-2-555-1000",
-      email: "contact@hussein-center.local",
+      email: "contact&001@مركزالحسينالصحي.org",
       latitude: 31.7683,
       longitude: 35.2137,
       specialties: ["طب الأسرة", "الطب العام"],
@@ -84,13 +83,13 @@ async function main() {
   const medicalCenter = await prisma.centralCenter.create({
     data: {
       centerCode: "M002",
-      centerName: "مركز الشفاء الصحي المتوسط",
+      centerName: "مركز الشفاء الصحي",
       centerType: "MEDICAL_CENTER",
       region: "رام الله والبيرة",
       city: "رام الله",
       address: "شارع المنطقة الصحية 45",
       phone: "+970-2-555-2200",
-      email: "info@shifaa-medical.local",
+      email: "contact&001@مركزالشفاءالصحي.org",
       latitude: 31.8996,
       longitude: 35.2042,
       specialties: ["أمراض القلب", "الأشعة التشخيصية", "الطب الباطني"],
@@ -159,24 +158,24 @@ async function main() {
   const managerClinic = await prisma.centerUserAccount.create({
     data: {
       centerId: clinic.id,
-      username: "manager.hussein",
+      username: "رنا.درويش&001",
       passwordHash,
       fullName: "رنا درويش",
       role: "CENTER_MANAGER",
       phone: "+970-59-111-0001",
-      email: "manager.hussein@shifaa.local"
+      email: "رنا.درويش&001@مركزالحسينالصحي.org"
     }
   });
 
   const doctorClinic = await prisma.centerUserAccount.create({
     data: {
       centerId: clinic.id,
-      username: "doctor.hussein",
+      username: "عمر.ناصر&001",
       passwordHash,
       fullName: "د. عمر ناصر",
       role: "DOCTOR",
       phone: "+970-59-111-0002",
-      email: "doctor.hussein@shifaa.local",
+      email: "عمر.ناصر&001@مركزالحسينالصحي.org",
       createdById: managerClinic.id
     }
   });
@@ -184,12 +183,12 @@ async function main() {
   const receptionistClinic = await prisma.centerUserAccount.create({
     data: {
       centerId: clinic.id,
-      username: "reception.hussein",
+      username: "هبة.قاسم&001",
       passwordHash,
       fullName: "هبة قاسم",
       role: "RECEPTIONIST",
       phone: "+970-59-111-0003",
-      email: "reception.hussein@shifaa.local",
+      email: "هبة.قاسم&001@مركزالحسينالصحي.org",
       createdById: managerClinic.id
     }
   });
@@ -197,24 +196,24 @@ async function main() {
   const managerMedical = await prisma.centerUserAccount.create({
     data: {
       centerId: medicalCenter.id,
-      username: "manager.shifaa",
+      username: "مها.خلف&001",
       passwordHash,
       fullName: "مها خلف",
       role: "CENTER_MANAGER",
       phone: "+970-59-222-0001",
-      email: "manager.shifaa@shifaa.local"
+      email: "مها.خلف&001@مركزالشفاءالصحي.org"
     }
   });
 
   const doctorMedical = await prisma.centerUserAccount.create({
     data: {
       centerId: medicalCenter.id,
-      username: "doctor.shifaa",
+      username: "لينا.حداد&001",
       passwordHash,
       fullName: "د. لينا حداد",
       role: "DOCTOR",
       phone: "+970-59-222-0002",
-      email: "doctor.shifaa@shifaa.local",
+      email: "لينا.حداد&001@مركزالشفاءالصحي.org",
       createdById: managerMedical.id
     }
   });
@@ -222,12 +221,12 @@ async function main() {
   const receptionistMedical = await prisma.centerUserAccount.create({
     data: {
       centerId: medicalCenter.id,
-      username: "reception.shifaa",
+      username: "سامر.عودة&001",
       passwordHash,
       fullName: "سامر عودة",
       role: "RECEPTIONIST",
       phone: "+970-59-222-0003",
-      email: "reception.shifaa@shifaa.local",
+      email: "سامر.عودة&001@مركزالشفاءالصحي.org",
       createdById: managerMedical.id
     }
   });
@@ -563,7 +562,7 @@ async function main() {
       maxDistanceKm: 120,
       status: "ACCEPTED",
       selectedCenterReason:
-        "تم اختيار مركز الشفاء الصحي المتوسط بناءً على توفر اختصاص أمراض القلب وقرب المسافة وملاءمة متوسط الانتظار.",
+        "تم اختيار مركز الشفاء الصحي بناءً على توفر اختصاص أمراض القلب وقرب المسافة وملاءمة متوسط الانتظار.",
       estimatedWaitTimeMinutes: 32,
       requestedAt: subDays(new Date(), 3),
       respondedAt: subDays(new Date(), 3),
@@ -696,24 +695,24 @@ async function main() {
 
   const legacyClinic = await prisma.center.create({
     data: {
-      name: "مركز الحسين الصحي الصغير",
+      name: "مركز الحسين الصحي",
       code: "C001",
       city: "القدس",
       address: "شارع البلدية 12",
       phone: "+970-2-555-1000",
-      email: "portal.hussein@shifaa.local",
+      email: "portal&001@مركزالحسينالصحي.org",
       description: "بوابة مرضى للرعاية الأولية ومتابعة الأمراض المزمنة."
     }
   });
 
   const legacyMedicalCenter = await prisma.center.create({
     data: {
-      name: "مركز الشفاء الصحي المتوسط",
+      name: "مركز الشفاء الصحي",
       code: "M002",
       city: "رام الله",
       address: "شارع المنطقة الصحية 45",
       phone: "+970-2-555-2200",
-      email: "portal.shifaa@shifaa.local",
+      email: "portal&001@مركزالشفاءالصحي.org",
       description: "بوابة مرضى للمواعيد التخصصية والمتابعة القلبية والمحادثات الطبية."
     }
   });
@@ -757,7 +756,7 @@ async function main() {
   ] = await Promise.all([
     prisma.user.create({
       data: {
-        email: "doctor.hussein.portal@shifaa.local",
+        email: "عمر.ناصر&001@مركزالحسينالصحي.org",
         passwordHash,
         fullName: "د. عمر ناصر",
         phone: "+970-59-111-1001",
@@ -766,7 +765,7 @@ async function main() {
     }),
     prisma.user.create({
       data: {
-        email: "doctor.shifaa.portal@shifaa.local",
+        email: "لينا.حداد&001@مركزالشفاءالصحي.org",
         passwordHash,
         fullName: "د. لينا حداد",
         phone: "+970-59-222-1001",
@@ -775,7 +774,7 @@ async function main() {
     }),
     prisma.user.create({
       data: {
-        email: "doctor.batiny@shifaa.local",
+        email: "سامر.عودة&002@مركزالشفاءالصحي.org",
         passwordHash,
         fullName: "د. سامر عودة",
         phone: "+970-59-222-1002",
@@ -784,7 +783,7 @@ async function main() {
     }),
     prisma.user.create({
       data: {
-        email: "402010101@patients.local",
+        email: "يوسف.درويش&001@مركزالحسينالصحي.org",
         passwordHash,
         fullName: "يوسف درويش",
         phone: "0599000101",
@@ -793,7 +792,7 @@ async function main() {
     }),
     prisma.user.create({
       data: {
-        email: "402010102@patients.local",
+        email: "مريم.خليل&001@مركزالشفاءالصحي.org",
         passwordHash,
         fullName: "مريم خليل",
         phone: "0599000201",
@@ -1070,7 +1069,7 @@ async function main() {
       {
         userId: clinicPatientUser.id,
         title: "تحديث حالة الإحالة",
-        body: "تم قبول إحالتك إلى عيادة أمراض القلب في مركز الشفاء الصحي المتوسط.",
+        body: "تم قبول إحالتك إلى عيادة أمراض القلب في مركز الشفاء الصحي.",
         type: "REFERRAL"
       },
       {
@@ -1101,15 +1100,15 @@ async function main() {
   });
 
   console.log("اكتملت زراعة البيانات التجريبية للشبكة الصحية العربية.");
-  console.log("مدير النظام المركزي: central.admin / Password123!");
-  console.log("مدير المركز الصحي الصغير: manager.hussein / Password123!");
-  console.log("طبيب المركز الصحي الصغير: doctor.hussein / Password123!");
-  console.log("موظف استقبال المركز الصحي الصغير: reception.hussein / Password123!");
-  console.log("مدير المركز الصحي المتوسط: manager.shifaa / Password123!");
-  console.log("طبيب المركز الصحي المتوسط: doctor.shifaa / Password123!");
-  console.log("موظف استقبال المركز الصحي المتوسط: reception.shifaa / Password123!");
-  console.log("مريض المركز الصحي الصغير: 402010101 / Password123!");
-  console.log("مريضة المركز الصحي المتوسط: 402010102 / Password123!");
+  console.log("مدير النظام المركزي: سلمى.أبوسمرة&001 / Password123!");
+  console.log("مدير المركز الصحي: رنا.درويش&001 / Password123!");
+  console.log("طبيب المركز الصحي: عمر.ناصر&001 / Password123!");
+  console.log("موظف استقبال المركز الصحي: هبة.قاسم&001 / Password123!");
+  console.log("مدير المركز الصحي: مها.خلف&001 / Password123!");
+  console.log("طبيب المركز الصحي: لينا.حداد&001 / Password123!");
+  console.log("موظف استقبال المركز الصحي: سامر.عودة&001 / Password123!");
+  console.log("مريض المركز الصحي: يوسف.درويش&001 / Password123!");
+  console.log("مريضة المركز الصحي: مريم.خليل&001 / Password123!");
 }
 
 main()

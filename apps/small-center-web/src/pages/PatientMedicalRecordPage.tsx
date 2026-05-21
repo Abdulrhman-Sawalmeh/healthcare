@@ -33,7 +33,8 @@ function escapeHtml(value: string) {
 }
 
 function formatAmount(amountInCents: number, currency: string) {
-  return `${(amountInCents / 100).toFixed(2)} ${currency}`;
+  const currencyLabel = currency === "ILS" ? "شيكل" : currency;
+  return `${(amountInCents / 100).toFixed(2)} ${currencyLabel}`;
 }
 
 function openPrintableReport(record: PortalMedicalRecord, report: PortalAppointmentRecord) {
@@ -828,7 +829,7 @@ export function PatientMedicalRecordPage() {
         </div>
         <div className="form-grid">
           <label className="field">
-            <span>Subscription plan</span>
+            <span>خطة الاشتراك</span>
             <select value={selectedPlanId} onChange={(event) => setSelectedPlanId(event.target.value)}>
               {plans.map((plan) => (
                 <option key={plan.id} value={plan.id}>
@@ -838,11 +839,11 @@ export function PatientMedicalRecordPage() {
             </select>
           </label>
           <label className="field">
-            <span>Secure payment token</span>
+            <span>رمز الدفع الآمن</span>
             <input
               value={paymentToken}
               onChange={(event) => setPaymentToken(event.target.value)}
-              placeholder="SECURE-CARD-TOKEN"
+              placeholder="رمز بطاقة آمن"
               type="password"
             />
           </label>
@@ -853,7 +854,7 @@ export function PatientMedicalRecordPage() {
               type="button"
               onClick={handleActivateSubscription}
             >
-              {activatingSubscription ? "Activating..." : "Activate subscription by secure payment"}
+              {activatingSubscription ? "جاري التفعيل..." : "تفعيل الاشتراك عبر دفع آمن"}
             </button>
           </div>
           {subscriptionMessage ? <div className="field-span-2 inline-note">{subscriptionMessage}</div> : null}

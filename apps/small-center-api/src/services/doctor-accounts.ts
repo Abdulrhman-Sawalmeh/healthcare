@@ -1,8 +1,8 @@
-import bcrypt from "bcryptjs";
 import { CenterUserRole, Gender, Prisma } from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
+import { buildCenterEmailAddress, buildPersonUsername } from "../utils/account-identifiers";
 
 interface BaseCenterDoctorInput {
   centerId: number;
@@ -260,19 +260,39 @@ export async function getCenterDoctorsBundle(centerId: number) {
 export async function createCenterDoctor(input: CreateCenterDoctorInput) {
   try {
     return await prisma.$transaction(async (tx) => {
-      const passwordHash = await bcrypt.hash(input.password, 10);
+      const passwordHash = input.password;
+      const center = await tx.centralCenter.findUnique({
+        where: { id: input.centerId },
+        select: {
+          centerName: true
+        }
+      });
+
+      if (!center) {
+        throw new AppError("Unable to find the requested center.", 404);
+      }
+
+      const doctorSerial =
+        (await tx.centerUserAccount.count({
+          where: {
+            centerId: input.centerId,
+            role: CenterUserRole.DOCTOR
+          }
+        })) + 1;
+      const username = buildPersonUsername(input.fullName, doctorSerial);
+      const email = buildCenterEmailAddress(username, center.centerName);
 
       await syncCenterSpecialties(tx, input.centerId, input.specialization);
 
       const doctor = await tx.centerUserAccount.create({
         data: {
           centerId: input.centerId,
-          username: input.username,
+          username,
           passwordHash,
           fullName: input.fullName,
           role: CenterUserRole.DOCTOR,
           phone: input.phone,
-          email: input.email,
+          email,
           isActive: input.isActive,
           createdById: input.createdById,
           doctorProfile: {
@@ -309,7 +329,7 @@ export async function createCenterDoctor(input: CreateCenterDoctorInput) {
       return {
         success: true,
         credentials: {
-          username: input.username,
+          username,
           temporaryPassword: input.password
         },
         doctor: mapDoctorRecord(doctor)
@@ -349,18 +369,29 @@ export async function updateCenterDoctor(input: UpdateCenterDoctorInput) {
 
       await syncCenterSpecialties(tx, input.centerId, input.specialization);
 
-      const passwordHash = input.password ? await bcrypt.hash(input.password, 10) : undefined;
+      const passwordHash = input.password || undefined;
+      const center = await tx.centralCenter.findUnique({
+        where: { id: input.centerId },
+        select: {
+          centerName: true
+        }
+      });
+      const existingSerial = existingDoctor.username.includes("&")
+        ? existingDoctor.username.split("&").pop()
+        : String(existingDoctor.id);
+      const username = buildPersonUsername(input.fullName, existingSerial ?? existingDoctor.id);
+      const email = center ? buildCenterEmailAddress(username, center.centerName) : input.email;
 
       const doctor = await tx.centerUserAccount.update({
         where: {
           id: existingDoctor.id
         },
         data: {
-          username: input.username,
+          username,
           passwordHash,
           fullName: input.fullName,
           phone: input.phone,
-          email: input.email,
+          email,
           isActive: input.isActive,
           doctorProfile: {
             upsert: {

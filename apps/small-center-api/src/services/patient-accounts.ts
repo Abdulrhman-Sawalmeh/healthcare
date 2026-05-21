@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
+import { buildCenterEmailAddress, buildPersonUsername } from "../utils/account-identifiers";
 
 const passwordAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
@@ -38,10 +39,6 @@ export interface SyncPatientPortalProfileInput {
 
 function normalizeNationalId(value: string) {
   return value.replace(/\s+/g, "");
-}
-
-function buildPatientEmail(nationalId: string) {
-  return `${normalizeNationalId(nationalId)}@patients.local`;
 }
 
 function buildMedicalRecordNumber(centerCode: string) {
@@ -130,8 +127,7 @@ async function sendPatientPasswordSms(input: {
 export async function ensurePatientPortalAccount(
   input: EnsurePatientPortalAccountInput
 ): Promise<EnsurePatientPortalAccountResult> {
-  const loginIdentifier = normalizeNationalId(input.nationalId);
-  const patientEmail = buildPatientEmail(loginIdentifier);
+  const normalizedNationalId = normalizeNationalId(input.nationalId);
   const temporaryPassword = generateTemporaryPassword();
   const passwordHash = temporaryPassword;
 
@@ -158,13 +154,22 @@ export async function ensurePatientPortalAccount(
     throw new AppError("تعذر العثور على بوابة المرضى الخاصة بهذا المركز.", 404);
   }
 
+  const patientSerial =
+    (await prisma.patientProfile.count({
+      where: {
+        centerId: legacyCenter.id
+      }
+    })) + 1;
+  const loginIdentifier = buildPersonUsername(input.fullName, patientSerial);
+  const patientEmail = buildCenterEmailAddress(loginIdentifier, center.centerName);
+
   const existingUser = await prisma.user.findFirst({
     where: {
       role: UserRole.PATIENT,
       OR: [
         {
           email: {
-            startsWith: `${loginIdentifier}@`
+            startsWith: `${normalizedNationalId}@`
           }
         },
         {
@@ -276,7 +281,8 @@ export async function syncPatientPortalProfile(input: SyncPatientPortalProfileIn
   const center = await prisma.centralCenter.findUnique({
     where: { id: input.centerId },
     select: {
-      centerCode: true
+      centerCode: true,
+      centerName: true
     }
   });
 
@@ -332,7 +338,9 @@ export async function syncPatientPortalProfile(input: SyncPatientPortalProfileIn
   await prisma.user.update({
     where: { id: existingUser.id },
     data: {
-      email: normalizedNationalId ? buildPatientEmail(normalizedNationalId) : existingUser.email,
+      email: normalizedNationalId
+        ? buildCenterEmailAddress(buildPersonUsername(input.fullName, normalizedNationalId.slice(-6)), center.centerName)
+        : existingUser.email,
       fullName: input.fullName,
       phone: input.primaryPhone
     }

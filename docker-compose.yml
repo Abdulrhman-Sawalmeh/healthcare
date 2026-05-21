@@ -6,11 +6,11 @@ services:
     container_name: healthcare-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: healthcare_ecosystem
+      POSTGRES_DB: healthcare_ecosystem_ar
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: "123456"
     ports:
-      - "5433:5433"
+      - "5433:5432"
     volumes:
       - healthcare-postgres-data:/var/lib/postgresql/data
 

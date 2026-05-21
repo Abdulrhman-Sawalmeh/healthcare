@@ -79,7 +79,7 @@ export function DashboardPage() {
   }
 
   function formatCurrency(value: number) {
-    return `${Math.round(value).toLocaleString()} ILS`;
+    return `${Math.round(value).toLocaleString()} شيكل`;
   }
 
   if (loading) {
@@ -371,66 +371,68 @@ export function DashboardPage() {
         />
       </div>
 
+      {user?.role !== "DOCTOR" ? (
       <SectionCard
-        title="Financial administration"
-        subtitle="Invoices, budget utilization, and operating cost categories for this center."
+        title="الإدارة المالية"
+        subtitle="الفواتير، واستخدام الميزانية، وتصنيف تكاليف التشغيل داخل هذا المركز."
       >
         <div className="metric-grid">
           <MetricCard
-            label="Invoice total"
+            label="إجمالي الفواتير"
             value={formatCurrency(centerData.financial.invoices.total)}
-            helper={`${centerData.financial.invoices.count} invoices recorded for patients.`}
+            helper={`${centerData.financial.invoices.count} فواتير مسجلة للمرضى.`}
           />
           <MetricCard
-            label="Outstanding invoices"
+            label="الفواتير غير المسددة"
             value={formatCurrency(centerData.financial.invoices.outstanding)}
-            helper={`${centerData.financial.invoices.unpaidCount} invoices still unpaid or partially paid.`}
+            helper={`${centerData.financial.invoices.unpaidCount} فواتير ما زالت غير مدفوعة أو مدفوعة جزئيًا.`}
           />
           <MetricCard
-            label="Budget used"
+            label="المستخدم من الميزانية"
             value={`${centerData.financial.budget.utilizationRate}%`}
-            helper={`${formatCurrency(centerData.financial.budget.projectedSpend)} projected from ${formatCurrency(centerData.financial.budget.monthlyLimit)} monthly budget.`}
+            helper={`${formatCurrency(centerData.financial.budget.projectedSpend)} إنفاق متوقع من ميزانية شهرية قدرها ${formatCurrency(centerData.financial.budget.monthlyLimit)}.`}
           />
           <MetricCard
-            label="Budget remaining"
+            label="المتبقي من الميزانية"
             value={formatCurrency(centerData.financial.budget.remaining)}
-            helper="Remaining budget after staff, medications, equipment, and patient load."
+            helper="المبلغ المتبقي بعد احتساب الموظفين والأدوية والمعدات وحمل المرضى."
           />
         </div>
         <div className="table-shell">
           <table className="data-table">
             <thead>
               <tr>
-                <th>Category</th>
-                <th>Amount</th>
-                <th>Budget basis</th>
+                <th>الفئة</th>
+                <th>المبلغ</th>
+                <th>أساس الاحتساب</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td>Staff</td>
+                <td>الموظفون</td>
                 <td>{formatCurrency(centerData.financial.expenses.staff)}</td>
-                <td>Active administrators, doctors, reception, and care team users.</td>
+                <td>الحسابات النشطة للإدارة والأطباء والاستقبال وفريق الرعاية.</td>
               </tr>
               <tr>
-                <td>Medications</td>
+                <td>الأدوية</td>
                 <td>{formatCurrency(centerData.financial.expenses.medications)}</td>
-                <td>Current pharmacy stock value.</td>
+                <td>قيمة مخزون الصيدلية الحالي.</td>
               </tr>
               <tr>
-                <td>Equipment</td>
+                <td>المعدات</td>
                 <td>{formatCurrency(centerData.financial.expenses.equipment)}</td>
-                <td>Lab catalog and available operating room capacity.</td>
+                <td>كتالوج المختبر والطاقة المتاحة لغرف العمليات.</td>
               </tr>
               <tr>
-                <td>Patients</td>
+                <td>المرضى</td>
                 <td>{formatCurrency(centerData.financial.expenses.patients)}</td>
-                <td>Operational cost estimate for the local patient load.</td>
+                <td>تقدير تكلفة التشغيل لحمل المرضى المحلي.</td>
               </tr>
             </tbody>
           </table>
         </div>
       </SectionCard>
+      ) : null}
 
       <div className="split-grid">
         <SectionCard

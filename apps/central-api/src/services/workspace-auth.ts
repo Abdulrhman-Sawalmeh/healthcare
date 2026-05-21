@@ -1,5 +1,3 @@
-import bcrypt from "bcryptjs";
-
 import { systemConfig, isWorkspaceAllowed } from "../config/system";
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
@@ -106,7 +104,7 @@ export async function loginWorkspaceUser(identifier: string, password: string) {
       }
     });
 
-    if (centralUser && centralUser.isActive && (await bcrypt.compare(password, centralUser.passwordHash))) {
+    if (centralUser && centralUser.isActive && password === centralUser.passwordHash) {
       await prisma.centralUser.update({
         where: { id: centralUser.id },
         data: { lastLogin: new Date() }
@@ -136,7 +134,7 @@ export async function loginWorkspaceUser(identifier: string, password: string) {
       }
     });
 
-    if (centerUser && centerUser.isActive && (await bcrypt.compare(password, centerUser.passwordHash))) {
+    if (centerUser && centerUser.isActive && password === centerUser.passwordHash) {
       await prisma.centerUserAccount.update({
         where: { id: centerUser.id },
         data: { lastLogin: new Date() }

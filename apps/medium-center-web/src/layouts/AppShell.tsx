@@ -60,7 +60,7 @@ function summarizeUnreadMessages(threads: PortalThreadRecord[], currentRole: str
 
 export function AppShell() {
   const { user, loading, logout } = useAuth();
-  const { isEnglish, t, toggleLanguage } = useLanguage();
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const [alerts, setAlerts] = useState<SidebarAlert[]>([]);
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
@@ -322,21 +322,6 @@ export function AppShell() {
     (item) => item.roles.includes(user.role) && systemConfig.allowedRoutes.includes(item.to)
   );
   const isPatientPortal = user.role === "PATIENT" || user.workspace === "legacy";
-  const navLabels: Record<string, string> = {
-    "/": "Dashboard",
-    "/appointments": "Appointments",
-    "/medical-record": "Health record",
-    "/doctors": "Doctors",
-    "/messages": "Medical chat",
-    "/centers": "Centers",
-    "/patients": "Patients",
-    "/visits": "Visits",
-    "/referrals": "Referrals",
-    "/master-data": "Master data",
-    "/reports": "Reports",
-    "/notifications": "Notifications"
-  };
-
   return (
     <div className="app-shell">
       <div className="background-veil background-veil-a" />
@@ -370,7 +355,7 @@ export function AppShell() {
               end={item.to === "/"}
               className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
             >
-              <span>{isEnglish ? navLabels[item.to] ?? item.label : item.label}</span>
+              <span>{item.label}</span>
               {item.to === "/messages" && unreadMessageCount > 0 ? (
                 <span className="nav-badge">{unreadMessageCount}</span>
               ) : null}
@@ -404,8 +389,8 @@ export function AppShell() {
             className={showNotifications ? "topbar-icon-button active" : "topbar-icon-button"}
             type="button"
             aria-expanded={showNotifications}
-            aria-label={t("ÝÊÍ ÓÌá ÇáÅÔÚÇÑÇÊ", "Open notification log")}
-            title={t("ÓÌá ÇáÅÔÚÇÑÇÊ", "Notification log")}
+            aria-label={t("ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½", "Open notification log")}
+            title={t("ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½", "Notification log")}
             onClick={() => setShowNotifications((current) => !current)}
           >
             <span className="sidebar-icon-mark">!</span>
@@ -423,9 +408,6 @@ export function AppShell() {
                   : user.center?.name}
             </h2>
           </div>
-          <button className="ghost-button language-toggle" type="button" title={t("ØªØºÙŠÙŠØ± Ø§Ù„Ù„ØºØ©", "Change language")} onClick={toggleLanguage}>
-            {isEnglish ? "Ø§Ù„Ø¹Ø±Ø¨ÙŠØ©" : "English"}
-          </button>
           <div className="topbar-chip">
             <span>{user.username}</span>
           </div>

@@ -1,28 +1,55 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
 import { MasterDataBundle } from "../types";
 
+type MedicineRecord = MasterDataBundle["medicines"][number];
+type LabTestRecord = MasterDataBundle["labTests"][number];
+type SpecialtyRecord = MasterDataBundle["specialties"][number];
+
+const defaultMedicineForm = {
+  genericName: "",
+  brandName: "",
+  category: "",
+  unit: "",
+  isCritical: false
+};
+
+const defaultLabForm = {
+  testName: "",
+  category: "",
+  normalRange: ""
+};
+
+const defaultSpecialtyForm = {
+  specialtyName: "",
+  description: ""
+};
+
+function includesTerm(values: Array<string | number | boolean | null | undefined>, term: string) {
+  const normalizedTerm = term.trim().toLowerCase();
+
+  if (!normalizedTerm) {
+    return true;
+  }
+
+  return values.some((value) => String(value ?? "").toLowerCase().includes(normalizedTerm));
+}
+
 export function MasterDataPage() {
   const [data, setData] = useState<MasterDataBundle | null>(null);
   const [error, setError] = useState("");
-  const [medicineForm, setMedicineForm] = useState({
-    genericName: "",
-    brandName: "",
-    category: "",
-    unit: "",
-    isCritical: false
-  });
-  const [labForm, setLabForm] = useState({
-    testName: "",
-    category: "",
-    normalRange: ""
-  });
-  const [specialtyForm, setSpecialtyForm] = useState({
-    specialtyName: "",
-    description: ""
-  });
+  const [successMessage, setSuccessMessage] = useState("");
+  const [medicineQuery, setMedicineQuery] = useState("");
+  const [labQuery, setLabQuery] = useState("");
+  const [specialtyQuery, setSpecialtyQuery] = useState("");
+  const [editingMedicineId, setEditingMedicineId] = useState<number | null>(null);
+  const [editingLabId, setEditingLabId] = useState<number | null>(null);
+  const [editingSpecialtyId, setEditingSpecialtyId] = useState<number | null>(null);
+  const [medicineForm, setMedicineForm] = useState(defaultMedicineForm);
+  const [labForm, setLabForm] = useState(defaultLabForm);
+  const [specialtyForm, setSpecialtyForm] = useState(defaultSpecialtyForm);
 
   async function loadData() {
     const payload = await apiRequest<MasterDataBundle>("/central/master-data");
@@ -33,222 +60,442 @@ export function MasterDataPage() {
     loadData().catch((cause: Error) => setError(cause.message));
   }, []);
 
+  const filteredMedicines = useMemo(
+    () =>
+      data?.medicines.filter((medicine) =>
+        includesTerm(
+          [medicine.genericName, medicine.brandName, medicine.category, medicine.unit, medicine.isCritical],
+          medicineQuery
+        )
+      ) ?? [],
+    [data, medicineQuery]
+  );
+
+  const filteredLabTests = useMemo(
+    () =>
+      data?.labTests.filter((test) => includesTerm([test.testName, test.category, test.normalRange], labQuery)) ?? [],
+    [data, labQuery]
+  );
+
+  const filteredSpecialties = useMemo(
+    () =>
+      data?.specialties.filter((specialty) =>
+        includesTerm([specialty.specialtyName, specialty.description], specialtyQuery)
+      ) ?? [],
+    [data, specialtyQuery]
+  );
+
+  function resetMedicineForm() {
+    setMedicineForm(defaultMedicineForm);
+    setEditingMedicineId(null);
+  }
+
+  function resetLabForm() {
+    setLabForm(defaultLabForm);
+    setEditingLabId(null);
+  }
+
+  function resetSpecialtyForm() {
+    setSpecialtyForm(defaultSpecialtyForm);
+    setEditingSpecialtyId(null);
+  }
+
+  function editMedicine(medicine: MedicineRecord) {
+    setEditingMedicineId(medicine.id);
+    setMedicineForm({
+      genericName: medicine.genericName,
+      brandName: medicine.brandName,
+      category: medicine.category,
+      unit: medicine.unit,
+      isCritical: medicine.isCritical
+    });
+    setError("");
+    setSuccessMessage("");
+  }
+
+  function editLabTest(test: LabTestRecord) {
+    setEditingLabId(test.id);
+    setLabForm({
+      testName: test.testName,
+      category: test.category,
+      normalRange: test.normalRange ?? ""
+    });
+    setError("");
+    setSuccessMessage("");
+  }
+
+  function editSpecialty(specialty: SpecialtyRecord) {
+    setEditingSpecialtyId(specialty.id);
+    setSpecialtyForm({
+      specialtyName: specialty.specialtyName,
+      description: specialty.description ?? ""
+    });
+    setError("");
+    setSuccessMessage("");
+  }
+
   async function handleMedicineSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    const path = editingMedicineId
+      ? `/central/master-data/medicines/${editingMedicineId}`
+      : "/central/master-data/medicines";
+    const method = editingMedicineId ? "PUT" : "POST";
+
     try {
-      await apiRequest("/central/master-data/medicines", {
-        method: "POST",
+      await apiRequest(path, {
+        method,
         body: JSON.stringify(medicineForm)
       });
-
-      setMedicineForm({
-        genericName: "",
-        brandName: "",
-        category: "",
-        unit: "",
-        isCritical: false
-      });
+      resetMedicineForm();
       await loadData();
       setError("");
+      setSuccessMessage(editingMedicineId ? "تم تحديث الدواء وطلب المزامنة." : "تمت إضافة الدواء وطلب المزامنة.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذر نشر الدواء.");
+      setError(cause instanceof Error ? cause.message : "تعذر حفظ الدواء.");
     }
   }
 
   async function handleLabSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    const path = editingLabId ? `/central/master-data/lab-tests/${editingLabId}` : "/central/master-data/lab-tests";
+    const method = editingLabId ? "PUT" : "POST";
+
     try {
-      await apiRequest("/central/master-data/lab-tests", {
-        method: "POST",
+      await apiRequest(path, {
+        method,
         body: JSON.stringify(labForm)
       });
-
-      setLabForm({
-        testName: "",
-        category: "",
-        normalRange: ""
-      });
+      resetLabForm();
       await loadData();
       setError("");
+      setSuccessMessage(editingLabId ? "تم تحديث فحص المختبر وطلب المزامنة." : "تمت إضافة فحص المختبر وطلب المزامنة.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذر نشر الفحص المخبري.");
+      setError(cause instanceof Error ? cause.message : "تعذر حفظ فحص المختبر.");
     }
   }
 
   async function handleSpecialtySubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    const path = editingSpecialtyId
+      ? `/central/master-data/specialties/${editingSpecialtyId}`
+      : "/central/master-data/specialties";
+    const method = editingSpecialtyId ? "PUT" : "POST";
+
     try {
-      await apiRequest("/central/master-data/specialties", {
-        method: "POST",
+      await apiRequest(path, {
+        method,
         body: JSON.stringify(specialtyForm)
       });
-
-      setSpecialtyForm({
-        specialtyName: "",
-        description: ""
-      });
+      resetSpecialtyForm();
       await loadData();
       setError("");
+      setSuccessMessage(
+        editingSpecialtyId ? "تم تحديث التخصص وطلب المزامنة." : "تمت إضافة التخصص وطلب المزامنة."
+      );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذر نشر التخصص الطبي.");
+      setError(cause instanceof Error ? cause.message : "تعذر حفظ التخصص.");
+    }
+  }
+
+  async function deleteMasterDataRecord(path: string, label: string) {
+    if (!window.confirm(`هل تريد حذف ${label}؟ سيتم حذفه من قاعدة البيانات.`)) {
+      return;
+    }
+
+    try {
+      await apiRequest(path, { method: "DELETE" });
+      await loadData();
+      setError("");
+      setSuccessMessage(`تم حذف ${label} وطلب المزامنة.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : `تعذر حذف ${label}.`);
     }
   }
 
   if (!data) {
-    return <div className="empty-state">جارٍ تحميل البيانات المرجعية...</div>;
+    return <div className="empty-state">جاري تحميل البيانات المرجعية...</div>;
   }
 
   return (
     <div className="page-stack">
+      <div className="hero-strip">
+        <div>
+          <p className="eyebrow">سجلات النظام التفاعلية</p>
+          <h1>إدارة قوائم الشبكة</h1>
+        </div>
+        <p className="muted">
+          ابحث داخل القوائم الكبيرة، وأضف سجلات جديدة، وعدّل الأدوية والفحوصات والتخصصات الحالية.
+          تُحفظ التحديثات عبر واجهة API وتُرسل للمراكز ضمن طلبات المزامنة.
+        </p>
+      </div>
+
+      {successMessage ? <div className="credentials-banner">{successMessage}</div> : null}
       {error ? <div className="error-banner">{error}</div> : null}
 
       <div className="split-grid">
-        <SectionCard title="القائمة المرجعية للأدوية" subtitle="يتم توزيعها على جميع المراكز المتصلة.">
+        <SectionCard
+          title={editingMedicineId ? "تعديل دواء" : "إضافة دواء"}
+          subtitle="سجلات الأدوية المستخدمة في مخزون الصيدلية والوصفات والبيانات المرجعية المتزامنة."
+        >
           <form className="form-grid" onSubmit={handleMedicineSubmit}>
             <label className="field">
               <span>الاسم العلمي</span>
               <input
                 value={medicineForm.genericName}
-                onChange={(event) =>
-                  setMedicineForm((current) => ({ ...current, genericName: event.target.value }))
-                }
+                onChange={(event) => setMedicineForm((current) => ({ ...current, genericName: event.target.value }))}
+                required
               />
             </label>
             <label className="field">
               <span>الاسم التجاري</span>
               <input
                 value={medicineForm.brandName}
-                onChange={(event) =>
-                  setMedicineForm((current) => ({ ...current, brandName: event.target.value }))
-                }
+                onChange={(event) => setMedicineForm((current) => ({ ...current, brandName: event.target.value }))}
+                required
               />
             </label>
             <label className="field">
-              <span>التصنيف العلاجي</span>
+              <span>الفئة</span>
               <input
                 value={medicineForm.category}
-                onChange={(event) =>
-                  setMedicineForm((current) => ({ ...current, category: event.target.value }))
-                }
+                onChange={(event) => setMedicineForm((current) => ({ ...current, category: event.target.value }))}
+                required
               />
             </label>
             <label className="field">
               <span>الوحدة</span>
               <input
                 value={medicineForm.unit}
-                onChange={(event) =>
-                  setMedicineForm((current) => ({ ...current, unit: event.target.value }))
-                }
+                onChange={(event) => setMedicineForm((current) => ({ ...current, unit: event.target.value }))}
+                required
               />
             </label>
             <label className="field checkbox-field field-span-2">
               <input
                 checked={medicineForm.isCritical}
-                onChange={(event) =>
-                  setMedicineForm((current) => ({ ...current, isCritical: event.target.checked }))
-                }
+                onChange={(event) => setMedicineForm((current) => ({ ...current, isCritical: event.target.checked }))}
                 type="checkbox"
               />
-              <span>دواء حرج عالي الأهمية</span>
+              <span>دواء حرج</span>
             </label>
-            <button className="primary-button field-span-2" type="submit">
-              نشر الدواء
-            </button>
+            <div className="field-span-2 button-row">
+              <button className="primary-button" type="submit">
+                {editingMedicineId ? "حفظ تعديلات الدواء" : "إضافة الدواء"}
+              </button>
+              {editingMedicineId ? (
+                <button className="ghost-button" type="button" onClick={resetMedicineForm}>
+                  إلغاء التعديل
+                </button>
+              ) : null}
+            </div>
           </form>
-
-          <div className="stack-list">
-            {data.medicines.map((medicine) => (
-              <article className="stack-item" key={medicine.id}>
-                <strong>{medicine.genericName}</strong>
-                <p className="muted">
-                  {medicine.brandName} • {medicine.category} • الإصدار {medicine.version}
-                </p>
-              </article>
-            ))}
-          </div>
         </SectionCard>
 
-        <SectionCard title="القائمة المرجعية للفحوصات" subtitle="دليل تشخيصي موحد على مستوى الشبكة.">
+        <SectionCard
+          title={editingLabId ? "تعديل فحص مختبر" : "إضافة فحص مختبر"}
+          subtitle="سجلات الفحوصات التشخيصية المستخدمة في طلبات المختبر وتقارير النتائج."
+        >
           <form className="form-grid" onSubmit={handleLabSubmit}>
             <label className="field">
               <span>اسم الفحص</span>
               <input
                 value={labForm.testName}
-                onChange={(event) =>
-                  setLabForm((current) => ({ ...current, testName: event.target.value }))
-                }
+                onChange={(event) => setLabForm((current) => ({ ...current, testName: event.target.value }))}
+                required
               />
             </label>
             <label className="field">
-              <span>التصنيف</span>
+              <span>الفئة</span>
               <input
                 value={labForm.category}
-                onChange={(event) =>
-                  setLabForm((current) => ({ ...current, category: event.target.value }))
-                }
+                onChange={(event) => setLabForm((current) => ({ ...current, category: event.target.value }))}
+                required
               />
             </label>
             <label className="field field-span-2">
-              <span>المدى المرجعي الطبيعي</span>
+              <span>المدى الطبيعي</span>
               <input
                 value={labForm.normalRange}
-                onChange={(event) =>
-                  setLabForm((current) => ({ ...current, normalRange: event.target.value }))
-                }
+                onChange={(event) => setLabForm((current) => ({ ...current, normalRange: event.target.value }))}
               />
             </label>
-            <button className="primary-button field-span-2" type="submit">
-              نشر الفحص
-            </button>
+            <div className="field-span-2 button-row">
+              <button className="primary-button" type="submit">
+                {editingLabId ? "حفظ تعديلات الفحص" : "إضافة الفحص"}
+              </button>
+              {editingLabId ? (
+                <button className="ghost-button" type="button" onClick={resetLabForm}>
+                  إلغاء التعديل
+                </button>
+              ) : null}
+            </div>
           </form>
-
-          <div className="stack-list">
-            {data.labTests.map((test) => (
-              <article className="stack-item" key={test.id}>
-                <strong>{test.testName}</strong>
-                <p className="muted">
-                  {test.category} • {test.normalRange || "لا يوجد مدى مرجعي"} • الإصدار {test.version}
-                </p>
-              </article>
-            ))}
-          </div>
         </SectionCard>
       </div>
 
-      <SectionCard title="قائمة التخصصات الطبية" subtitle="التخصصات القياسية التي يستخدمها محرك الإحالة الذكي.">
+      <SectionCard title="قائمة الأدوية" subtitle={`يتم عرض ${filteredMedicines.length} من أصل ${data.medicines.length} سجل.`}>
+        <form className="toolbar" onSubmit={(event) => event.preventDefault()}>
+          <input
+            className="toolbar-input"
+            value={medicineQuery}
+            onChange={(event) => setMedicineQuery(event.target.value)}
+            placeholder="ابحث باسم الدواء أو الاسم التجاري أو الفئة أو الوحدة أو حالة الأهمية"
+          />
+        </form>
+        <div className="table-shell">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>الاسم العلمي</th>
+                <th>الاسم التجاري</th>
+                <th>الفئة</th>
+                <th>الوحدة</th>
+                <th>الحالة</th>
+                <th>الإصدار</th>
+                <th>الإجراءات</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredMedicines.map((medicine) => (
+                <tr key={medicine.id}>
+                  <td>{medicine.genericName}</td>
+                  <td>{medicine.brandName}</td>
+                  <td>{medicine.category}</td>
+                  <td>{medicine.unit}</td>
+                  <td>{medicine.isCritical ? "حرج" : "عادي"}</td>
+                  <td>{medicine.version}</td>
+                  <td>
+                    <div className="button-row">
+                      <button className="ghost-button" type="button" onClick={() => editMedicine(medicine)}>
+                        تعديل
+                      </button>
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={() => deleteMasterDataRecord(`/central/master-data/medicines/${medicine.id}`, medicine.genericName)}
+                      >
+                        حذف
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="قائمة فحوصات المختبر" subtitle={`يتم عرض ${filteredLabTests.length} من أصل ${data.labTests.length} سجل.`}>
+        <form className="toolbar" onSubmit={(event) => event.preventDefault()}>
+          <input
+            className="toolbar-input"
+            value={labQuery}
+            onChange={(event) => setLabQuery(event.target.value)}
+            placeholder="ابحث باسم الفحص أو الفئة أو المدى الطبيعي"
+          />
+        </form>
+        <div className="table-shell">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>الفحص</th>
+                <th>الفئة</th>
+                <th>المدى الطبيعي</th>
+                <th>الإصدار</th>
+                <th>الإجراءات</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredLabTests.map((test) => (
+                <tr key={test.id}>
+                  <td>{test.testName}</td>
+                  <td>{test.category}</td>
+                  <td>{test.normalRange || "-"}</td>
+                  <td>{test.version}</td>
+                  <td>
+                    <div className="button-row">
+                      <button className="ghost-button" type="button" onClick={() => editLabTest(test)}>
+                        تعديل
+                      </button>
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={() => deleteMasterDataRecord(`/central/master-data/lab-tests/${test.id}`, test.testName)}
+                      >
+                        حذف
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title={editingSpecialtyId ? "تعديل تخصص" : "إضافة تخصص"}
+        subtitle="التخصصات المستخدمة في الإحالات وسجلات الأطباء ومطابقة المواعيد."
+      >
         <form className="form-grid" onSubmit={handleSpecialtySubmit}>
           <label className="field">
             <span>اسم التخصص</span>
             <input
               value={specialtyForm.specialtyName}
-              onChange={(event) =>
-                setSpecialtyForm((current) => ({ ...current, specialtyName: event.target.value }))
-              }
+              onChange={(event) => setSpecialtyForm((current) => ({ ...current, specialtyName: event.target.value }))}
+              required
             />
           </label>
           <label className="field field-span-2">
             <span>الوصف</span>
             <textarea
               value={specialtyForm.description}
-              onChange={(event) =>
-                setSpecialtyForm((current) => ({ ...current, description: event.target.value }))
-              }
+              onChange={(event) => setSpecialtyForm((current) => ({ ...current, description: event.target.value }))}
             />
           </label>
-          <button className="primary-button field-span-2" type="submit">
-            نشر التخصص
-          </button>
+          <div className="field-span-2 button-row">
+            <button className="primary-button" type="submit">
+              {editingSpecialtyId ? "حفظ تعديلات التخصص" : "إضافة التخصص"}
+            </button>
+            {editingSpecialtyId ? (
+              <button className="ghost-button" type="button" onClick={resetSpecialtyForm}>
+                إلغاء التعديل
+              </button>
+            ) : null}
+          </div>
         </form>
 
+        <form className="toolbar" onSubmit={(event) => event.preventDefault()}>
+          <input
+            className="toolbar-input"
+            value={specialtyQuery}
+            onChange={(event) => setSpecialtyQuery(event.target.value)}
+            placeholder="ابحث في التخصصات"
+          />
+        </form>
         <div className="card-grid">
-          {data.specialties.map((specialty) => (
-            <article className="profile-tile" key={specialty.id}>
-              <p className="eyebrow">تخصص طبي</p>
+          {filteredSpecialties.map((specialty) => (
+            <article className="profile-tile interactive-card" key={specialty.id}>
+              <p className="eyebrow">تخصص</p>
               <h3>{specialty.specialtyName}</h3>
               <p className="muted">{specialty.description || "لا يوجد وصف مسجل."}</p>
+              <div className="button-row">
+                <button className="ghost-button" type="button" onClick={() => editSpecialty(specialty)}>
+                  تعديل
+                </button>
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() =>
+                    deleteMasterDataRecord(`/central/master-data/specialties/${specialty.id}`, specialty.specialtyName)
+                  }
+                >
+                  حذف
+                </button>
+              </div>
             </article>
           ))}
         </div>

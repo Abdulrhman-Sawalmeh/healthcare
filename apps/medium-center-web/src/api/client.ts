@@ -1,6 +1,6 @@
 import { systemConfig } from "../config/system";
 
-const API_URL = import.meta.env.VITE_API_URL ?? systemConfig.apiUrl;
+const API_URL = import.meta.env.VITE_MEDIUM_API_URL ?? systemConfig.apiUrl;
 const STORAGE_KEY = systemConfig.storageKey;
 
 let accessToken = localStorage.getItem(STORAGE_KEY);
@@ -40,7 +40,7 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   });
 
   if (!response.ok) {
-        let message = "تعذر تنفيذ الطلب.";
+    let message = "تعذر تنفيذ الطلب.";
 
     try {
       const payload = (await response.json()) as { message?: string };

@@ -1,7 +1,6 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 
 import { apiRequest } from "../api/client";
-import { ClinicalWorkflowScene3D } from "../components/ClinicalWorkflowScene3D";
 import { SectionCard } from "../components/SectionCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAuth } from "../context/AuthContext";
@@ -488,7 +487,6 @@ export function VisitsPage() {
           </p>
         </div>
         <div className="workflow-scene-shell">
-          <ClinicalWorkflowScene3D variant="visits" />
           <div className="scene-stat-row" aria-hidden="true">
             <span>{visitStats.pendingVisits} قيد المزامنة</span>
             <span>{visitStats.reports} تقرير</span>

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { apiRequest } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { useLanguage } from "../context/LanguageContext";
 import { formatDateTime } from "../lib/arabic";
 import { PortalDoctorRecord, PortalSummary, PortalThreadRecord } from "../types";
 
@@ -25,14 +26,46 @@ function getUnreadMessagesCount(thread: PortalThreadRecord, currentRole: string 
   ).length;
 }
 
+function getLatestMessage(thread: PortalThreadRecord) {
+  return thread.messages[thread.messages.length - 1] ?? null;
+}
+
+function getPartnerName(thread: PortalThreadRecord, isDoctorView: boolean) {
+  return isDoctorView ? thread.patient.fullName : thread.doctor.fullName;
+}
+
+function threadMatchesQuery(thread: PortalThreadRecord, isDoctorView: boolean, query: string) {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const latestMessage = getLatestMessage(thread);
+  const searchableText = [
+    getPartnerName(thread, isDoctorView),
+    thread.patient.fullName,
+    thread.doctor.fullName,
+    thread.doctor.departmentName,
+    latestMessage?.content ?? ""
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return searchableText.includes(normalizedQuery);
+}
+
 export function PatientMessagesPage() {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const [threads, setThreads] = useState<PortalThreadRecord[]>([]);
   const [doctors, setDoctors] = useState<PortalDoctorRecord[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string>("");
   const [newDoctorId, setNewDoctorId] = useState("");
   const [newThreadMessage, setNewThreadMessage] = useState("");
   const [replyMessage, setReplyMessage] = useState("");
+  const [conversationQuery, setConversationQuery] = useState("");
+  const [showUnreadOnly, setShowUnreadOnly] = useState(false);
   const [patientSubscriptionActive, setPatientSubscriptionActive] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -54,16 +87,17 @@ export function PatientMessagesPage() {
         isDoctorView ? Promise.resolve(null) : apiRequest<PortalSummary>("/portal/summary")
       ]);
 
-      setThreads(sortThreads(threadsPayload));
+      const sortedThreads = sortThreads(threadsPayload);
+      setThreads(sortedThreads);
       setDoctors(doctorsPayload);
       setPatientSubscriptionActive(isDoctorView || (summaryPayload?.stats.activeSubscriptions ?? 0) > 0);
       setSelectedThreadId((currentThreadId) =>
-        currentThreadId && threadsPayload.some((thread) => thread.id === currentThreadId)
+        currentThreadId && sortedThreads.some((thread) => thread.id === currentThreadId)
           ? currentThreadId
-          : (threadsPayload[0]?.id ?? "")
+          : (sortedThreads[0]?.id ?? "")
       );
     } catch {
-      setError("تعذر تحميل المحادثات الطبية.");
+      setError(t("تعذر تحميل المحادثات الطبية.", "Could not load medical conversations."));
     } finally {
       setLoading(false);
     }
@@ -98,6 +132,19 @@ export function PatientMessagesPage() {
       threads.filter((thread) => getUnreadMessagesCount(thread, user?.role) > 0).length,
     [threads, user?.role]
   );
+  const visibleThreads = useMemo(
+    () =>
+      threads.filter((thread) => {
+        const unreadCount = getUnreadMessagesCount(thread, user?.role);
+
+        if (showUnreadOnly && unreadCount === 0) {
+          return false;
+        }
+
+        return threadMatchesQuery(thread, isDoctorView, conversationQuery);
+      }),
+    [conversationQuery, isDoctorView, showUnreadOnly, threads, user?.role]
+  );
 
   useEffect(() => {
     if (!selectedThread || !user) {
@@ -124,7 +171,7 @@ export function PatientMessagesPage() {
     event.preventDefault();
 
     if (!newDoctorId || !newThreadMessage.trim()) {
-      setError("يرجى اختيار الطبيب وكتابة الرسالة الافتتاحية.");
+      setError(t("يرجى اختيار الطبيب وكتابة الرسالة الافتتاحية.", "Choose a doctor and write the first message."));
       return;
     }
 
@@ -139,11 +186,13 @@ export function PatientMessagesPage() {
 
       setNewDoctorId("");
       setNewThreadMessage("");
+      setConversationQuery("");
+      setShowUnreadOnly(false);
       setSelectedThreadId(thread.id);
       setThreads((currentThreads) => upsertThread(currentThreads, thread));
       setError("");
     } catch {
-      setError("تعذر إنشاء المحادثة الجديدة.");
+      setError(t("تعذر إنشاء المحادثة الجديدة.", "Could not create the new conversation."));
     }
   }
 
@@ -169,30 +218,30 @@ export function PatientMessagesPage() {
       setThreads((currentThreads) => upsertThread(currentThreads, updatedThread));
       setError("");
     } catch {
-      setError("تعذر إرسال الرسالة الحالية.");
+      setError(t("تعذر إرسال الرسالة الحالية.", "Could not send the current message."));
     }
   }
 
   if (loading) {
-    return <div className="screen-center">جارٍ تحميل المحادثات الطبية...</div>;
+    return <div className="screen-center">{t("جاري تحميل المحادثات الطبية...", "Loading medical conversations...")}</div>;
   }
 
   return (
     <div className="page-stack">
       <section className="hero-strip">
         <div>
-          <p className="eyebrow">{isDoctorView ? "رسائل المرضى" : "المحادثة مع الطبيب"}</p>
-          <h1>{isDoctorView ? "صندوق رسائل الطبيب" : "تواصل آمن ومنظم"}</h1>
+          <p className="eyebrow">{isDoctorView ? t("محادثات المرضى", "Patient conversations") : t("المحادثة مع الطبيب", "Doctor conversations")}</p>
+          <h1>{isDoctorView ? t("صندوق محادثات الطبيب", "Doctor chat inbox") : t("رسائل المتابعة الطبية", "Medical follow-up messages")}</h1>
           <p className="muted">
             {isDoctorView
-              ? "تظهر هنا جميع محادثات المرضى المرتبطة بك، مع تنبيه واضح للرسائل الجديدة."
-              : "ابدأ محادثة جديدة أو أكمل النقاش مع طبيبك حول الخطة العلاجية والمواعيد القادمة."}
+              ? t("اختر أي مريض من القائمة، راجع آخر الرسائل، ورد من نفس الصفحة.", "Choose any patient conversation, review the latest messages, and reply from the same page.")
+              : t("اختر محادثة مفتوحة أو ابدأ محادثة جديدة مع طبيبك عند تفعيل الاشتراك.", "Choose an open conversation or start a new one with your doctor when your subscription is active.")}
           </p>
         </div>
         <div className="tile-stats">
-          <span>المحادثات: {threads.length}</span>
-          <span>الرسائل غير المقروءة: {unreadMessagesCount}</span>
-          {isDoctorView ? <span>محادثات بانتظار رد: {unreadThreadsCount}</span> : null}
+          <span>{t("المحادثات", "Conversations")}: {threads.length}</span>
+          <span>{t("الرسائل غير المقروءة", "Unread messages")}: {unreadMessagesCount}</span>
+          <span>{t("محادثات تحتاج متابعة", "Needs follow-up")}: {unreadThreadsCount}</span>
         </div>
       </section>
 
@@ -202,109 +251,137 @@ export function PatientMessagesPage() {
         <section className="section-card">
           <div className="section-header">
             <div>
-              <p className="eyebrow">Subscription required</p>
-              <h3>Activate follow-up support to contact your doctor</h3>
+              <p className="eyebrow">{t("الاشتراك مطلوب", "Subscription required")}</p>
+              <h3>{t("فعّل دعم المتابعة للتواصل مع طبيبك", "Activate follow-up support to contact your doctor")}</h3>
             </div>
           </div>
           <p className="muted">
-            You can still view health history and prescriptions. Doctor messaging is included with
-            the subscription for reminders and follow-up care.
+            {t(
+              "يمكنك الاستمرار في عرض السجل الصحي والوصفات. التواصل مع الطبيب متاح ضمن الاشتراك للمتابعة والتذكيرات.",
+              "You can still view health history and prescriptions. Doctor messaging is included with the subscription for follow-up and reminders."
+            )}
           </p>
         </section>
       ) : null}
 
-      {!isDoctorView && patientSubscriptionActive ? (
-        <section className="section-card">
+      <section className="messages-layout chat-workspace">
+        <aside className="section-card conversation-sidebar">
           <div className="section-header">
             <div>
-              <p className="eyebrow">بدء محادثة</p>
-              <h3>رسالة افتتاحية للطبيب</h3>
+              <p className="eyebrow">{t("القائمة", "Inbox")}</p>
+              <h3>{isDoctorView ? t("محادثات المرضى", "Patient chats") : t("محادثاتي", "My chats")}</h3>
             </div>
           </div>
-          <form className="form-grid" onSubmit={handleCreateThread}>
-            <label className="field">
-              <span>اختيار الطبيب</span>
-              <select value={newDoctorId} onChange={(event) => setNewDoctorId(event.target.value)}>
-                <option value="">اختر الطبيب</option>
-                {doctors.map((doctor) => (
-                  <option key={doctor.id} value={doctor.id}>
-                    {doctor.fullName} - {doctor.specialization}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field field-span-2">
-              <span>الرسالة الافتتاحية</span>
-              <textarea
-                value={newThreadMessage}
-                onChange={(event) => setNewThreadMessage(event.target.value)}
+
+          <div className="conversation-tools">
+            <label className="field compact-field">
+              <span>{t("بحث", "Search")}</span>
+              <input
+                value={conversationQuery}
+                onChange={(event) => setConversationQuery(event.target.value)}
+                placeholder={isDoctorView ? t("اسم المريض أو آخر رسالة", "Patient name or latest message") : t("اسم الطبيب أو آخر رسالة", "Doctor name or latest message")}
               />
             </label>
-            <div className="field-span-2">
-              <button className="primary-button" type="submit">
-                فتح المحادثة
-              </button>
-            </div>
-          </form>
-        </section>
-      ) : null}
-
-      <section className="messages-layout">
-        <article className="section-card">
-          <div className="section-header">
-            <div>
-              <p className="eyebrow">المحادثات الحالية</p>
-              <h3>{isDoctorView ? "اختر محادثة مع مريض" : "اختيار المحادثة"}</h3>
-            </div>
+            <button
+              className={showUnreadOnly ? "ghost-button active-filter" : "ghost-button"}
+              type="button"
+              onClick={() => setShowUnreadOnly((current) => !current)}
+            >
+              {showUnreadOnly ? t("عرض الكل", "Show all") : t("غير المقروء فقط", "Unread only")}
+            </button>
           </div>
-          <div className="thread-list">
-            {threads.map((thread) => {
-              const latestMessage = thread.messages[thread.messages.length - 1];
+
+          {!isDoctorView && patientSubscriptionActive ? (
+            <form className="conversation-create" onSubmit={handleCreateThread}>
+              <label className="field compact-field">
+                <span>{t("طبيب جديد", "New doctor chat")}</span>
+                <select value={newDoctorId} onChange={(event) => setNewDoctorId(event.target.value)}>
+                  <option value="">{t("اختر الطبيب", "Choose doctor")}</option>
+                  {doctors.map((doctor) => (
+                    <option key={doctor.id} value={doctor.id}>
+                      {doctor.fullName} - {doctor.specialization}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field compact-field">
+                <span>{t("الرسالة الأولى", "First message")}</span>
+                <textarea
+                  value={newThreadMessage}
+                  onChange={(event) => setNewThreadMessage(event.target.value)}
+                  placeholder={t("اكتب سبب التواصل باختصار", "Write the reason for contact")}
+                />
+              </label>
+              <button className="primary-button" type="submit">
+                {t("فتح محادثة", "Open chat")}
+              </button>
+            </form>
+          ) : null}
+
+          <div className="thread-list conversation-list">
+            {visibleThreads.map((thread) => {
+              const latestMessage = getLatestMessage(thread);
               const unreadCount = getUnreadMessagesCount(thread, user?.role);
-              const partnerName = isDoctorView ? thread.patient.fullName : thread.doctor.fullName;
+              const partnerName = getPartnerName(thread, isDoctorView);
 
               return (
                 <button
                   key={thread.id}
                   className={thread.id === selectedThreadId ? "thread-item active" : "thread-item"}
                   type="button"
+                  aria-current={thread.id === selectedThreadId ? "true" : undefined}
                   onClick={() => setSelectedThreadId(thread.id)}
                 >
                   <div className="thread-item-top">
                     <strong>{partnerName}</strong>
                     {unreadCount > 0 ? (
-                      <span className="thread-unread-badge">{unreadCount} جديدة</span>
+                      <span className="thread-unread-badge">{unreadCount}</span>
                     ) : null}
                   </div>
-                  <span>{latestMessage?.content ?? "لا توجد رسائل بعد."}</span>
-                  <span>{latestMessage ? formatDateTime(latestMessage.createdAt) : "-"}</span>
+                  <span className="thread-meta">
+                    {isDoctorView ? t("مريض", "Patient") : thread.doctor.departmentName}
+                  </span>
+                  <span className="thread-preview">{latestMessage?.content ?? t("لا توجد رسائل بعد.", "No messages yet.")}</span>
+                  <span className="thread-time">{latestMessage ? formatDateTime(latestMessage.createdAt) : "-"}</span>
                 </button>
               );
             })}
-            {threads.length === 0 ? (
+            {visibleThreads.length === 0 ? (
               <div className="empty-state compact">
-                {isDoctorView
-                  ? "لا توجد محادثات من المرضى مرتبطة بك بعد."
-                  : "لا توجد محادثات مفتوحة بعد."}
+                {threads.length === 0
+                  ? isDoctorView
+                    ? t("لا توجد محادثات من المرضى مرتبطة بك بعد.", "No patient conversations are linked to you yet.")
+                    : t("لا توجد محادثات مفتوحة بعد.", "No open conversations yet.")
+                  : t("لا توجد محادثات تطابق البحث الحالي.", "No conversations match the current filter.")}
               </div>
             ) : null}
           </div>
-        </article>
+        </aside>
 
         <article className="section-card chat-panel">
-          <div className="section-header">
+          <div className="chat-heading">
             <div>
-              <p className="eyebrow">تفاصيل المحادثة</p>
+              <p className="eyebrow">{t("المحادثة النشطة", "Active conversation")}</p>
               <h3>
                 {selectedThread
-                  ? isDoctorView
-                    ? selectedThread.patient.fullName
-                    : selectedThread.doctor.fullName
+                  ? getPartnerName(selectedThread, isDoctorView)
                   : isDoctorView
-                    ? "اختر محادثة من المرضى"
-                    : "اختر محادثة من القائمة"}
+                    ? t("اختر مريضاً من القائمة", "Choose a patient from the list")
+                    : t("اختر محادثة من القائمة", "Choose a conversation from the list")}
               </h3>
+              {selectedThread ? (
+                <span className="muted">
+                  {isDoctorView
+                    ? t("مريض", "Patient")
+                    : selectedThread.doctor.departmentName}
+                </span>
+              ) : null}
             </div>
+            {selectedThread ? (
+              <span className="status-badge status-success">
+                {t("مفتوحة", "Open")}
+              </span>
+            ) : null}
           </div>
 
           {selectedThread ? (
@@ -333,20 +410,20 @@ export function PatientMessagesPage() {
                   disabled={!isDoctorView && !patientSubscriptionActive}
                   placeholder={
                     isDoctorView
-                      ? "اكتب ردك للمريض هنا..."
-                      : "اكتب رسالتك للطبيب هنا..."
+                      ? t("اكتب ردك للمريض هنا...", "Write your reply to the patient here...")
+                      : t("اكتب رسالتك للطبيب هنا...", "Write your message to the doctor here...")
                   }
                 />
                 <button className="primary-button" disabled={!isDoctorView && !patientSubscriptionActive} type="submit">
-                  إرسال الرسالة
+                  {t("إرسال الرسالة", "Send message")}
                 </button>
               </form>
             </>
           ) : (
             <div className="empty-state compact">
               {isDoctorView
-                ? "اختر محادثة لعرض رسائل المريض والرد عليها."
-                : "اختر محادثة أو ابدأ محادثة جديدة مع طبيبك."}
+                ? t("اختر محادثة لعرض رسائل المريض والرد عليها.", "Choose a conversation to view and reply to patient messages.")
+                : t("اختر محادثة أو ابدأ محادثة جديدة مع طبيبك.", "Choose a conversation or start a new chat with your doctor.")}
             </div>
           )}
         </article>

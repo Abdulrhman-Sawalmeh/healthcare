@@ -28,6 +28,23 @@ const centerConnectionSchema = z.object({
   reason: z.string().max(255).optional()
 });
 
+const centerSchema = z.object({
+  centerCode: z.string().min(2),
+  centerName: z.string().min(2),
+  centerType: z.enum(["CLINIC", "MEDICAL_CENTER", "HOSPITAL"]),
+  region: z.string().min(2),
+  city: z.string().min(2),
+  address: z.string().min(2),
+  phone: z.string().min(5),
+  email: z.string().min(3),
+  latitude: z.coerce.number().default(0),
+  longitude: z.coerce.number().default(0),
+  specialties: z.array(z.string().min(1)).default([]),
+  isConnected: z.boolean().default(true),
+  apiEndpoint: z.string().url().optional().or(z.literal("")),
+  apiKey: z.string().optional()
+});
+
 const medicineSchema = z.object({
   genericName: z.string().min(2),
   brandName: z.string().min(2),
@@ -81,6 +98,56 @@ router.get(
   })
 );
 
+router.post(
+  "/centers",
+  asyncHandler(async (req, res) => {
+    const payload = centerSchema.parse(req.body);
+    const center = await prisma.centralCenter.create({
+      data: {
+        ...payload,
+        apiEndpoint: payload.apiEndpoint || null,
+        apiKey: payload.apiKey || null,
+        connectionSuspendedAt: payload.isConnected ? null : new Date(),
+        suspensionReason: payload.isConnected ? null : "Connection disabled when the center was created."
+      }
+    });
+
+    const centers = await getCentersOverview();
+    res.status(201).json(centers.find((item) => item.id === center.id));
+  })
+);
+
+router.put(
+  "/centers/:centerId",
+  asyncHandler(async (req, res) => {
+    const payload = centerSchema.parse(req.body);
+    const center = await prisma.centralCenter.update({
+      where: { id: Number(req.params.centerId) },
+      data: {
+        ...payload,
+        apiEndpoint: payload.apiEndpoint || null,
+        apiKey: payload.apiKey || null,
+        connectionSuspendedAt: payload.isConnected ? null : new Date(),
+        suspensionReason: payload.isConnected ? null : "Connection disabled from center record editing."
+      }
+    });
+
+    const centers = await getCentersOverview();
+    res.json(centers.find((item) => item.id === center.id));
+  })
+);
+
+router.delete(
+  "/centers/:centerId",
+  asyncHandler(async (req, res) => {
+    await prisma.centralCenter.delete({
+      where: { id: Number(req.params.centerId) }
+    });
+
+    res.json({ success: true });
+  })
+);
+
 router.patch(
   "/centers/:centerId/connection",
   asyncHandler(async (req, res) => {
@@ -96,7 +163,8 @@ router.patch(
       }
     });
 
-    res.json(center);
+    const centers = await getCentersOverview();
+    res.json(centers.find((item) => item.id === center.id));
   })
 );
 
@@ -154,6 +222,18 @@ router.put(
   })
 );
 
+router.delete(
+  "/master-data/medicines/:id",
+  asyncHandler(async (req, res) => {
+    await prisma.masterMedicine.delete({
+      where: { id: Number(req.params.id) }
+    });
+
+    await broadcastMasterDataSync("medicines");
+    res.json({ success: true });
+  })
+);
+
 router.post(
   "/master-data/lab-tests",
   asyncHandler(async (req, res) => {
@@ -186,6 +266,18 @@ router.put(
   })
 );
 
+router.delete(
+  "/master-data/lab-tests/:id",
+  asyncHandler(async (req, res) => {
+    await prisma.masterLabTest.delete({
+      where: { id: Number(req.params.id) }
+    });
+
+    await broadcastMasterDataSync("lab-tests");
+    res.json({ success: true });
+  })
+);
+
 router.post(
   "/master-data/specialties",
   asyncHandler(async (req, res) => {
@@ -210,6 +302,18 @@ router.put(
 
     await broadcastMasterDataSync("specialties");
     res.json(specialty);
+  })
+);
+
+router.delete(
+  "/master-data/specialties/:id",
+  asyncHandler(async (req, res) => {
+    await prisma.masterSpecialty.delete({
+      where: { id: Number(req.params.id) }
+    });
+
+    await broadcastMasterDataSync("specialties");
+    res.json({ success: true });
   })
 );
 
