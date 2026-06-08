@@ -31,50 +31,46 @@ export interface FrontendSystemConfig {
   demoAccounts: DemoAccount[];
 }
 
+const demoPassword = "Password123!";
+
 export const systemConfig: FrontendSystemConfig = {
   kind: "medium_center",
   key: "medium-center-system",
-  name: "المركز الصحي المتوسط",
-  shortName: "نظام المركز الصحي المتوسط",
-  description: "نظام محلي لإدارة الاستقبال والعيادات والزيارات والإحالات مع بوابة مرضى.",
+  name: "المركز الصحي",
+  shortName: "نظام المركز الصحي",
+  description: "نظام محلي لإدارة الاستقبال والعيادات والزيارات والإحالات مع بوابة المرضى.",
   workspace: "center",
-  allowedRoles: ["CENTER_MANAGER", "DOCTOR", "PATIENT", "RECEPTIONIST"],
-  allowedRoutes: ["/", "/appointments", "/medical-record", "/doctors", "/messages", "/patients", "/visits", "/referrals", "/notifications"],
+  allowedRoles: ["CENTER_MANAGER", "DOCTOR", "PATIENT", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"],
+  allowedRoutes: [
+    "/",
+    "/appointments",
+    "/medical-record",
+    "/doctors",
+    "/messages",
+    "/patients",
+    "/visits",
+    "/visit-workflow",
+    "/referrals",
+    "/notifications"
+  ],
   allowedCenterCode: "M002",
   apiUrl: "http://localhost:4100/api",
   storageKey: "healthcare.medium-center-web.token",
-  loginEyebrow: "نظام المركز الصحي المتوسط",
+  loginEyebrow: "نظام المركز الصحي",
   loginTitle: "",
   loginDescription: "",
-  dashboardLabel: "تشغيل المركز المتوسط",
+  dashboardLabel: "تشغيل المركز الصحي",
   feedLabel: "آخر المستجدات",
   feedTitle: "الإشعارات والتنبيهات",
-  accessDeniedMessage: "هذا الحساب لا ينتمي إلى نظام المركز الصحي المتوسط.",
+  accessDeniedMessage: "هذا الحساب لا ينتمي إلى نظام المركز الصحي.",
   demoAccounts: [
-    {
-      group: "المركز الصحي المتوسط",
-      roleLabel: "CENTER_MANAGER",
-      identifier: "medium-manager",
-      password: "Password123!"
-    },
-    {
-      group: "المركز الصحي المتوسط",
-      roleLabel: "DOCTOR",
-      identifier: "medium-doctor",
-      password: "Password123!"
-    },
-    {
-      group: "المركز الصحي المتوسط",
-      roleLabel: "PATIENT",
-      identifier: "medium-patient",
-      password: "Password123!"
-    },
-    {
-      group: "المركز الصحي المتوسط",
-      roleLabel: "RECEPTIONIST",
-      identifier: "medium-receptionist",
-      password: "Password123!"
-    }
+    { group: "المركز الصحي", roleLabel: "مدير المركز", identifier: "medium-manager", password: demoPassword },
+    { group: "المركز الصحي", roleLabel: "طبيب", identifier: "medium-doctor", password: demoPassword },
+    { group: "المركز الصحي", roleLabel: "مريض", identifier: "medium-patient", password: demoPassword },
+    { group: "المركز الصحي", roleLabel: "موظف استقبال", identifier: "medium-receptionist", password: demoPassword },
+    { group: "المركز الصحي", roleLabel: "ممرض", identifier: "medium-nurse", password: demoPassword },
+    { group: "المركز الصحي", roleLabel: "فني مختبر", identifier: "medium-lab", password: demoPassword },
+    { group: "المركز الصحي", roleLabel: "صيدلي", identifier: "medium-pharmacist", password: demoPassword }
   ]
 };
 

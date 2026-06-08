@@ -364,6 +364,29 @@ enum LocalVisitSyncState {
   SYNCED
 }
 
+enum VisitWorkflowStatus {
+  WAITING_DOCTOR
+  IN_TREATMENT
+  READY_TO_UPLOAD
+  UPLOAD_PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum VisitPriority {
+  NORMAL
+  URGENT
+  EMERGENCY
+}
+
+enum VisitUploadStatus {
+  NOT_READY
+  READY
+  QUEUED
+  UPLOADED
+  FAILED
+}
+
 enum InvoiceStatus {
   UNPAID
   PARTIAL
@@ -780,32 +803,41 @@ model LocalPatient {
 }
 
 model LocalVisit {
-  id             Int                @id @default(autoincrement())
-  centerId       Int
-  patientId      Int
-  doctorId       Int?
-  visitDate      DateTime
-  visitTime      String?
-  visitType      LocalVisitType
-  symptoms       String?
-  bloodPressure  String?
-  temperature    Float?
-  heartRate      Int?
-  diagnosis      String
-  notes          String?
-  centralVisitId Int?               @unique
-  syncState      LocalVisitSyncState @default(PENDING)
-  syncedToCentral Boolean           @default(false)
-  syncAttemptCount Int              @default(0)
-  createdAt      DateTime           @default(now())
-  center         CentralCenter      @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  patient        LocalPatient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  doctor         CenterUserAccount? @relation("CenterUserVisits", fields: [doctorId], references: [id], onDelete: SetNull)
-  unifiedVisit   UnifiedVisit?      @relation("LocalVisitSync", fields: [centralVisitId], references: [id], onDelete: SetNull)
-  prescriptions  LocalPrescription[]
-  resultReports  LocalResultReport[]
-  invoice        LocalInvoice?
+  id               Int                 @id @default(autoincrement())
+  centerId         Int
+  patientId        Int
+  doctorId         Int?
+  visitDate        DateTime
+  visitTime        String?
+  visitType        LocalVisitType
+  symptoms         String?
+  bloodPressure    String?
+  temperature      Float?
+  heartRate        Int?
+  diagnosis        String
+  notes            String?
+  priority         VisitPriority       @default(NORMAL)
+  workflowStatus   VisitWorkflowStatus @default(WAITING_DOCTOR)
+  uploadStatus     VisitUploadStatus   @default(NOT_READY)
+  checkedInAt      DateTime            @default(now())
+  completedAt      DateTime?
+  uploadedAt       DateTime?
+  uploadError      String?
+  centralVisitId   Int?                @unique
+  syncState        LocalVisitSyncState @default(PENDING)
+  syncedToCentral  Boolean             @default(false)
+  syncAttemptCount Int                 @default(0)
+  createdAt        DateTime            @default(now())
+  center           CentralCenter       @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  patient          LocalPatient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor           CenterUserAccount?  @relation("CenterUserVisits", fields: [doctorId], references: [id], onDelete: SetNull)
+  unifiedVisit     UnifiedVisit?       @relation("LocalVisitSync", fields: [centralVisitId], references: [id], onDelete: SetNull)
+  prescriptions    LocalPrescription[]
+  resultReports    LocalResultReport[]
+  invoice          LocalInvoice?
 
+  @@index([centerId, workflowStatus, priority, checkedInAt])
+  @@index([centerId, uploadStatus, visitDate])
   @@index([centerId, syncState, visitDate])
   @@index([patientId, visitDate])
 }
@@ -839,14 +871,19 @@ model LocalResultReport {
 }
 
 model LocalPrescription {
-  id           Int       @id @default(autoincrement())
-  visitId       Int
-  medicineName  String
-  dosage        String
-  duration      String
-  instructions  String?
-  dispensed     Boolean   @default(false)
-  visit         LocalVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  id           Int        @id @default(autoincrement())
+  visitId      Int
+  medicineId   Int?
+  medicineName String
+  dosage       String
+  duration     String
+  quantity     Int        @default(1)
+  unitPrice    Float?
+  instructions String?
+  dispensed    Boolean    @default(false)
+  visit        LocalVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([visitId])
 }
 
 model LocalInvoice {

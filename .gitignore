@@ -1,4 +1,5 @@
 node_modules
+apps/mobile/dist-web
 dist
 .turbo
 .expo

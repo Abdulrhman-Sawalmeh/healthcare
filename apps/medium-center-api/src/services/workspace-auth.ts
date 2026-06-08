@@ -5,8 +5,6 @@ import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
 import { AuthWorkspace, hasCenterModules, SessionUser } from "../types/auth";
 
-const hiddenCenterRoles = new Set<CenterUserRole>(["LAB_TECH", "PHARMACIST", "NURSE"]);
-
 type PromptCenterUser = {
   id: number;
   username: string;
@@ -299,7 +297,7 @@ export async function resolveSessionUser(workspace: AuthWorkspace, subjectId: st
       }
     });
 
-    if (!user || !user.isActive || hiddenCenterRoles.has(user.role)) {
+    if (!user || !user.isActive) {
       throw new AppError("Ø­Ø³Ø§Ø¨ Ø§Ù„Ù…Ø±ÙƒØ² ØºÙŠØ± Ù…ØªØ§Ø­.", 401);
     }
 
@@ -368,7 +366,6 @@ export async function loginWorkspaceUser(identifier: string, password: string) {
     if (
       centerUser &&
       centerUser.isActive &&
-      !hiddenCenterRoles.has(centerUser.role) &&
       (await passwordMatches(password, centerUser.passwordHash))
     ) {
       await prisma.centerUserAccount.update({

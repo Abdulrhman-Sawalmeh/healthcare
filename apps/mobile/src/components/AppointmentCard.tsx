@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { AppointmentItem } from "../types";
 import { colors, radii, spacing } from "../theme/tokens";
 
-const dateFormatter = new Intl.DateTimeFormat("en", {
+const dateFormatter = new Intl.DateTimeFormat("ar", {
   month: "short",
   day: "numeric",
   hour: "2-digit",
@@ -25,10 +25,10 @@ export function AppointmentCard({
     <View style={styles.card}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.type}>{appointment.type}</Text>
+          <Text style={styles.type}>{typeLabels[appointment.type] ?? appointment.type}</Text>
           <Text style={styles.title}>{appointment.reason}</Text>
         </View>
-        <Text style={styles.status}>{appointment.status.replaceAll("_", " ")}</Text>
+        <Text style={styles.status}>{statusLabels[appointment.status] ?? appointment.status}</Text>
       </View>
 
       <Text style={styles.meta}>{dateFormatter.format(new Date(appointment.scheduledAt))}</Text>
@@ -44,6 +44,22 @@ export function AppointmentCard({
     </View>
   );
 }
+
+const typeLabels: Record<string, string> = {
+  CLINIC: "زيارة عيادة",
+  FOLLOW_UP: "متابعة",
+  TELEMEDICINE: "استشارة عن بعد",
+  LAB: "فحص مختبر"
+};
+
+const statusLabels: Record<string, string> = {
+  SCHEDULED: "مجدول",
+  CONFIRMED: "مؤكد",
+  IN_PROGRESS: "قيد التنفيذ",
+  COMPLETED: "مكتمل",
+  CANCELLED: "ملغي",
+  NO_SHOW: "لم يحضر"
+};
 
 const styles = StyleSheet.create({
   card: {

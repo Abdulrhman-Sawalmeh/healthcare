@@ -39,7 +39,7 @@ export const systemConfig: FrontendSystemConfig = {
   description: "نظام محلي لإدارة الاستقبال والعيادات والإحالات مع بوابة مرضى.",
   workspace: "center",
   allowedRoles: ["CENTER_MANAGER", "DOCTOR", "PATIENT", "RECEPTIONIST"],
-  allowedRoutes: ["/", "/appointments", "/medical-record", "/doctors", "/messages", "/patients", "/visits", "/referrals", "/notifications"],
+  allowedRoutes: ["/", "/appointments", "/medical-record", "/doctors", "/messages", "/patients", "/visits", "/visit-workflow", "/referrals", "/notifications"],
   allowedCenterCode: "C001",
   apiUrl: "http://localhost:4200/api",
   storageKey: "healthcare.small-center-web.token",

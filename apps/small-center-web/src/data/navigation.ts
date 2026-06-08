@@ -9,64 +9,17 @@ export interface NavigationItem {
 const allCenterRoles: Role[] = ["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"];
 
 export const navigationItems: NavigationItem[] = [
-  {
-    to: "/",
-    label: "لوحة المتابعة",
-    roles: ["CENTRAL_ADMIN", ...allCenterRoles]
-  },
-  {
-    to: "/appointments",
-    label: "حجز موعد",
-    roles: ["PATIENT"]
-  },
-  {
-    to: "/medical-record",
-    label: "السجل الصحي",
-    roles: ["PATIENT"]
-  },
-  {
-    to: "/doctors",
-    label: "الأطباء",
-    roles: ["PATIENT", "CENTER_MANAGER"]
-  },
-  {
-    to: "/messages",
-    label: "المحادثة الطبية",
-    roles: ["PATIENT", "DOCTOR"]
-  },
-  {
-    to: "/centers",
-    label: "المراكز",
-    roles: ["CENTRAL_ADMIN"]
-  },
-  {
-    to: "/patients",
-    label: "المرضى",
-    roles: ["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]
-  },
-  {
-    to: "/visits",
-    label: "الزيارات",
-    roles: ["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]
-  },
-  {
-    to: "/referrals",
-    label: "الإحالات",
-    roles: ["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]
-  },
-  {
-    to: "/master-data",
-    label: "البيانات المرجعية",
-    roles: ["CENTRAL_ADMIN"]
-  },
-  {
-    to: "/reports",
-    label: "التقارير",
-    roles: ["CENTRAL_ADMIN"]
-  },
-  {
-    to: "/notifications",
-    label: "الإشعارات",
-    roles: ["PATIENT", "CENTRAL_ADMIN", ...allCenterRoles]
-  }
+  { to: "/", label: "لوحة المتابعة", roles: ["CENTRAL_ADMIN", ...allCenterRoles] },
+  { to: "/appointments", label: "حجز موعد", roles: ["PATIENT"] },
+  { to: "/medical-record", label: "السجل الصحي", roles: ["PATIENT"] },
+  { to: "/doctors", label: "الأطباء", roles: ["PATIENT", "CENTER_MANAGER"] },
+  { to: "/messages", label: "المحادثة الطبية", roles: ["PATIENT", "DOCTOR"] },
+  { to: "/centers", label: "المراكز", roles: ["CENTRAL_ADMIN"] },
+  { to: "/patients", label: "المرضى", roles: ["CENTRAL_ADMIN", ...allCenterRoles] },
+  { to: "/visits", label: "الزيارات", roles: allCenterRoles },
+  { to: "/visit-workflow", label: "ملفات الزيارة والمتابعة", roles: allCenterRoles },
+  { to: "/referrals", label: "الإحالات", roles: ["CENTRAL_ADMIN", ...allCenterRoles] },
+  { to: "/master-data", label: "البيانات المرجعية", roles: ["CENTRAL_ADMIN"] },
+  { to: "/reports", label: "التقارير", roles: ["CENTRAL_ADMIN"] },
+  { to: "/notifications", label: "الإشعارات", roles: ["PATIENT", "CENTRAL_ADMIN", ...allCenterRoles] }
 ];

@@ -23,7 +23,7 @@ export function AppointmentsScreen() {
     setRefreshing(true);
 
     try {
-      const payload = await apiRequest<AppointmentItem[]>("/appointments");
+      const payload = await apiRequest<AppointmentItem[]>("/portal/appointments");
       setAppointments(payload);
       setError("");
     } catch (cause) {
@@ -38,7 +38,7 @@ export function AppointmentsScreen() {
   }, []);
 
   async function cancelAppointment(appointmentId: string) {
-    await apiRequest(`/appointments/${appointmentId}/status`, {
+    await apiRequest(`/portal/appointments/${appointmentId}/status`, {
       method: "PATCH",
       body: JSON.stringify({
         status: "CANCELLED"
@@ -54,8 +54,8 @@ export function AppointmentsScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadData()} />}
       showsVerticalScrollIndicator={false}
     >
-      <Text style={styles.title}>Appointments</Text>
-      <Text style={styles.subtitle}>Track upcoming visits and keep follow-up on schedule.</Text>
+      <Text style={styles.title}>المواعيد</Text>
+      <Text style={styles.subtitle}>متابعة المواعيد الطبية القادمة وحالتها.</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <View style={styles.stack}>
@@ -65,7 +65,7 @@ export function AppointmentsScreen() {
             appointment={appointment}
             actionLabel={
               user?.role === "PATIENT" && ["SCHEDULED", "CONFIRMED"].includes(appointment.status)
-                ? "Cancel visit"
+                ? "إلغاء الموعد"
                 : undefined
             }
             onPressAction={
@@ -77,7 +77,7 @@ export function AppointmentsScreen() {
         ))}
         {appointments.length === 0 ? (
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>No appointments available right now.</Text>
+            <Text style={styles.emptyText}>لا توجد مواعيد مسجلة حالياً.</Text>
           </View>
         ) : null}
       </View>
@@ -93,11 +93,13 @@ const styles = StyleSheet.create({
   title: {
     color: colors.text,
     fontSize: 28,
-    fontWeight: "800"
+    fontWeight: "800",
+    textAlign: "right"
   },
   subtitle: {
     color: colors.muted,
-    marginBottom: spacing.sm
+    marginBottom: spacing.sm,
+    textAlign: "right"
   },
   stack: {
     gap: spacing.md

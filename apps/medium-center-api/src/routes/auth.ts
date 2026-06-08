@@ -14,7 +14,10 @@ const demoPrefix = "medium";
 const demoRoleAliases: Partial<Record<CenterUserRole, string>> = {
   CENTER_MANAGER: `${demoPrefix}-manager`,
   DOCTOR: `${demoPrefix}-doctor`,
-  RECEPTIONIST: `${demoPrefix}-receptionist`
+  RECEPTIONIST: `${demoPrefix}-receptionist`,
+  LAB_TECH: `${demoPrefix}-lab`,
+  PHARMACIST: `${demoPrefix}-pharmacist`,
+  NURSE: `${demoPrefix}-nurse`
 };
 const demoPatientAlias = `${demoPrefix}-patient`;
 

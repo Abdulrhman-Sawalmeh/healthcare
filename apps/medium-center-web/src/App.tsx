@@ -22,6 +22,7 @@ import { PatientsPage } from "./pages/PatientsPage";
 import { ReferralsPage } from "./pages/ReferralsPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { VisitsPage } from "./pages/VisitsPage";
+import { VisitWorkflowPage } from "./pages/VisitWorkflowPage";
 import { Role } from "./types";
 
 function LoginRoute() {
@@ -177,6 +178,14 @@ export function App() {
               }
             />
           ) : null}
+          <Route
+            path="/visit-workflow"
+            element={
+              <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE", "LAB_TECH", "PHARMACIST"]}>
+                <VisitWorkflowPage />
+              </ProtectedRoute>
+            }
+          />
           {isRouteEnabled("/referrals") ? (
             <Route
               path="/referrals"

@@ -1,232 +1,134 @@
-import { useEffect, useState } from "react";
-import {
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View
-} from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { apiRequest } from "../api/client";
-import { AppointmentCard } from "../components/AppointmentCard";
 import { StatCard } from "../components/StatCard";
 import { useAuth } from "../context/AuthContext";
-import {
-  AppointmentItem,
-  DashboardSummary,
-  NotificationRecord,
-  SubscriptionRecord
-} from "../types";
+import { CenterDashboard, PortalSummary } from "../types";
 import { colors, radii, spacing } from "../theme/tokens";
 
-const currencyFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD"
-});
+const roleLabels = {
+  CENTER_MANAGER: "مدير المركز",
+  DOCTOR: "طبيب",
+  PATIENT: "مريض",
+  RECEPTIONIST: "موظف استقبال",
+  LAB_TECH: "فني مختبر",
+  PHARMACIST: "صيدلي",
+  NURSE: "ممرض"
+};
 
 export function HomeScreen() {
   const { user } = useAuth();
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
-  const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>([]);
-  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  const [centerData, setCenterData] = useState<CenterDashboard | null>(null);
+  const [patientData, setPatientData] = useState<PortalSummary | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
+    if (!user) return;
     setRefreshing(true);
     try {
-      const [summaryPayload, appointmentsPayload, subscriptionsPayload, notificationsPayload] =
-        await Promise.all([
-          apiRequest<DashboardSummary>("/dashboard/summary"),
-          apiRequest<AppointmentItem[]>("/appointments"),
-          apiRequest<SubscriptionRecord[]>("/subscriptions"),
-          apiRequest<NotificationRecord[]>("/notifications")
-        ]);
-
-      setSummary(summaryPayload);
-      setAppointments(appointmentsPayload);
-      setSubscriptions(subscriptionsPayload);
-      setNotifications(notificationsPayload);
+      if (user.role === "PATIENT") {
+        setPatientData(await apiRequest<PortalSummary>("/portal/summary"));
+      } else {
+        setCenterData(await apiRequest<CenterDashboard>("/center/dashboard"));
+      }
       setError("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to load home data.");
+      setError(cause instanceof Error ? cause.message : "تعذر تحميل الصفحة الرئيسية.");
     } finally {
       setRefreshing(false);
     }
-  }
+  }, [user]);
 
-  useEffect(() => {
-    void loadData();
-  }, []);
+  useEffect(() => { void loadData(); }, [loadData]);
 
-  const nextAppointment = appointments[0];
-  const activePlan = subscriptions[0];
+  const stats = user?.role === "PATIENT"
+    ? [
+        { label: "المواعيد القادمة", value: patientData?.stats.upcomingAppointments ?? 0 },
+        { label: "التقارير الطبية", value: patientData?.stats.completedReports ?? 0 },
+        { label: "الإحالات النشطة", value: patientData?.stats.activeReferrals ?? 0 }
+      ]
+    : [
+        { label: "المرضى المحليون", value: centerData?.stats.localPatients ?? 0 },
+        { label: "زيارات غير مرفوعة", value: centerData?.stats.unsyncedVisits ?? 0 },
+        { label: "طلبات المختبر", value: centerData?.stats.labOpenRequests ?? 0 }
+      ];
 
   return (
     <ScrollView
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadData()} />}
       contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadData()} />}
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.hero}>
-        <Text style={styles.heroEyebrow}>{user?.centerName ?? "Mobile workspace"}</Text>
-        <Text style={styles.heroTitle}>Welcome back, {user?.fullName?.split(" ")[0]}</Text>
-        <Text style={styles.heroSubtitle}>
-          Keep care continuity visible from your phone with live appointments, referrals, and alerts.
-        </Text>
+        <Text style={styles.heroRole}>{user ? roleLabels[user.role] : ""}</Text>
+        <Text style={styles.heroTitle}>مرحباً، {user?.fullName}</Text>
+        <Text style={styles.heroSubtitle}>{user?.center?.name ?? "المركز الصحي المتوسط"}</Text>
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statRow}>
-        <StatCard label="Today's visits" value={summary?.metrics.todayAppointments ?? 0} />
-        <StatCard label="Pending referrals" value={summary?.metrics.pendingReferrals ?? 0} tone="secondary" />
-        <StatCard label="Adherence" value={`${summary?.metrics.adherenceRate ?? 0}%`} />
+        {stats.map((stat, index) => <StatCard key={stat.label} {...stat} tone={index === 1 ? "secondary" : "primary"} />)}
       </ScrollView>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Next appointment</Text>
-        {nextAppointment ? (
-          <AppointmentCard appointment={nextAppointment} />
-        ) : (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyText}>No upcoming appointments.</Text>
+      {user?.role === "PATIENT" ? (
+        <>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>الموعد القادم</Text>
+            <View style={styles.panel}>
+              {patientData?.nextAppointment ? (
+                <>
+                  <Text style={styles.panelTitle}>{patientData.nextAppointment.reason}</Text>
+                  <Text style={styles.meta}>{patientData.nextAppointment.doctor.fullName}</Text>
+                  <Text style={styles.meta}>{new Date(patientData.nextAppointment.scheduledAt).toLocaleString("ar")}</Text>
+                </>
+              ) : <Text style={styles.meta}>لا يوجد موعد قادم.</Text>}
+            </View>
           </View>
-        )}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Current plan</Text>
-        {activePlan ? (
-          <View style={styles.planCard}>
-            <Text style={styles.planName}>{activePlan.plan.name}</Text>
-            <Text style={styles.planMeta}>
-              {currencyFormatter.format(activePlan.plan.priceInCents / 100)} /{" "}
-              {activePlan.plan.billingCycle.toLowerCase()}
-            </Text>
-            <Text style={styles.planMeta}>Center: {activePlan.center.name}</Text>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>آخر الإشعارات</Text>
+            {(patientData?.recentNotifications ?? []).slice(0, 4).map((notification) => (
+              <View key={notification.id} style={styles.panel}>
+                <Text style={styles.panelTitle}>{notification.title}</Text>
+                <Text style={styles.meta}>{notification.body}</Text>
+              </View>
+            ))}
           </View>
-        ) : (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyText}>No active subscription found.</Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Recent alerts</Text>
-        <View style={styles.alertStack}>
-          {notifications.slice(0, 3).map((notification) => (
-            <View key={notification.id} style={styles.alertCard}>
-              <Text style={styles.alertType}>{notification.type}</Text>
-              <Text style={styles.alertTitle}>{notification.title}</Text>
-              <Text style={styles.alertBody}>{notification.body}</Text>
+        </>
+      ) : (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>آخر الزيارات</Text>
+          {(centerData?.recentVisits ?? []).slice(0, 6).map((visit) => (
+            <View key={visit.id} style={styles.panel}>
+              <View style={styles.row}>
+                <Text style={styles.state}>{visit.syncState === "SYNCED" ? "مرفوعة" : "محلية"}</Text>
+                <Text style={styles.panelTitle}>{visit.patientName}</Text>
+              </View>
+              <Text style={styles.meta}>{visit.diagnosis}</Text>
+              <Text style={styles.meta}>{visit.doctorName}</Text>
             </View>
           ))}
-          {notifications.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyText}>No notifications yet.</Text>
-            </View>
-          ) : null}
         </View>
-      </View>
+      )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    padding: spacing.lg,
-    gap: spacing.lg
-  },
-  hero: {
-    backgroundColor: colors.primary,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
-    gap: spacing.sm
-  },
-  heroEyebrow: {
-    color: "rgba(255,255,255,0.72)",
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1.1
-  },
-  heroTitle: {
-    color: "#fff",
-    fontSize: 30,
-    fontWeight: "800"
-  },
-  heroSubtitle: {
-    color: "rgba(255,255,255,0.8)",
-    lineHeight: 22
-  },
-  statRow: {
-    gap: spacing.md
-  },
-  section: {
-    gap: spacing.sm
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: "800"
-  },
-  emptyCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border
-  },
-  emptyText: {
-    color: colors.muted
-  },
-  planCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: spacing.xs
-  },
-  planName: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: "800"
-  },
-  planMeta: {
-    color: colors.muted
-  },
-  alertStack: {
-    gap: spacing.sm
-  },
-  alertCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: 6
-  },
-  alertType: {
-    color: colors.secondary,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    fontSize: 12
-  },
-  alertTitle: {
-    color: colors.text,
-    fontWeight: "800",
-    fontSize: 16
-  },
-  alertBody: {
-    color: colors.muted,
-    lineHeight: 20
-  },
-  error: {
-    color: colors.danger,
-    fontWeight: "700"
-  }
+  content: { padding: spacing.lg, gap: spacing.lg },
+  hero: { backgroundColor: colors.primary, borderRadius: radii.md, padding: spacing.lg, gap: spacing.xs },
+  heroRole: { color: "#d9f1e8", fontWeight: "800", textAlign: "right" },
+  heroTitle: { color: "#fff", fontSize: 26, fontWeight: "800", textAlign: "right" },
+  heroSubtitle: { color: "#d9f1e8", textAlign: "right" },
+  statRow: { flexDirection: "row-reverse", gap: spacing.md },
+  section: { gap: spacing.sm },
+  sectionTitle: { color: colors.text, fontSize: 20, fontWeight: "800", textAlign: "right" },
+  panel: { backgroundColor: colors.surface, borderRadius: radii.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border, gap: 5 },
+  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  panelTitle: { color: colors.text, fontWeight: "800", fontSize: 16, textAlign: "right" },
+  meta: { color: colors.muted, textAlign: "right", lineHeight: 20 },
+  state: { color: colors.primary, fontWeight: "800", fontSize: 12 },
+  error: { color: colors.danger, textAlign: "right", fontWeight: "700" }
 });

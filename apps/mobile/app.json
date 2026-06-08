@@ -1,26 +1,31 @@
 {
   "expo": {
-    "name": "Healthcare Ecosystem",
-    "slug": "healthcare-ecosystem",
+    "name": "المركز الصحي المتوسط",
+    "slug": "medium-health-center",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "splash": {
-      "backgroundColor": "#eef6f1"
+      "backgroundColor": "#edf5f0"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "org.healthcare.mediumcenter"
     },
     "android": {
+      "package": "org.healthcare.mediumcenter",
       "adaptiveIcon": {
-        "backgroundColor": "#eef6f1"
+        "backgroundColor": "#edf5f0"
       }
     },
     "extra": {
-      "apiUrl": "http://10.0.2.2:4000/api"
-    }
+      "apiUrl": "http://10.0.2.2:4100/api"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
   }
 }

@@ -24,10 +24,12 @@ import {
 } from "../services/network-queries";
 import { ensurePatientPortalAccount } from "../services/patient-accounts";
 import { asyncHandler } from "../utils/async-handler";
+import { visitWorkflowRouter } from "./visit-workflow";
 
 const router = Router();
 
 router.use(authenticate, authorizeWorkspace("center"));
+router.use("/visit-workflow", visitWorkflowRouter);
 
 function getCenterId(req: Parameters<typeof asyncHandler>[0] extends never ? never : any) {
   return Number(req.auth?.centerId);

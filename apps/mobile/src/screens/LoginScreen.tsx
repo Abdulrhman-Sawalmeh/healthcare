@@ -1,179 +1,129 @@
 import { useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View
-} from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 
-import { ApiError } from "../api/client";
+import { ApiError, getApiUrl } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { colors, radii, spacing } from "../theme/tokens";
 
 const accounts = [
-  { label: "Admin", email: "admin@healthcare.local", password: "Password123!" },
-  { label: "Doctor", email: "doctor@healthcare.local", password: "Password123!" },
-  { label: "Patient", email: "patient@healthcare.local", password: "Password123!" }
+  { label: "مدير المركز", identifier: "medium-manager" },
+  { label: "طبيب", identifier: "medium-doctor" },
+  { label: "موظف استقبال", identifier: "medium-receptionist" },
+  { label: "ممرض", identifier: "medium-nurse" },
+  { label: "فني مختبر", identifier: "medium-lab" },
+  { label: "صيدلي", identifier: "medium-pharmacist" },
+  { label: "مريض", identifier: "medium-patient" }
 ];
 
 export function LoginScreen() {
   const { login } = useAuth();
-  const [email, setEmail] = useState(accounts[2].email);
-  const [password, setPassword] = useState(accounts[2].password);
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   async function handleLogin() {
+    if (!identifier.trim() || !password) {
+      setError("أدخل اسم المستخدم وكلمة المرور.");
+      return;
+    }
     setSubmitting(true);
     setError("");
-
     try {
-      await login(email, password);
+      await login(identifier.trim(), password);
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : "Unable to sign in.");
+      setError(cause instanceof ApiError || cause instanceof Error ? cause.message : "تعذر تسجيل الدخول.");
     } finally {
       setSubmitting(false);
     }
   }
 
+  function fillAccount(account: typeof accounts[number]) {
+    setIdentifier(account.identifier);
+    setPassword("Password123!");
+    setError("");
+  }
+
   return (
-    <View style={styles.container}>
-      <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Healthcare Ecosystem</Text>
-        <Text style={styles.title}>Keep care plans, referrals, and patient follow-up in one mobile flow.</Text>
-        <Text style={styles.subtitle}>
-          Sign in with one of the demo accounts to review appointments, alerts, and secure messages.
-        </Text>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Sign in</Text>
-
-        <TextInput
-          autoCapitalize="none"
-          onChangeText={setEmail}
-          placeholder="Email"
-          placeholderTextColor={colors.muted}
-          style={styles.input}
-          value={email}
-        />
-        <TextInput
-          onChangeText={setPassword}
-          placeholder="Password"
-          placeholderTextColor={colors.muted}
-          secureTextEntry
-          style={styles.input}
-          value={password}
-        />
-
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-
-        <Pressable onPress={handleLogin} style={styles.primaryButton}>
-          {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Enter mobile workspace</Text>}
-        </Pressable>
-
-        <View style={styles.accountList}>
-          {accounts.map((account) => (
-            <Pressable
-              key={account.label}
-              onPress={() => {
-                setEmail(account.email);
-                setPassword(account.password);
-              }}
-              style={styles.accountChip}
-            >
-              <Text style={styles.accountLabel}>{account.label}</Text>
-              <Text style={styles.accountEmail}>{account.email}</Text>
-            </Pressable>
-          ))}
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.page}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <View style={styles.brand}>
+          <View style={styles.brandIcon}><Ionicons name="medical" color="#fff" size={30} /></View>
+          <Text style={styles.brandTitle}>المركز الصحي المتوسط</Text>
+          <Text style={styles.brandSub}>الوصول الآمن إلى خدمات المركز ودورة رعاية المريض</Text>
         </View>
-      </View>
-    </View>
+
+        <View style={styles.form}>
+          <Text style={styles.title}>تسجيل الدخول</Text>
+          <Text style={styles.label}>اسم المستخدم أو البريد الإلكتروني</Text>
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            onChangeText={setIdentifier}
+            placeholder="أدخل بيانات الحساب"
+            placeholderTextColor={colors.muted}
+            style={styles.input}
+            textAlign="right"
+            value={identifier}
+          />
+          <Text style={styles.label}>كلمة المرور</Text>
+          <View style={styles.passwordRow}>
+            <TextInput
+              onChangeText={setPassword}
+              placeholder="أدخل كلمة المرور"
+              placeholderTextColor={colors.muted}
+              secureTextEntry={!showPassword}
+              style={styles.passwordInput}
+              textAlign="right"
+              value={password}
+            />
+            <Pressable onPress={() => setShowPassword((value) => !value)} style={styles.iconButton}>
+              <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={22} color={colors.muted} />
+            </Pressable>
+          </View>
+
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <Pressable disabled={submitting} onPress={() => void handleLogin()} style={styles.primaryButton}>
+            {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>دخول</Text>}
+          </Pressable>
+
+          <Text style={styles.demoTitle}>حسابات مرحلة التطوير</Text>
+          <View style={styles.accounts}>
+            {accounts.map((account) => (
+              <Pressable key={account.identifier} onPress={() => fillAccount(account)} style={styles.accountButton}>
+                <Text style={styles.accountText}>{account.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.server}>الخادم: {getApiUrl()}</Text>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: "center",
-    padding: spacing.lg,
-    backgroundColor: colors.background,
-    gap: spacing.lg
-  },
-  hero: {
-    gap: spacing.sm
-  },
-  eyebrow: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1.2
-  },
-  title: {
-    color: colors.text,
-    fontSize: 32,
-    lineHeight: 36,
-    fontWeight: "800"
-  },
-  subtitle: {
-    color: colors.muted,
-    fontSize: 15,
-    lineHeight: 22
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
-    gap: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: "800"
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    color: colors.text,
-    backgroundColor: "#fff"
-  },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: spacing.md
-  },
-  primaryText: {
-    color: "#fff",
-    fontWeight: "800"
-  },
-  error: {
-    color: colors.danger,
-    fontWeight: "700"
-  },
-  accountList: {
-    gap: spacing.sm
-  },
-  accountChip: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radii.sm,
-    padding: spacing.md
-  },
-  accountLabel: {
-    color: colors.primary,
-    fontWeight: "800",
-    marginBottom: 4
-  },
-  accountEmail: {
-    color: colors.text
-  }
+  page: { flex: 1, backgroundColor: colors.background },
+  content: { flexGrow: 1, justifyContent: "center", padding: spacing.lg, gap: spacing.lg },
+  brand: { alignItems: "center", gap: spacing.sm },
+  brandIcon: { width: 64, height: 64, borderRadius: 20, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
+  brandTitle: { color: colors.text, fontSize: 28, fontWeight: "800", textAlign: "center" },
+  brandSub: { color: colors.muted, textAlign: "center", lineHeight: 21 },
+  form: { backgroundColor: colors.surface, borderRadius: radii.md, padding: spacing.lg, gap: spacing.sm, borderWidth: 1, borderColor: colors.border },
+  title: { color: colors.text, fontSize: 22, fontWeight: "800", textAlign: "right", marginBottom: spacing.xs },
+  label: { color: colors.text, fontWeight: "700", textAlign: "right" },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, padding: spacing.md, color: colors.text, backgroundColor: "#fff" },
+  passwordRow: { flexDirection: "row", borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: "#fff" },
+  passwordInput: { flex: 1, padding: spacing.md, color: colors.text },
+  iconButton: { width: 48, alignItems: "center", justifyContent: "center" },
+  primaryButton: { minHeight: 50, backgroundColor: colors.primary, borderRadius: radii.sm, alignItems: "center", justifyContent: "center", marginTop: spacing.xs },
+  primaryText: { color: "#fff", fontWeight: "800", fontSize: 16 },
+  demoTitle: { color: colors.muted, fontWeight: "700", textAlign: "right", marginTop: spacing.sm },
+  accounts: { flexDirection: "row-reverse", flexWrap: "wrap", gap: spacing.xs },
+  accountButton: { backgroundColor: colors.surfaceMuted, borderRadius: radii.sm, paddingHorizontal: spacing.sm, paddingVertical: 9 },
+  accountText: { color: colors.primary, fontWeight: "700" },
+  server: { color: colors.muted, fontSize: 11, textAlign: "center", marginTop: spacing.xs },
+  error: { color: colors.danger, fontWeight: "700", textAlign: "right" }
 });

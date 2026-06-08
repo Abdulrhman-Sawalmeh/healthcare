@@ -32,9 +32,9 @@ export function MessagesScreen() {
   async function loadData() {
     try {
       const [threadsPayload, doctorsPayload] = await Promise.all([
-        apiRequest<ThreadRecord[]>("/communications/threads"),
+        apiRequest<ThreadRecord[]>("/portal/communications/threads"),
         user?.role === "PATIENT"
-          ? apiRequest<DoctorRecord[]>("/doctors")
+          ? apiRequest<DoctorRecord[]>("/portal/doctors")
           : Promise.resolve<DoctorRecord[]>([])
       ]);
 
@@ -61,7 +61,7 @@ export function MessagesScreen() {
       return;
     }
 
-    await apiRequest(`/communications/threads/${selectedThread.id}/messages`, {
+    await apiRequest(`/portal/communications/threads/${selectedThread.id}/messages`, {
       method: "POST",
       body: JSON.stringify({ content: draft })
     });
@@ -75,7 +75,7 @@ export function MessagesScreen() {
       return;
     }
 
-    await apiRequest("/communications/threads", {
+    await apiRequest("/portal/communications/threads", {
       method: "POST",
       body: JSON.stringify({
         doctorId: doctors[0].id,
@@ -89,8 +89,8 @@ export function MessagesScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Secure messages</Text>
-      <Text style={styles.subtitle}>Stay in touch with your care team without leaving the mobile app.</Text>
+      <Text style={styles.title}>المحادثات الطبية</Text>
+      <Text style={styles.subtitle}>تواصل مباشرة مع طبيبك من داخل التطبيق.</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.threadTabs}>
@@ -147,33 +147,33 @@ export function MessagesScreen() {
           <View style={styles.composer}>
             <TextInput
               onChangeText={setDraft}
-              placeholder="Write a secure message..."
+              placeholder="اكتب رسالة..."
               placeholderTextColor={colors.muted}
               style={styles.input}
               value={draft}
             />
             <Pressable onPress={() => void sendMessage()} style={styles.sendButton}>
-              <Text style={styles.sendText}>Send</Text>
+              <Text style={styles.sendText}>إرسال</Text>
             </Pressable>
           </View>
         </>
       ) : user?.role === "PATIENT" && doctors[0] ? (
         <View style={styles.emptyPanel}>
-          <Text style={styles.emptyTitle}>Start your first care chat</Text>
+          <Text style={styles.emptyTitle}>ابدأ محادثتك الطبية الأولى</Text>
           <TextInput
             onChangeText={setNewThreadMessage}
-            placeholder={`Message ${doctors[0].fullName}`}
+            placeholder={`رسالة إلى ${doctors[0].fullName}`}
             placeholderTextColor={colors.muted}
             style={styles.input}
             value={newThreadMessage}
           />
           <Pressable onPress={() => void createThread()} style={styles.sendButton}>
-            <Text style={styles.sendText}>Start thread</Text>
+            <Text style={styles.sendText}>بدء المحادثة</Text>
           </Pressable>
         </View>
       ) : (
         <View style={styles.emptyPanel}>
-          <Text style={styles.emptyTitle}>No threads available yet.</Text>
+          <Text style={styles.emptyTitle}>لا توجد محادثات حالياً.</Text>
         </View>
       )}
     </View>
@@ -189,10 +189,12 @@ const styles = StyleSheet.create({
   title: {
     color: colors.text,
     fontSize: 28,
-    fontWeight: "800"
+    fontWeight: "800",
+    textAlign: "right"
   },
   subtitle: {
-    color: colors.muted
+    color: colors.muted,
+    textAlign: "right"
   },
   threadTabs: {
     gap: spacing.sm,

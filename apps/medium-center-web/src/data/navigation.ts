@@ -6,7 +6,14 @@ export interface NavigationItem {
   roles: Role[];
 }
 
-const allCenterRoles: Role[] = ["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"];
+const allCenterRoles: Role[] = [
+  "CENTER_MANAGER",
+  "DOCTOR",
+  "RECEPTIONIST",
+  "LAB_TECH",
+  "PHARMACIST",
+  "NURSE"
+];
 
 export const navigationItems: NavigationItem[] = [
   {
@@ -48,6 +55,11 @@ export const navigationItems: NavigationItem[] = [
     to: "/visits",
     label: "الزيارات",
     roles: ["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]
+  },
+  {
+    to: "/visit-workflow",
+    label: "ملفات الزيارة والمتابعة",
+    roles: allCenterRoles
   },
   {
     to: "/referrals",
