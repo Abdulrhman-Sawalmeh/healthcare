@@ -29,15 +29,40 @@ const careInsightSchema = z.object({
   context: z.enum(["PATIENT_SELF_CARE", "CLINICAL_TRIAGE", "FOLLOW_UP"]).optional()
 });
 
+function resolveAiRuntime() {
+  if (env.AI_PROVIDER === "openrouter" || (env.AI_PROVIDER === "auto" && env.OPENROUTER_API_KEY?.trim())) {
+    return {
+      provider: "openrouter",
+      model: env.OPENROUTER_MODEL,
+      fallback: false
+    };
+  }
+
+  if (env.AI_PROVIDER === "gemini" || (env.AI_PROVIDER === "auto" && env.GEMINI_API_KEY?.trim())) {
+    return {
+      provider: "gemini",
+      model: env.GEMINI_MODEL,
+      fallback: false
+    };
+  }
+
+  return {
+    provider: "local",
+    model: "local-fallback",
+    fallback: true
+  };
+}
+
 router.use(authenticate, authorize(...aiRoles));
 
 router.get(
   "/capabilities",
   asyncHandler(async (_req, res) => {
+    const runtime = resolveAiRuntime();
+
     res.json({
       features: ["care-insights", "triage-support", "follow-up-questions", "red-flags"],
-      model: env.GEMINI_MODEL,
-      fallback: !env.GEMINI_API_KEY?.trim()
+      ...runtime
     });
   })
 );

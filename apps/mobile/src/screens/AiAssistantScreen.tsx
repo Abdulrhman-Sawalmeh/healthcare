@@ -44,7 +44,12 @@ export function AiAssistantScreen() {
   const [chronicDiseases, setChronicDiseases] = useState("");
   const [allergies, setAllergies] = useState("");
   const [currentMedications, setCurrentMedications] = useState("");
-  const [capabilities, setCapabilities] = useState<{ features: string[]; model: string; fallback: boolean } | null>(null);
+  const [capabilities, setCapabilities] = useState<{
+    features: string[];
+    model: string;
+    fallback: boolean;
+    provider: "openrouter" | "gemini" | "local";
+  } | null>(null);
   const [result, setResult] = useState<AiCareInsightResponse | null>(null);
   const [loadingCapabilities, setLoadingCapabilities] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -122,7 +127,7 @@ export function AiAssistantScreen() {
           <>
             <Text style={styles.meta}>النموذج: {capabilities.model}</Text>
             <Text style={styles.meta}>
-              وضع التشغيل: {capabilities.fallback ? "تحليل محلي احتياطي" : "Gemini"}
+              وضع التشغيل: {capabilities.provider === "openrouter" ? "OpenRouter" : capabilities.provider === "gemini" ? "Gemini" : "تحليل محلي احتياطي"}
             </Text>
             <ChipRow>
               {capabilities.features.map((feature) => (
@@ -143,7 +148,7 @@ export function AiAssistantScreen() {
           </View>
           <Text style={styles.summary}>{result.summary}</Text>
           <Text style={styles.meta}>
-            المصدر: {result.source === "gemini" ? "Gemini" : "تحليل محلي احتياطي"}
+            المصدر: {result.source === "openrouter" ? "OpenRouter" : result.source === "gemini" ? "Gemini" : "تحليل محلي احتياطي"}
           </Text>
           <ResultList title="إجراءات مقترحة" items={result.suggestedActions} />
           <ResultList title="أسئلة للطبيب" items={result.questionsForClinician} />

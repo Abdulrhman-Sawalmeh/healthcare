@@ -62,6 +62,18 @@ function getAiErrorMessage(cause: unknown) {
   return cause instanceof Error ? cause.message : "تعذر تشغيل المساعد الذكي.";
 }
 
+function sourceLabel(source: AiCareInsightResponse["source"]) {
+  if (source === "openrouter") {
+    return "OpenRouter";
+  }
+
+  if (source === "gemini") {
+    return "Gemini";
+  }
+
+  return "التحليل المحلي الاحتياطي";
+}
+
 function InsightList({ title, items }: { title: string; items: string[] }) {
   return (
     <article className="section-card inset-card">
@@ -133,7 +145,7 @@ export function CareAssistantPage() {
 
       <SectionCard
         title="تحليل حالة أو سؤال صحي"
-        subtitle="يستخدم Gemini عند توفر المفتاح، ويعمل بتحليل محلي احتياطي عندما لا يكون GEMINI_API_KEY مضبوطا."
+        subtitle="يستخدم OpenRouter المجاني عند توفر OPENROUTER_API_KEY، ثم Gemini عند توفره، وإلا يعمل بتحليل محلي احتياطي."
       >
         <form className="form-grid" onSubmit={submitPrompt}>
           <label className="field field-span-2">
@@ -193,7 +205,7 @@ export function CareAssistantPage() {
       {result ? (
         <SectionCard
           title="نتيجة المساعد"
-          subtitle={result.source === "gemini" ? "تم توليد النتيجة عبر Gemini." : "تم توليد النتيجة عبر التحليل المحلي الاحتياطي."}
+          subtitle={`تم توليد النتيجة عبر ${sourceLabel(result.source)}.`}
           action={<span className={`status-badge ${urgencyClasses[result.urgency]}`}>{urgencyLabels[result.urgency]}</span>}
         >
           <div className="stack-item">

@@ -910,7 +910,7 @@ export interface AiCareInsightRequest {
 }
 
 export interface AiCareInsightResponse {
-  source: "gemini" | "local-fallback";
+  source: "openrouter" | "gemini" | "local-fallback";
   urgency: "LOW" | "ROUTINE" | "URGENT" | "EMERGENCY";
   summary: string;
   suggestedActions: string[];

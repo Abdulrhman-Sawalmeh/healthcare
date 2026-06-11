@@ -232,7 +232,10 @@ export const mediumApi = {
     apiRequest<PrescriptionVerificationResult>(`/center/prescriptions/verify/${encodeURIComponent(code.trim())}`),
   auditLogs: (limit = 12) => apiRequest<AuditLogRecord[]>(`/center/audit-logs?limit=${limit}`),
 
-  aiCapabilities: () => apiRequest<{ features: string[]; model: string; fallback: boolean }>("/ai/capabilities"),
+  aiCapabilities: () =>
+    apiRequest<{ features: string[]; model: string; fallback: boolean; provider: "openrouter" | "gemini" | "local" }>(
+      "/ai/capabilities"
+    ),
   careInsights: (payload: AiCareInsightRequest) =>
     apiRequest<AiCareInsightResponse>("/ai/care-insights", {
       method: "POST",

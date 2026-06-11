@@ -16,7 +16,7 @@ export interface CareInsightInput {
 }
 
 export interface CareInsightResponse {
-  source: "gemini" | "local-fallback";
+  source: "openrouter" | "gemini" | "local-fallback";
   urgency: "LOW" | "ROUTINE" | "URGENT" | "EMERGENCY";
   summary: string;
   suggestedActions: string[];
@@ -34,6 +34,14 @@ type GeminiResponse = {
   candidates?: Array<{
     content?: {
       parts?: GeminiPart[];
+    };
+  }>;
+};
+
+type OpenRouterResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string;
     };
   }>;
 };
@@ -189,7 +197,7 @@ function extractJson(text: string) {
   const end = withoutFence.lastIndexOf("}");
 
   if (start === -1 || end === -1 || end <= start) {
-    throw new Error("Gemini response did not contain JSON.");
+    throw new Error("AI response did not contain JSON.");
   }
 
   return JSON.parse(withoutFence.slice(start, end + 1)) as Record<string, unknown>;
@@ -210,9 +218,13 @@ function toUrgency(value: unknown, fallback: CareInsightResponse["urgency"]) {
     : fallback;
 }
 
-function normalizeGeminiPayload(payload: Record<string, unknown>, fallback: CareInsightResponse): CareInsightResponse {
+function normalizeAiPayload(
+  payload: Record<string, unknown>,
+  fallback: CareInsightResponse,
+  source: Exclude<CareInsightResponse["source"], "local-fallback">
+): CareInsightResponse {
   return {
-    source: "gemini",
+    source,
     urgency: toUrgency(payload.urgency, fallback.urgency),
     summary: typeof payload.summary === "string" && payload.summary.trim() ? payload.summary : fallback.summary,
     suggestedActions: toStringArray(payload.suggestedActions, fallback.suggestedActions),
@@ -221,6 +233,62 @@ function normalizeGeminiPayload(payload: Record<string, unknown>, fallback: Care
     selfCare: toStringArray(payload.selfCare, fallback.selfCare),
     disclaimer: typeof payload.disclaimer === "string" && payload.disclaimer.trim() ? payload.disclaimer : disclaimer
   };
+}
+
+async function generateWithOpenRouter(input: CareInsightInput, fallback: CareInsightResponse) {
+  const apiKey = env.OPENROUTER_API_KEY?.trim();
+
+  if (!apiKey) {
+    return null;
+  }
+
+  const headers: Record<string, string> = {
+    "Authorization": `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+    "X-Title": env.OPENROUTER_APP_NAME
+  };
+
+  if (env.OPENROUTER_APP_URL?.trim()) {
+    headers["HTTP-Referer"] = env.OPENROUTER_APP_URL.trim();
+  }
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: env.OPENROUTER_MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a careful healthcare AI assistant. Respond only with valid JSON matching the requested schema. Do not provide a final diagnosis or prescribe medication."
+        },
+        {
+          role: "user",
+          content: makePrompt(input)
+        }
+      ],
+      temperature: 0.25,
+      max_tokens: 1000
+    })
+  });
+
+  if (!response.ok) {
+    throw new AppError("OpenRouter AI service is currently unavailable. Please try again later.", 503);
+  }
+
+  const data = (await response.json()) as OpenRouterResponse;
+  const text = data.choices?.[0]?.message?.content?.trim();
+
+  if (!text) {
+    throw new AppError("OpenRouter returned an empty response.", 502);
+  }
+
+  try {
+    return normalizeAiPayload(extractJson(text), fallback, "openrouter");
+  } catch {
+    throw new AppError("OpenRouter returned an unreadable response.", 502);
+  }
 }
 
 async function generateWithGemini(input: CareInsightInput, fallback: CareInsightResponse) {
@@ -265,7 +333,7 @@ async function generateWithGemini(input: CareInsightInput, fallback: CareInsight
   }
 
   try {
-    return normalizeGeminiPayload(extractJson(text), fallback);
+    return normalizeAiPayload(extractJson(text), fallback, "gemini");
   } catch {
     throw new AppError("Gemini returned an unreadable response.", 502);
   }
@@ -273,5 +341,33 @@ async function generateWithGemini(input: CareInsightInput, fallback: CareInsight
 
 export async function generateCareInsights(input: CareInsightInput): Promise<CareInsightResponse> {
   const fallback = buildLocalResponse(input);
-  return generateWithGemini(input, fallback);
+  const provider = env.AI_PROVIDER;
+
+  if (provider === "local") {
+    return fallback;
+  }
+
+  if (provider === "openrouter") {
+    return (await generateWithOpenRouter(input, fallback)) ?? fallback;
+  }
+
+  if (provider === "gemini") {
+    return generateWithGemini(input, fallback);
+  }
+
+  try {
+    const openRouterResult = await generateWithOpenRouter(input, fallback);
+
+    if (openRouterResult) {
+      return openRouterResult;
+    }
+  } catch {
+    undefined;
+  }
+
+  try {
+    return await generateWithGemini(input, fallback);
+  } catch {
+    return fallback;
+  }
 }
