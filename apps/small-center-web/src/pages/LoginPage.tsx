@@ -79,7 +79,13 @@ export function LoginPage() {
 
         <label className="field">
           <span>اسم المستخدم أو رقم الهوية أو البريد الإلكتروني</span>
-          <input value={identifier} onChange={(event) => setIdentifier(event.target.value)} autoComplete="off" type="text" />
+          <input
+            value={identifier}
+            onChange={(event) => setIdentifier(event.target.value)}
+            autoComplete="off"
+            placeholder="اسم المستخدم"
+            type="text"
+          />
         </label>
 
         <label className="field">
@@ -88,6 +94,7 @@ export function LoginPage() {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             autoComplete="new-password"
+            placeholder="كلمة المرور"
             type="password"
           />
         </label>

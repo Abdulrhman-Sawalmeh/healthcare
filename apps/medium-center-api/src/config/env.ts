@@ -9,7 +9,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(4100),
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(8),
-  CORS_ORIGIN: z.string().default("http://localhost:5175"),
+  CORS_ORIGIN: z.string().default("http://localhost:5175,http://localhost:8081,http://localhost:8082"),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default("gemini-1.5-flash")
 });

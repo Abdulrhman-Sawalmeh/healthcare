@@ -1,7 +1,7 @@
 @echo off
 
-echo  stop old project servers on ports 4000, 4100, 4200, 5174, 5175, 5176...
-for %%P in (4000 4100 4200 5174 5175 5176) do (
+echo  stop old project servers on ports 4000, 4100, 4200, 5174, 5175, 5176, 8081, 8082...
+for %%P in (4000 4100 4200 5174 5175 5176 8081 8082) do (
   for /f "tokens=5" %%A in ('netstat -ano ^| findstr /R /C:":%%P .*LISTENING"') do (
     taskkill /PID %%A /F >nul 2>nul
   )
@@ -34,6 +34,11 @@ timeout /t 2 /nobreak >nul
 
 echo  run Small Web...
 start "Small Web" cmd /k "cd /d %~dp0 && npm run dev:small-web"
+
+timeout /t 2 /nobreak >nul
+
+echo  run Mobile Expo...
+start "Mobile Expo" cmd /k "cd /d %~dp0 && npm run dev:mobile"
 
 
 

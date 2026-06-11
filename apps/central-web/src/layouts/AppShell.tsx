@@ -1,7 +1,8 @@
 import { type CSSProperties, type WheelEvent as ReactWheelEvent, useEffect, useState } from "react";
-import { NavLink, Navigate, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
+import { TableEnhancer } from "../components/TableEnhancer";
 import { systemConfig } from "../config/system";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
@@ -20,6 +21,7 @@ type SidebarAlert = {
 export function AppShell() {
   const { user, loading, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useLanguage();
   const [alerts, setAlerts] = useState<SidebarAlert[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -120,6 +122,11 @@ export function AppShell() {
   const visibleNavigation = navigationItems.filter(
     (item) => item.roles.includes(user.role) && systemConfig.allowedRoutes.includes(item.to)
   );
+  const currentNavigationItem =
+    visibleNavigation
+      .filter((item) => item.to === "/" ? location.pathname === "/" : location.pathname.startsWith(item.to))
+      .sort((a, b) => b.to.length - a.to.length)[0] ?? visibleNavigation[0];
+  const isNestedPage = Boolean(currentNavigationItem && location.pathname !== currentNavigationItem.to);
   return (
     <div className="app-shell">
       <div className="background-veil background-veil-a" />
@@ -194,6 +201,22 @@ export function AppShell() {
 
         <div className={showNotifications ? "content-grid with-notifications" : "content-grid"} style={{ "--content-zoom": contentZoom } as CSSProperties} onWheel={handleContentWheel}>
           <section className="page-panel">
+            <nav className="breadcrumbs" aria-label="مسار الصفحة">
+              <Link to="/">الرئيسية</Link>
+              {currentNavigationItem && currentNavigationItem.to !== "/" ? (
+                <>
+                  <span aria-hidden="true">/</span>
+                  <Link to={currentNavigationItem.to}>{currentNavigationItem.label}</Link>
+                </>
+              ) : null}
+              {isNestedPage ? (
+                <>
+                  <span aria-hidden="true">/</span>
+                  <span>تفاصيل</span>
+                </>
+              ) : null}
+            </nav>
+            <TableEnhancer />
             <Outlet />
           </section>
 
