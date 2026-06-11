@@ -3,12 +3,8 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $asciiDrive = "H:"
 $asciiRoot = "$asciiDrive\"
-$logsDir = Join-Path $asciiRoot "runtime-logs"
 $npm = (Get-Command npm.cmd).Source
-$viteBin = Join-Path $asciiRoot "node_modules\vite\bin\vite.js"
 $pgCtl = "C:\Program Files\PostgreSQL\16\bin\pg_ctl.exe"
-$pgDataDir = Join-Path $asciiRoot "runtime-postgres\data"
-$pgLogFile = Join-Path $logsDir "postgres-5433.out.log"
 
 function Ensure-AsciiDrive {
   if (Test-Path $asciiRoot) {
@@ -88,6 +84,11 @@ function Start-WebPreview($port, $appDirectory, $logPrefix) {
 }
 
 Ensure-AsciiDrive
+
+$logsDir = Join-Path $asciiRoot "runtime-logs"
+$viteBin = Join-Path $asciiRoot "node_modules\vite\bin\vite.js"
+$pgDataDir = Join-Path $asciiRoot "runtime-postgres\data"
+$pgLogFile = Join-Path $logsDir "postgres-5433.out.log"
 
 if (-not (Test-Path $logsDir)) {
   New-Item -ItemType Directory -Path $logsDir -Force | Out-Null

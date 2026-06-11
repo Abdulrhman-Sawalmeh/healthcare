@@ -4,7 +4,12 @@ import { z } from "zod";
 
 import { prisma } from "../lib/prisma";
 import { authorize } from "../middleware/auth";
+import { recordAuditLog } from "../services/audit-log";
 import { syncCenterVisitsNow } from "../services/notification-processor";
+import {
+  createPrescriptionVerificationCode,
+  hashPrescriptionVerificationCode
+} from "../services/prescription-verification";
 import { asyncHandler } from "../utils/async-handler";
 
 const router = Router();
@@ -521,6 +526,19 @@ router.post(
       return created;
     });
 
+    await recordAuditLog(req, {
+      action: "QUEUE_VISIT",
+      entityType: "LocalVisit",
+      entityId: visit.id,
+      centerId,
+      newValue: {
+        patientId: visit.patientId,
+        doctorId: visit.doctorId,
+        priority: visit.priority,
+        workflowStatus: visit.workflowStatus
+      }
+    });
+
     res.status(201).json(visit);
   })
 );
@@ -609,11 +627,12 @@ router.patch(
 
       if (payload.prescriptions.length > 0) {
         await tx.localPrescription.createMany({
-          data: payload.prescriptions.map((prescription) => {
+          data: payload.prescriptions.map((prescription, index) => {
             const inventoryItem = prescription.medicineId
               ? medicineById.get(prescription.medicineId)
               : undefined;
             const medicineName = inventoryItem?.medicineName ?? prescription.medicineName;
+            const verificationCode = createPrescriptionVerificationCode(centerId, visitId, index);
             if (!medicineName) {
               throw Object.assign(new Error("يجب اختيار دواء من المخزون أو كتابة اسمه."), { statusCode: 400 });
             }
@@ -626,7 +645,9 @@ router.patch(
               duration: prescription.duration,
               quantity: prescription.quantity,
               unitPrice: inventoryItem?.sellingPrice ?? prescription.unitPrice,
-              instructions: prescription.instructions
+              instructions: prescription.instructions,
+              verificationCode,
+              verificationHash: hashPrescriptionVerificationCode(verificationCode)
             };
           })
         });
@@ -662,6 +683,18 @@ router.patch(
 
       await completePendingTask(tx, visitId, "DOCTOR_ASSESSMENT", doctorId, payload.diagnosis);
       return refreshVisitStatus(tx, visitId);
+    });
+
+    await recordAuditLog(req, {
+      action: "CREATE_PRESCRIPTION",
+      entityType: "LocalVisit",
+      entityId: visitId,
+      centerId,
+      newValue: {
+        diagnosis: payload.diagnosis,
+        prescriptionCount: payload.prescriptions.length,
+        labRequestCount: payload.labTestIds.length
+      }
     });
 
     res.json(result);
@@ -711,6 +744,18 @@ router.patch(
       return updated;
     });
 
+    await recordAuditLog(req, {
+      action: "CREATE_LAB_RESULT",
+      entityType: "LabRequestLocal",
+      entityId: result.id,
+      centerId,
+      newValue: {
+        status: result.status,
+        resultValue: result.resultValue,
+        resultNotes: result.resultNotes
+      }
+    });
+
     res.json(result);
   })
 );
@@ -747,6 +792,18 @@ router.patch(
       }
       await refreshVisitStatus(tx, prescription.visitId);
       return updated;
+    });
+
+    await recordAuditLog(req, {
+      action: "DISPENSE_MEDICINE",
+      entityType: "LocalPrescription",
+      entityId: result.id,
+      centerId,
+      newValue: {
+        medicineName: result.medicineName,
+        quantity: result.quantity,
+        dispensed: result.dispensed
+      }
     });
 
     res.json(result);
@@ -809,6 +866,17 @@ router.post(
       });
 
       return { visit: updatedVisit, invoice };
+    });
+
+    await recordAuditLog(req, {
+      action: "COMPLETE_VISIT",
+      entityType: "LocalVisit",
+      entityId: result.visit.id,
+      centerId,
+      newValue: {
+        invoiceId: result.invoice.id,
+        amount: result.invoice.amount
+      }
     });
 
     res.json(result);

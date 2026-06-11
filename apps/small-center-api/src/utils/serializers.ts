@@ -39,9 +39,14 @@ type ReferralPayload = Prisma.ReferralGetPayload<{
 }>;
 
 type ThreadPayload = MessageThread & {
-  patient: PatientProfile & { user: User };
+  patient: PatientProfile & { user: User; center?: Center };
   doctor: DoctorProfile & { user: User; department: Department };
   messages: Array<Message & { sender: User }>;
+};
+
+type PatientIdentity = {
+  nationalId?: string | null;
+  unifiedId?: string | null;
 };
 
 type SubscriptionPayload = Subscription & {
@@ -161,13 +166,16 @@ export function mapReferral(referral: ReferralPayload) {
   };
 }
 
-export function mapThread(thread: ThreadPayload) {
+export function mapThread(thread: ThreadPayload, patientIdentity: PatientIdentity = {}) {
   return {
     id: thread.id,
     updatedAt: thread.updatedAt,
     patient: {
       id: thread.patient.id,
-      fullName: thread.patient.user.fullName
+      fullName: thread.patient.user.fullName,
+      medicalRecordNumber: thread.patient.medicalRecordNumber,
+      nationalId: patientIdentity.nationalId ?? null,
+      unifiedId: patientIdentity.unifiedId ?? null
     },
     doctor: {
       id: thread.doctor.id,
@@ -179,6 +187,14 @@ export function mapThread(thread: ThreadPayload) {
       content: message.content,
       createdAt: message.createdAt,
       isRead: message.isRead,
+      attachment: message.attachmentFileName && message.attachmentMimeType && message.attachmentBase64
+        ? {
+            fileName: message.attachmentFileName,
+            mimeType: message.attachmentMimeType,
+            contentBase64: message.attachmentBase64,
+            sizeBytes: message.attachmentSizeBytes ?? 0
+          }
+        : null,
       sender: {
         id: message.sender.id,
         fullName: message.sender.fullName,

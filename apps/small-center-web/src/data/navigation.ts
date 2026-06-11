@@ -9,6 +9,7 @@ export interface NavigationItem {
 const allCenterRoles: Role[] = ["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"];
 
 export const navigationItems: NavigationItem[] = [
+  { to: "/ai-assistant", label: "المساعد الذكي", roles: ["PATIENT", ...allCenterRoles] },
   { to: "/", label: "لوحة المتابعة", roles: ["CENTRAL_ADMIN", ...allCenterRoles] },
   { to: "/appointments", label: "حجز موعد", roles: ["PATIENT"] },
   { to: "/medical-record", label: "السجل الصحي", roles: ["PATIENT"] },
@@ -19,6 +20,7 @@ export const navigationItems: NavigationItem[] = [
   { to: "/visits", label: "الزيارات", roles: allCenterRoles },
   { to: "/visit-workflow", label: "ملفات الزيارة والمتابعة", roles: allCenterRoles },
   { to: "/referrals", label: "الإحالات", roles: ["CENTRAL_ADMIN", ...allCenterRoles] },
+  { to: "/prescription-verification", label: "التحقق من الوصفات", roles: allCenterRoles },
   { to: "/master-data", label: "البيانات المرجعية", roles: ["CENTRAL_ADMIN"] },
   { to: "/reports", label: "التقارير", roles: ["CENTRAL_ADMIN"] },
   { to: "/notifications", label: "الإشعارات", roles: ["PATIENT", "CENTRAL_ADMIN", ...allCenterRoles] }

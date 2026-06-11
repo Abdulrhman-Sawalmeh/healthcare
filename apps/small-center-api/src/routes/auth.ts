@@ -6,6 +6,7 @@ import { systemConfig } from "../config/system";
 import { signAuthToken } from "../lib/jwt";
 import { prisma } from "../lib/prisma";
 import { authenticate } from "../middleware/auth";
+import { recordAuditLog } from "../services/audit-log";
 import { loginWorkspaceUser, resolveSessionUser } from "../services/workspace-auth";
 import { asyncHandler } from "../utils/async-handler";
 
@@ -129,6 +130,21 @@ router.post(
 
     const loginIdentifier = await resolveDemoIdentifier(identifier);
     const result = await loginWorkspaceUser(loginIdentifier, payload.password);
+    await recordAuditLog(req, {
+      action: "LOGIN",
+      entityType: "Session",
+      entityId: result.user.id,
+      centerId: result.user.center?.id,
+      actorUserId: result.user.id,
+      actorUsername: result.user.username,
+      actorRole: result.user.role,
+      workspace: result.workspace,
+      newValue: {
+        identifier: loginIdentifier,
+        role: result.user.role,
+        workspace: result.workspace
+      }
+    });
 
     const token = signAuthToken({
       sub: result.user.id,

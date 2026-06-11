@@ -249,14 +249,18 @@ model MessageThread {
 }
 
 model Message {
-  id        String        @id @default(uuid())
-  threadId  String
-  senderId  String
-  content   String
-  isRead    Boolean       @default(false)
-  createdAt DateTime      @default(now())
-  thread    MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  sender    User          @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  id                   String        @id @default(uuid())
+  threadId             String
+  senderId             String
+  content              String
+  attachmentFileName   String?
+  attachmentMimeType   String?
+  attachmentBase64     String?
+  attachmentSizeBytes  Int?
+  isRead               Boolean       @default(false)
+  createdAt            DateTime      @default(now())
+  thread               MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender               User          @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([threadId, createdAt])
 }
@@ -519,6 +523,7 @@ model CentralCenter {
   outgoingNotifications  OutgoingNotification[]
   processingLogs         NotificationProcessingLog[]
   alerts                 CenterSystemAlert[]
+  auditLogs              AuditLog[]
   unifiedVisits          UnifiedVisit[]
   referralsFrom          CentralReferral[]                 @relation("NetworkReferralFromCenter")
   referralsTo            CentralReferral[]                 @relation("NetworkReferralToCenter")
@@ -946,22 +951,26 @@ model LocalResultReport {
 }
 
 model LocalPrescription {
-  id            Int                @id @default(autoincrement())
-  visitId       Int
-  medicineId    Int?
-  medicineName  String
-  dosage        String
-  duration      String
-  quantity      Int                @default(1)
-  unitPrice     Float?
-  instructions  String?
-  dispensed     Boolean            @default(false)
-  dispensedById Int?
-  dispensedAt   DateTime?
-  visit         LocalVisit         @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  dispensedBy   CenterUserAccount? @relation("DispensedPrescriptions", fields: [dispensedById], references: [id], onDelete: SetNull)
+  id               Int                @id @default(autoincrement())
+  visitId          Int
+  medicineId       Int?
+  medicineName     String
+  dosage           String
+  duration         String
+  quantity         Int                @default(1)
+  unitPrice        Float?
+  instructions     String?
+  dispensed        Boolean            @default(false)
+  dispensedById    Int?
+  dispensedAt      DateTime?
+  verificationCode String?            @unique
+  verificationHash String?
+  issuedAt         DateTime           @default(now())
+  visit            LocalVisit         @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  dispensedBy      CenterUserAccount? @relation("DispensedPrescriptions", fields: [dispensedById], references: [id], onDelete: SetNull)
 
   @@index([visitId, dispensed])
+  @@index([verificationCode])
 }
 
 model LocalInvoice {
@@ -1148,4 +1157,25 @@ model CenterSystemAlert {
   center     CentralCenter @relation(fields: [centerId], references: [id], onDelete: Cascade)
 
   @@index([centerId, severity, createdAt])
+}
+
+model AuditLog {
+  id            Int            @id @default(autoincrement())
+  centerId      Int?
+  actorUserId   String?
+  actorUsername String?
+  actorRole     String?
+  workspace     String?
+  action        String
+  entityType    String
+  entityId      String?
+  oldValue      Json?
+  newValue      Json?
+  ipAddress     String?
+  createdAt     DateTime       @default(now())
+  center        CentralCenter? @relation(fields: [centerId], references: [id], onDelete: SetNull)
+
+  @@index([centerId, createdAt])
+  @@index([action, createdAt])
+  @@index([entityType, entityId])
 }

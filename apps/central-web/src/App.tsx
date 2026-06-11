@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { isRouteEnabled } from "./config/system";
 import { useAuth } from "./context/AuthContext";
 import { AppShell } from "./layouts/AppShell";
+import { AuditLogsPage } from "./pages/AuditLogsPage";
 import { CentersPage } from "./pages/CentersPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LabPage } from "./pages/LabPage";
@@ -169,6 +170,16 @@ export function App() {
             />
           ) : null}
           {isRouteEnabled("/notifications") ? <Route path="/notifications" element={<NotificationsPage />} /> : null}
+          {isRouteEnabled("/audit-logs") ? (
+            <Route
+              path="/audit-logs"
+              element={
+                <ProtectedRoute roles={["CENTRAL_ADMIN"]}>
+                  <AuditLogsPage />
+                </ProtectedRoute>
+              }
+            />
+          ) : null}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

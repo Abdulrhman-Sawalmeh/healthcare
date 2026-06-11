@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { isRouteEnabled } from "./config/system";
 import { useAuth } from "./context/AuthContext";
 import { AppShell } from "./layouts/AppShell";
+import { CareAssistantPage } from "./pages/CareAssistantPage";
 import { CentersPage } from "./pages/CentersPage";
 import { CenterDoctorsPage } from "./pages/CenterDoctorsPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -19,6 +20,7 @@ import { PatientNotificationsPage } from "./pages/PatientNotificationsPage";
 import { PatientProfilePage } from "./pages/PatientProfilePage";
 import { PatientTimelinePage } from "./pages/PatientTimelinePage";
 import { PatientsPage } from "./pages/PatientsPage";
+import { PrescriptionVerificationPage } from "./pages/PrescriptionVerificationPage";
 import { ReferralsPage } from "./pages/ReferralsPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { VisitsPage } from "./pages/VisitsPage";
@@ -128,6 +130,16 @@ export function App() {
               </ProtectedRoute>
             }
           />
+          {isRouteEnabled("/ai-assistant") ? (
+            <Route
+              path="/ai-assistant"
+              element={
+                <ProtectedRoute roles={["PATIENT", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE", "LAB_TECH", "PHARMACIST"]}>
+                  <CareAssistantPage />
+                </ProtectedRoute>
+              }
+            />
+          ) : null}
           {isRouteEnabled("/centers") ? (
             <Route
               path="/centers"
@@ -192,6 +204,16 @@ export function App() {
               element={
                 <ProtectedRoute roles={["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]}>
                   <ReferralsPage />
+                </ProtectedRoute>
+              }
+            />
+          ) : null}
+          {isRouteEnabled("/prescription-verification") ? (
+            <Route
+              path="/prescription-verification"
+              element={
+                <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"]}>
+                  <PrescriptionVerificationPage />
                 </ProtectedRoute>
               }
             />

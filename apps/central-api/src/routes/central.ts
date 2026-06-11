@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { prisma } from "../lib/prisma";
 import { authorize, authorizeWorkspace, authenticate } from "../middleware/auth";
+import { recordAuditLog } from "../services/audit-log";
 import {
   enqueueCentralNotification,
   processAllQueues,
@@ -17,11 +18,120 @@ import {
   getReportsSummary,
   getUnifiedPatients
 } from "../services/network-queries";
+import {
+  buildPrescriptionQrValue,
+  hashPrescriptionVerificationCode
+} from "../services/prescription-verification";
 import { asyncHandler } from "../utils/async-handler";
 
 const router = Router();
 
 router.use(authenticate, authorizeWorkspace("central"), authorize("CENTRAL_ADMIN"));
+
+router.get(
+  "/audit-logs",
+  asyncHandler(async (req, res) => {
+    const limit = Math.min(Number(req.query.limit ?? 120), 300);
+    const centerId = req.query.centerId ? Number(req.query.centerId) : undefined;
+    const action = typeof req.query.action === "string" ? req.query.action : undefined;
+    const entityType = typeof req.query.entityType === "string" ? req.query.entityType : undefined;
+
+    const logs = await prisma.auditLog.findMany({
+      where: {
+        ...(centerId ? { centerId } : {}),
+        ...(action ? { action } : {}),
+        ...(entityType ? { entityType } : {})
+      },
+      include: {
+        center: {
+          select: {
+            centerName: true,
+            centerCode: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: limit
+    });
+
+    res.json(logs);
+  })
+);
+
+router.get(
+  "/prescriptions/verify/:code",
+  asyncHandler(async (req, res) => {
+    const rawCode = String(req.params.code ?? "").trim();
+    const code = rawCode.startsWith("healthcare-prescription:")
+      ? rawCode.replace("healthcare-prescription:", "")
+      : rawCode;
+
+    const prescription = await prisma.localPrescription.findFirst({
+      where: {
+        verificationCode: code
+      },
+      include: {
+        visit: {
+          include: {
+            center: true,
+            patient: true,
+            doctor: {
+              select: {
+                id: true,
+                fullName: true,
+                role: true
+              }
+            }
+          }
+        }
+      }
+    });
+    const authentic = Boolean(
+      prescription &&
+        (!prescription.verificationHash || prescription.verificationHash === hashPrescriptionVerificationCode(code))
+    );
+
+    await recordAuditLog(req, {
+      action: "VERIFY_PRESCRIPTION",
+      entityType: "LocalPrescription",
+      entityId: prescription?.id,
+      centerId: prescription?.visit.centerId,
+      newValue: {
+        code,
+        authentic
+      }
+    });
+
+    res.json({
+      authentic,
+      qrValue: buildPrescriptionQrValue(code),
+      prescription: prescription
+        ? {
+            id: prescription.id,
+            verificationCode: prescription.verificationCode,
+            issuedAt: prescription.issuedAt,
+            medicineName: prescription.medicineName,
+            dosage: prescription.dosage,
+            duration: prescription.duration,
+            instructions: prescription.instructions,
+            dispensed: prescription.dispensed,
+            visit: {
+              id: prescription.visit.id,
+              visitDate: prescription.visit.visitDate,
+              diagnosis: prescription.visit.diagnosis,
+              patientName: prescription.visit.patient.fullName,
+              patientUnifiedId: prescription.visit.patient.unifiedId,
+              doctorName: prescription.visit.doctor?.fullName ?? "غير محدد",
+              centerName: prescription.visit.center.centerName,
+              centerCode: prescription.visit.center.centerCode
+            }
+          }
+        : null
+    });
+  })
+);
 
 const centerConnectionSchema = z.object({
   isConnected: z.boolean(),

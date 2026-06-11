@@ -1,6 +1,7 @@
 import { Router } from "express";
 
 import { systemConfig } from "../config/system";
+import { aiRouter } from "./ai";
 import { appointmentsRouter } from "./appointments";
 import { authRouter } from "./auth";
 import { centerRouter } from "./center";
@@ -12,6 +13,7 @@ import { portalRouter } from "./portal";
 const router = Router();
 
 router.use("/auth", authRouter);
+router.use("/ai", aiRouter);
 router.use("/appointments", appointmentsRouter);
 router.use("/patients", patientsRouter);
 

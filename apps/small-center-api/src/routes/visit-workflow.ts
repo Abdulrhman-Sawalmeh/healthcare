@@ -4,7 +4,12 @@ import { z } from "zod";
 
 import { prisma } from "../lib/prisma";
 import { authorize } from "../middleware/auth";
+import { recordAuditLog } from "../services/audit-log";
 import { syncCenterVisitsNow } from "../services/notification-processor";
+import {
+  createPrescriptionVerificationCode,
+  hashPrescriptionVerificationCode
+} from "../services/prescription-verification";
 import { asyncHandler } from "../utils/async-handler";
 
 const router = Router();
@@ -160,6 +165,20 @@ router.post(
         uploadStatus: "NOT_READY"
       }
     });
+
+    await recordAuditLog(req, {
+      action: "QUEUE_VISIT",
+      entityType: "LocalVisit",
+      entityId: visit.id,
+      centerId,
+      newValue: {
+        patientId: visit.patientId,
+        doctorId: visit.doctorId,
+        priority: visit.priority,
+        workflowStatus: visit.workflowStatus
+      }
+    });
+
     res.status(201).json(visit);
   })
 );
@@ -192,9 +211,10 @@ router.patch(
       await tx.localPrescription.deleteMany({ where: { visitId } });
       if (payload.prescriptions.length > 0) {
         await tx.localPrescription.createMany({
-          data: payload.prescriptions.map((item) => {
+          data: payload.prescriptions.map((item, index) => {
             const inventory = item.medicineId ? medicineById.get(item.medicineId) : undefined;
             const medicineName = inventory?.medicineName ?? item.medicineName;
+            const verificationCode = createPrescriptionVerificationCode(centerId, visitId, index);
             if (!medicineName) throw Object.assign(new Error("اختر دواء أو اكتب اسمه."), { statusCode: 400 });
             return {
               visitId,
@@ -204,7 +224,9 @@ router.patch(
               duration: item.duration,
               quantity: item.quantity,
               unitPrice: inventory?.sellingPrice ?? item.unitPrice,
-              instructions: item.instructions
+              instructions: item.instructions,
+              verificationCode,
+              verificationHash: hashPrescriptionVerificationCode(verificationCode)
             };
           })
         });
@@ -226,6 +248,18 @@ router.patch(
         include: { prescriptions: true }
       });
     });
+
+    await recordAuditLog(req, {
+      action: "CREATE_PRESCRIPTION",
+      entityType: "LocalVisit",
+      entityId: updated.id,
+      centerId,
+      newValue: {
+        diagnosis: updated.diagnosis,
+        prescriptionCount: updated.prescriptions.length
+      }
+    });
+
     res.json(updated);
   })
 );
@@ -263,6 +297,18 @@ router.post(
       });
       return { visit: updatedVisit, invoice };
     });
+
+    await recordAuditLog(req, {
+      action: "COMPLETE_VISIT",
+      entityType: "LocalVisit",
+      entityId: result.visit.id,
+      centerId,
+      newValue: {
+        invoiceId: result.invoice.id,
+        amount: result.invoice.amount
+      }
+    });
+
     res.json(result);
   })
 );

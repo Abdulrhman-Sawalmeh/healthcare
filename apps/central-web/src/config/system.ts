@@ -39,7 +39,7 @@ export const systemConfig: FrontendSystemConfig = {
   description: "",
   workspace: "central",
   allowedRoles: ["CENTRAL_ADMIN"],
-  allowedRoutes: ["/", "/centers", "/patients", "/referrals", "/master-data", "/reports", "/notifications"],
+  allowedRoutes: ["/", "/centers", "/patients", "/referrals", "/master-data", "/reports", "/audit-logs", "/notifications"],
   apiUrl: "http://localhost:4000/api",
   storageKey: "healthcare.central-web.token",
   loginEyebrow: "",

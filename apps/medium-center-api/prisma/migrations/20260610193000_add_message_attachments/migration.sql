@@ -1,0 +1,5 @@
+ALTER TABLE "Message"
+ADD COLUMN IF NOT EXISTS "attachmentFileName" TEXT,
+ADD COLUMN IF NOT EXISTS "attachmentMimeType" TEXT,
+ADD COLUMN IF NOT EXISTS "attachmentBase64" TEXT,
+ADD COLUMN IF NOT EXISTS "attachmentSizeBytes" INTEGER;

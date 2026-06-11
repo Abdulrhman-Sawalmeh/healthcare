@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { prisma } from "../lib/prisma";
 import { authorize, authorizeWorkspace, authenticate } from "../middleware/auth";
+import { recordAuditLog } from "../services/audit-log";
 import {
   createCenterDoctor,
   deleteCenterDoctor,
@@ -23,6 +24,11 @@ import {
   getCenterWorkspaceData
 } from "../services/network-queries";
 import { ensurePatientPortalAccount } from "../services/patient-accounts";
+import {
+  buildPrescriptionQrValue,
+  createPrescriptionVerificationCode,
+  hashPrescriptionVerificationCode
+} from "../services/prescription-verification";
 import { asyncHandler } from "../utils/async-handler";
 import { visitWorkflowRouter } from "./visit-workflow";
 
@@ -127,6 +133,118 @@ router.get(
 );
 
 router.get(
+  "/audit-logs",
+  authorize("CENTER_MANAGER"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const limit = Math.min(Number(req.query.limit ?? 80), 200);
+    const action = typeof req.query.action === "string" ? req.query.action : undefined;
+    const entityType = typeof req.query.entityType === "string" ? req.query.entityType : undefined;
+
+    const logs = await prisma.auditLog.findMany({
+      where: {
+        centerId,
+        ...(action ? { action } : {}),
+        ...(entityType ? { entityType } : {})
+      },
+      include: {
+        center: {
+          select: {
+            centerName: true,
+            centerCode: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: limit
+    });
+
+    res.json(logs);
+  })
+);
+
+router.get(
+  "/prescriptions/verify/:code",
+  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "PHARMACIST", "LAB_TECH", "NURSE"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const rawCode = String(req.params.code ?? "").trim();
+    const code = rawCode.startsWith("healthcare-prescription:")
+      ? rawCode.replace("healthcare-prescription:", "")
+      : rawCode;
+
+    const prescription = await prisma.localPrescription.findFirst({
+      where: {
+        verificationCode: code,
+        visit: {
+          centerId
+        }
+      },
+      include: {
+        visit: {
+          include: {
+            center: true,
+            patient: true,
+            doctor: {
+              select: {
+                id: true,
+                fullName: true,
+                role: true
+              }
+            }
+          }
+        }
+      }
+    });
+    const authentic = Boolean(
+      prescription &&
+        (!prescription.verificationHash || prescription.verificationHash === hashPrescriptionVerificationCode(code))
+    );
+
+    await recordAuditLog(req, {
+      action: "VERIFY_PRESCRIPTION",
+      entityType: "LocalPrescription",
+      entityId: prescription?.id,
+      centerId,
+      newValue: {
+        code,
+        authentic
+      }
+    });
+
+    res.json({
+      authentic,
+      qrValue: buildPrescriptionQrValue(code),
+      prescription: prescription
+        ? {
+            id: prescription.id,
+            verificationCode: prescription.verificationCode,
+            issuedAt: prescription.issuedAt,
+            medicineName: prescription.medicineName,
+            dosage: prescription.dosage,
+            duration: prescription.duration,
+            quantity: prescription.quantity,
+            instructions: prescription.instructions,
+            dispensed: prescription.dispensed,
+            visit: {
+              id: prescription.visit.id,
+              visitDate: prescription.visit.visitDate,
+              diagnosis: prescription.visit.diagnosis,
+              patientName: prescription.visit.patient.fullName,
+              patientUnifiedId: prescription.visit.patient.unifiedId,
+              doctorName: prescription.visit.doctor?.fullName ?? "غير محدد",
+              centerName: prescription.visit.center.centerName,
+              centerCode: prescription.visit.center.centerCode
+            }
+          }
+        : null
+    });
+  })
+);
+
+router.get(
   "/doctors",
   authorize("CENTER_MANAGER"),
   asyncHandler(async (req, res) => {
@@ -139,14 +257,25 @@ router.post(
   authorize("CENTER_MANAGER"),
   asyncHandler(async (req, res) => {
     const payload = doctorAccountSchema.extend({ password: z.string().min(6) }).parse(req.body);
-    res.status(201).json(
-      await createCenterDoctor({
+    const result = await createCenterDoctor({
         ...payload,
         centerId: getCenterId(req),
         username: payload.username ?? "",
         createdById: Number(req.auth!.sub)
-      })
-    );
+      });
+
+    await recordAuditLog(req, {
+      action: "CREATE_DOCTOR",
+      entityType: "CenterUserAccount",
+      entityId: result.doctor.id,
+      newValue: {
+        username: result.doctor.username,
+        fullName: result.doctor.fullName,
+        specialization: result.doctor.profile?.specialization
+      }
+    });
+
+    res.status(201).json(result);
   })
 );
 
@@ -155,14 +284,25 @@ router.put(
   authorize("CENTER_MANAGER"),
   asyncHandler(async (req, res) => {
     const payload = doctorAccountSchema.parse(req.body);
-    res.json(
-      await updateCenterDoctor({
+    const result = await updateCenterDoctor({
         ...payload,
         centerId: getCenterId(req),
         doctorId: Number(req.params.doctorId),
         username: payload.username ?? ""
-      })
-    );
+      });
+
+    await recordAuditLog(req, {
+      action: "UPDATE_DOCTOR",
+      entityType: "CenterUserAccount",
+      entityId: result.doctor.id,
+      newValue: {
+        username: result.doctor.username,
+        fullName: result.doctor.fullName,
+        isActive: result.doctor.isActive
+      }
+    });
+
+    res.json(result);
   })
 );
 
@@ -170,7 +310,16 @@ router.delete(
   "/doctors/:doctorId",
   authorize("CENTER_MANAGER"),
   asyncHandler(async (req, res) => {
-    res.json(await deleteCenterDoctor(getCenterId(req), Number(req.params.doctorId)));
+    const doctorId = Number(req.params.doctorId);
+    const result = await deleteCenterDoctor(getCenterId(req), doctorId);
+
+    await recordAuditLog(req, {
+      action: "DELETE_DOCTOR",
+      entityType: "CenterUserAccount",
+      entityId: doctorId
+    });
+
+    res.json(result);
   })
 );
 
@@ -378,6 +527,18 @@ router.post(
       chronicDiseases: payload.chronicDiseases
     });
 
+    await recordAuditLog(req, {
+      action: hadUnifiedPatient ? "UPDATE_PATIENT" : "CREATE_PATIENT",
+      entityType: "LocalPatient",
+      entityId: localPatient.id,
+      centerId,
+      newValue: {
+        fullName: localPatient.fullName,
+        unifiedId: localPatient.unifiedId,
+        phone: localPatient.phone
+      }
+    });
+
     res.status(201).json({
       success: true,
       unifiedId: unifiedPatient.unifiedId,
@@ -424,15 +585,34 @@ router.post(
 
     if (payload.prescriptions.length > 0) {
       await prisma.localPrescription.createMany({
-        data: payload.prescriptions.map((prescription) => ({
-          visitId: visit.id,
-          medicineName: prescription.medicineName,
-          dosage: prescription.dosage,
-          duration: prescription.duration,
-          instructions: prescription.instructions
-        }))
+        data: payload.prescriptions.map((prescription, index) => {
+          const verificationCode = createPrescriptionVerificationCode(centerId, visit.id, index);
+
+          return {
+            visitId: visit.id,
+            medicineName: prescription.medicineName,
+            dosage: prescription.dosage,
+            duration: prescription.duration,
+            instructions: prescription.instructions,
+            verificationCode,
+            verificationHash: hashPrescriptionVerificationCode(verificationCode)
+          };
+        })
       });
     }
+
+    await recordAuditLog(req, {
+      action: "CREATE_VISIT",
+      entityType: "LocalVisit",
+      entityId: visit.id,
+      centerId,
+      newValue: {
+        patientId: payload.patientId,
+        doctorId: visit.doctorId,
+        visitType: visit.visitType,
+        prescriptionCount: payload.prescriptions.length
+      }
+    });
 
     res.status(201).json(visit);
   })
@@ -558,6 +738,18 @@ router.post(
       await processOutgoingNotifications(centerId);
     }
 
+    await recordAuditLog(req, {
+      action: "CREATE_REFERRAL",
+      entityType: "OutgoingNotification",
+      entityId: queueItem.id,
+      centerId,
+      newValue: {
+        patientUnifiedId,
+        requiredSpecialty: payload.requiredSpecialty,
+        priority: payload.priority
+      }
+    });
+
     res.status(201).json(queueItem);
   })
 );
@@ -586,6 +778,18 @@ router.post(
       }
     });
 
+    await recordAuditLog(req, {
+      action: "CREATE_LAB_REQUEST",
+      entityType: "LabRequestLocal",
+      entityId: requestRecord.id,
+      centerId,
+      newValue: {
+        patientId: requestRecord.patientId,
+        doctorId: requestRecord.doctorId,
+        testId: requestRecord.testId
+      }
+    });
+
     res.status(201).json(requestRecord);
   })
 );
@@ -601,6 +805,17 @@ router.patch(
         status: payload.status,
         resultValue: payload.resultValue,
         resultDate: payload.status === "COMPLETED" ? new Date() : null
+      }
+    });
+
+    await recordAuditLog(req, {
+      action: "UPDATE_LAB_RESULT",
+      entityType: "LabRequestLocal",
+      entityId: record.id,
+      centerId: getCenterId(req),
+      newValue: {
+        status: record.status,
+        resultValue: record.resultValue
       }
     });
 

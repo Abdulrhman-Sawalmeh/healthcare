@@ -470,6 +470,7 @@ model CentralCenter {
   outgoingNotifications  OutgoingNotification[]
   processingLogs         NotificationProcessingLog[]
   alerts                 CenterSystemAlert[]
+  auditLogs              AuditLog[]
   unifiedVisits          UnifiedVisit[]
   referralsFrom          CentralReferral[]                  @relation("NetworkReferralFromCenter")
   referralsTo            CentralReferral[]                  @relation("NetworkReferralToCenter")
@@ -779,14 +780,19 @@ model LocalVisit {
 }
 
 model LocalPrescription {
-  id           Int       @id @default(autoincrement())
-  visitId       Int
-  medicineName  String
-  dosage        String
-  duration      String
-  instructions  String?
-  dispensed     Boolean   @default(false)
-  visit         LocalVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  id               Int        @id @default(autoincrement())
+  visitId          Int
+  medicineName     String
+  dosage           String
+  duration         String
+  instructions     String?
+  dispensed        Boolean    @default(false)
+  verificationCode String?    @unique
+  verificationHash String?
+  issuedAt         DateTime   @default(now())
+  visit            LocalVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([verificationCode])
 }
 
 model LocalInvoice {
@@ -927,4 +933,25 @@ model CenterSystemAlert {
   center      CentralCenter @relation(fields: [centerId], references: [id], onDelete: Cascade)
 
   @@index([centerId, severity, createdAt])
+}
+
+model AuditLog {
+  id            Int            @id @default(autoincrement())
+  centerId      Int?
+  actorUserId   String?
+  actorUsername String?
+  actorRole     String?
+  workspace     String?
+  action        String
+  entityType    String
+  entityId      String?
+  oldValue      Json?
+  newValue      Json?
+  ipAddress     String?
+  createdAt     DateTime       @default(now())
+  center        CentralCenter? @relation(fields: [centerId], references: [id], onDelete: SetNull)
+
+  @@index([centerId, createdAt])
+  @@index([action, createdAt])
+  @@index([entityType, entityId])
 }

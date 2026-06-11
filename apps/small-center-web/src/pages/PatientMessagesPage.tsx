@@ -1,14 +1,87 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { apiRequest } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
 import { formatDateTime } from "../lib/arabic";
-import { PortalDoctorRecord, PortalSummary, PortalThreadRecord } from "../types";
+import {
+  PortalConversationPatientOption,
+  PortalDoctorRecord,
+  PortalSummary,
+  PortalThreadRecord
+} from "../types";
+
+type MessageAttachmentDraft = {
+  fileName: string;
+  mimeType: string;
+  contentBase64: string;
+  sizeBytes: number;
+};
+
+type MessageAttachment = NonNullable<PortalThreadRecord["messages"][number]["attachment"]>;
+
+const maxAttachmentSizeBytes = 3_500_000;
 
 function sortThreads(threads: PortalThreadRecord[]) {
   return [...threads].sort(
     (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+  );
+}
+
+function attachmentDataUrl(attachment: Pick<MessageAttachment, "mimeType" | "contentBase64">) {
+  return `data:${attachment.mimeType};base64,${attachment.contentBase64}`;
+}
+
+function formatFileSize(sizeBytes: number) {
+  if (sizeBytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
+  }
+
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function readFileAsAttachment(file: File): Promise<MessageAttachmentDraft> {
+  if (file.size > maxAttachmentSizeBytes) {
+    return Promise.reject(new Error("حجم الملف أكبر من الحد المسموح 3.5MB."));
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      const contentBase64 = result.includes(",") ? result.split(",")[1] : result;
+
+      resolve({
+        fileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        contentBase64,
+        sizeBytes: file.size
+      });
+    };
+    reader.onerror = () => reject(new Error("تعذر قراءة الملف."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function AttachmentView({ attachment }: { attachment: MessageAttachment }) {
+  const url = attachmentDataUrl(attachment);
+
+  return (
+    <div className="message-attachment">
+      {attachment.mimeType.startsWith("image/") ? (
+        <a href={url} download={attachment.fileName} target="_blank" rel="noreferrer">
+          <img src={url} alt={attachment.fileName} />
+        </a>
+      ) : attachment.mimeType.startsWith("audio/") ? (
+        <audio controls src={url}>
+          <a href={url} download={attachment.fileName}>تحميل التسجيل</a>
+        </audio>
+      ) : null}
+      <a className="message-attachment-link" href={url} download={attachment.fileName}>
+        {attachment.fileName} - {formatFileSize(attachment.sizeBytes)}
+      </a>
+    </div>
   );
 }
 
@@ -34,6 +107,45 @@ function getPartnerName(thread: PortalThreadRecord, isDoctorView: boolean) {
   return isDoctorView ? thread.patient.fullName : thread.doctor.fullName;
 }
 
+function getPatientIdentifierLabel(patient: Pick<PortalThreadRecord["patient"], "medicalRecordNumber" | "nationalId">) {
+  return patient.nationalId ? `رقم الهوية: ${patient.nationalId}` : `رقم الملف: ${patient.medicalRecordNumber}`;
+}
+
+function getPatientOptionFields(option: PortalConversationPatientOption) {
+  return [
+    option.fullName,
+    option.nationalId ?? "",
+    option.medicalRecordNumber,
+    option.unifiedId ?? "",
+    option.phone ?? ""
+  ].map((value) => value.trim().toLowerCase());
+}
+
+function patientOptionMatchesQuery(option: PortalConversationPatientOption, query: string) {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  if (!normalizedQuery) {
+    return false;
+  }
+
+  return getPatientOptionFields(option).some((value) => value.includes(normalizedQuery));
+}
+
+function rankPatientOption(option: PortalConversationPatientOption, query: string) {
+  const normalizedQuery = query.trim().toLowerCase();
+  const fields = getPatientOptionFields(option);
+
+  if (fields.some((value) => value === normalizedQuery)) {
+    return 0;
+  }
+
+  if (fields.some((value) => value.startsWith(normalizedQuery))) {
+    return 1;
+  }
+
+  return 2;
+}
+
 function threadMatchesQuery(thread: PortalThreadRecord, isDoctorView: boolean, query: string) {
   const normalizedQuery = query.trim().toLowerCase();
 
@@ -45,9 +157,15 @@ function threadMatchesQuery(thread: PortalThreadRecord, isDoctorView: boolean, q
   const searchableText = [
     getPartnerName(thread, isDoctorView),
     thread.patient.fullName,
+    thread.patient.nationalId ?? "",
+    thread.patient.medicalRecordNumber,
+    thread.patient.unifiedId ?? "",
+    thread.patient.id,
+    thread.doctor.id,
     thread.doctor.fullName,
     thread.doctor.departmentName,
-    latestMessage?.content ?? ""
+    latestMessage?.content ?? "",
+    latestMessage?.attachment?.fileName ?? ""
   ]
     .join(" ")
     .toLowerCase();
@@ -60,15 +178,20 @@ export function PatientMessagesPage() {
   const { t } = useLanguage();
   const [threads, setThreads] = useState<PortalThreadRecord[]>([]);
   const [doctors, setDoctors] = useState<PortalDoctorRecord[]>([]);
+  const [patientOptions, setPatientOptions] = useState<PortalConversationPatientOption[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string>("");
   const [newDoctorId, setNewDoctorId] = useState("");
-  const [newThreadMessage, setNewThreadMessage] = useState("");
   const [replyMessage, setReplyMessage] = useState("");
+  const [replyAttachment, setReplyAttachment] = useState<MessageAttachmentDraft | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
   const [conversationQuery, setConversationQuery] = useState("");
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
   const [patientSubscriptionActive, setPatientSubscriptionActive] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
   const isDoctorView = user?.role === "DOCTOR";
 
   async function loadData(showLoading = false) {
@@ -79,17 +202,21 @@ export function PatientMessagesPage() {
     setError("");
 
     try {
-      const [threadsPayload, doctorsPayload, summaryPayload] = await Promise.all([
+      const [threadsPayload, doctorsPayload, summaryPayload, patientOptionsPayload] = await Promise.all([
         apiRequest<PortalThreadRecord[]>("/portal/communications/threads"),
         isDoctorView
           ? Promise.resolve([] as PortalDoctorRecord[])
           : apiRequest<PortalDoctorRecord[]>("/portal/doctors"),
-        isDoctorView ? Promise.resolve(null) : apiRequest<PortalSummary>("/portal/summary")
+        isDoctorView ? Promise.resolve(null) : apiRequest<PortalSummary>("/portal/summary"),
+        isDoctorView
+          ? apiRequest<PortalConversationPatientOption[]>("/portal/communications/patient-options")
+          : Promise.resolve([] as PortalConversationPatientOption[])
       ]);
 
       const sortedThreads = sortThreads(threadsPayload);
       setThreads(sortedThreads);
       setDoctors(doctorsPayload);
+      setPatientOptions(patientOptionsPayload);
       setPatientSubscriptionActive(isDoctorView || (summaryPayload?.stats.activeSubscriptions ?? 0) > 0);
       setSelectedThreadId((currentThreadId) =>
         currentThreadId && sortedThreads.some((thread) => thread.id === currentThreadId)
@@ -114,6 +241,13 @@ export function PatientMessagesPage() {
       window.clearInterval(intervalId);
     };
   }, [isDoctorView]);
+
+  useEffect(() => {
+    return () => {
+      mediaRecorderRef.current?.stop();
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
 
   const selectedThread = useMemo(
     () => threads.find((thread) => thread.id === selectedThreadId) ?? null,
@@ -145,6 +279,25 @@ export function PatientMessagesPage() {
       }),
     [conversationQuery, isDoctorView, showUnreadOnly, threads, user?.role]
   );
+  const patientSuggestions = useMemo(() => {
+    if (!isDoctorView || !conversationQuery.trim()) {
+      return [];
+    }
+
+    return patientOptions
+      .filter((option) => patientOptionMatchesQuery(option, conversationQuery))
+      .sort((left, right) => {
+        const rankDifference =
+          rankPatientOption(left, conversationQuery) - rankPatientOption(right, conversationQuery);
+
+        if (rankDifference !== 0) {
+          return rankDifference;
+        }
+
+        return left.fullName.localeCompare(right.fullName, "ar");
+      })
+      .slice(0, 8);
+  }, [conversationQuery, isDoctorView, patientOptions]);
 
   useEffect(() => {
     if (!selectedThread || !user) {
@@ -170,8 +323,8 @@ export function PatientMessagesPage() {
   async function handleCreateThread(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!newDoctorId || !newThreadMessage.trim()) {
-      setError(t("يرجى اختيار الطبيب وكتابة الرسالة الافتتاحية.", "Choose a doctor and write the first message."));
+    if (!newDoctorId) {
+      setError(t("يرجى اختيار الطبيب.", "Choose a doctor."));
       return;
     }
 
@@ -179,13 +332,11 @@ export function PatientMessagesPage() {
       const thread = await apiRequest<PortalThreadRecord>("/portal/communications/threads", {
         method: "POST",
         body: JSON.stringify({
-          doctorId: newDoctorId,
-          initialMessage: newThreadMessage
+          doctorId: newDoctorId
         })
       });
 
       setNewDoctorId("");
-      setNewThreadMessage("");
       setConversationQuery("");
       setShowUnreadOnly(false);
       setSelectedThreadId(thread.id);
@@ -196,10 +347,117 @@ export function PatientMessagesPage() {
     }
   }
 
+  async function handleSelectPatientOption(option: PortalConversationPatientOption) {
+    setShowUnreadOnly(false);
+
+    if (option.threadId) {
+      setSelectedThreadId(option.threadId);
+      setConversationQuery(option.fullName.trim());
+      return;
+    }
+
+    try {
+      const thread = await apiRequest<PortalThreadRecord>("/portal/communications/threads", {
+        method: "POST",
+        body: JSON.stringify({
+          patientId: option.id
+        })
+      });
+
+      setThreads((currentThreads) => upsertThread(currentThreads, thread));
+      setPatientOptions((currentOptions) =>
+        currentOptions.map((currentOption) =>
+          currentOption.id === option.id
+            ? {
+                ...currentOption,
+                threadId: thread.id
+              }
+            : currentOption
+        )
+      );
+      setSelectedThreadId(thread.id);
+      setConversationQuery(option.fullName.trim());
+      setError("");
+    } catch {
+      setError(t("تعذر فتح محادثة لهذا المريض.", "Could not open a conversation for this patient."));
+    }
+  }
+
+  async function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    try {
+      setReplyAttachment(await readFileAsAttachment(file));
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "تعذر إرفاق الملف.");
+    }
+  }
+
+  async function startRecording() {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setError("التسجيل الصوتي غير مدعوم في هذا المتصفح.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      recordingChunksRef.current = [];
+      recordingStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordingChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const mimeType = recorder.mimeType || "audio/webm";
+        const blob = new Blob(recordingChunksRef.current, { type: mimeType });
+        stream.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+        mediaRecorderRef.current = null;
+        setIsRecording(false);
+
+        if (blob.size === 0) {
+          return;
+        }
+
+        try {
+          const extension = mimeType.includes("mp4") ? "m4a" : "webm";
+          const file = new File([blob], `voice-note-${Date.now()}.${extension}`, { type: mimeType });
+          setReplyAttachment(await readFileAsAttachment(file));
+          setError("");
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : "تعذر حفظ التسجيل الصوتي.");
+        }
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      setError("");
+    } catch {
+      setError("تعذر الوصول إلى الميكروفون. تحقق من صلاحيات المتصفح.");
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+  }
+
   async function handleReply(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!selectedThread || !replyMessage.trim()) {
+    if (!selectedThread || (!replyMessage.trim() && !replyAttachment)) {
       return;
     }
 
@@ -209,12 +467,14 @@ export function PatientMessagesPage() {
         {
           method: "POST",
           body: JSON.stringify({
-            content: replyMessage
+            content: replyMessage,
+            attachment: replyAttachment
           })
         }
       );
 
       setReplyMessage("");
+      setReplyAttachment(null);
       setThreads((currentThreads) => upsertThread(currentThreads, updatedThread));
       setError("");
     } catch {
@@ -276,12 +536,45 @@ export function PatientMessagesPage() {
           <div className="conversation-tools">
             <label className="field compact-field">
               <span>{t("بحث", "Search")}</span>
-              <input
-                value={conversationQuery}
-                onChange={(event) => setConversationQuery(event.target.value)}
-                placeholder={isDoctorView ? t("اسم المريض أو آخر رسالة", "Patient name or latest message") : t("اسم الطبيب أو آخر رسالة", "Doctor name or latest message")}
-              />
+              {isDoctorView ? (
+                <input
+                  value={conversationQuery}
+                  onChange={(event) => setConversationQuery(event.target.value)}
+                  placeholder={t("اسم المريض أو رقم الهوية/الملف أو آخر رسالة", "Patient name, ID/record number, or latest message")}
+                />
+              ) : (
+                <select value={conversationQuery} onChange={(event) => setConversationQuery(event.target.value)}>
+                  <option value="">{t("كل الأطباء", "All doctors")}</option>
+                  {doctors.map((doctor) => (
+                    <option key={doctor.id} value={doctor.id}>
+                      {doctor.fullName} - {doctor.specialization}
+                    </option>
+                  ))}
+                </select>
+              )}
             </label>
+            {patientSuggestions.length > 0 ? (
+              <div className="conversation-suggestions" role="listbox">
+                {patientSuggestions.map((option) => (
+                  <button
+                    key={option.id}
+                    className="conversation-suggestion"
+                    type="button"
+                    onClick={() => void handleSelectPatientOption(option)}
+                  >
+                    <strong>{option.fullName.trim()}</strong>
+                    <span>
+                      {option.nationalId
+                        ? `رقم الهوية: ${option.nationalId}`
+                        : `رقم الملف: ${option.medicalRecordNumber}`}
+                    </span>
+                    <small>
+                      {option.threadId ? t("محادثة موجودة", "Existing chat") : t("فتح محادثة جديدة", "Open new chat")}
+                    </small>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <button
               className={showUnreadOnly ? "ghost-button active-filter" : "ghost-button"}
               type="button"
@@ -303,14 +596,6 @@ export function PatientMessagesPage() {
                     </option>
                   ))}
                 </select>
-              </label>
-              <label className="field compact-field">
-                <span>{t("الرسالة الأولى", "First message")}</span>
-                <textarea
-                  value={newThreadMessage}
-                  onChange={(event) => setNewThreadMessage(event.target.value)}
-                  placeholder={t("اكتب سبب التواصل باختصار", "Write the reason for contact")}
-                />
               </label>
               <button className="primary-button" type="submit">
                 {t("فتح محادثة", "Open chat")}
@@ -339,9 +624,15 @@ export function PatientMessagesPage() {
                     ) : null}
                   </div>
                   <span className="thread-meta">
-                    {isDoctorView ? t("مريض", "Patient") : thread.doctor.departmentName}
+                    {isDoctorView
+                      ? getPatientIdentifierLabel(thread.patient)
+                      : thread.doctor.departmentName}
                   </span>
-                  <span className="thread-preview">{latestMessage?.content ?? t("لا توجد رسائل بعد.", "No messages yet.")}</span>
+                  <span className="thread-preview">
+                    {latestMessage?.content ||
+                      latestMessage?.attachment?.fileName ||
+                      t("لا توجد رسائل بعد.", "No messages yet.")}
+                  </span>
                   <span className="thread-time">{latestMessage ? formatDateTime(latestMessage.createdAt) : "-"}</span>
                 </button>
               );
@@ -372,7 +663,7 @@ export function PatientMessagesPage() {
               {selectedThread ? (
                 <span className="muted">
                   {isDoctorView
-                    ? t("مريض", "Patient")
+                    ? getPatientIdentifierLabel(selectedThread.patient)
                     : selectedThread.doctor.departmentName}
                 </span>
               ) : null}
@@ -398,6 +689,7 @@ export function PatientMessagesPage() {
                   >
                     <strong>{message.sender.fullName}</strong>
                     <p>{message.content}</p>
+                    {message.attachment ? <AttachmentView attachment={message.attachment} /> : null}
                     <span>{formatDateTime(message.createdAt)}</span>
                   </div>
                 ))}
@@ -414,7 +706,38 @@ export function PatientMessagesPage() {
                       : t("اكتب رسالتك للطبيب هنا...", "Write your message to the doctor here...")
                   }
                 />
-                <button className="primary-button" disabled={!isDoctorView && !patientSubscriptionActive} type="submit">
+                <div className="message-tools">
+                  <label className="ghost-button attachment-picker">
+                    إرفاق ملف
+                    <input
+                      type="file"
+                      accept="image/*,audio/*,application/pdf,.doc,.docx,.txt"
+                      disabled={!isDoctorView && !patientSubscriptionActive}
+                      onChange={handleAttachmentChange}
+                    />
+                  </label>
+                  <button
+                    className={isRecording ? "ghost-button active-filter" : "ghost-button"}
+                    disabled={!isDoctorView && !patientSubscriptionActive}
+                    type="button"
+                    onClick={isRecording ? stopRecording : startRecording}
+                  >
+                    {isRecording ? "إيقاف التسجيل" : "تسجيل صوتي"}
+                  </button>
+                </div>
+                {replyAttachment ? (
+                  <div className="attachment-preview">
+                    <span>{replyAttachment.fileName} - {formatFileSize(replyAttachment.sizeBytes)}</span>
+                    <button className="ghost-button" type="button" onClick={() => setReplyAttachment(null)}>
+                      إزالة
+                    </button>
+                  </div>
+                ) : null}
+                <button
+                  className="primary-button"
+                  disabled={(!isDoctorView && !patientSubscriptionActive) || (!replyMessage.trim() && !replyAttachment)}
+                  type="submit"
+                >
                   {t("إرسال الرسالة", "Send message")}
                 </button>
               </form>

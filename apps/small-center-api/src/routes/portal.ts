@@ -370,7 +370,7 @@ router.get(
       nextAppointment: upcomingAppointments[0] ? mapAppointment(upcomingAppointments[0]) : null,
       recentReports: clinicalReports.slice(0, 3),
       careTeam: doctors.slice(0, 4).map(mapDoctor),
-      recentThreads: threads.slice(0, 3).map(mapThread),
+      recentThreads: threads.slice(0, 3).map((thread) => mapThread(thread)),
       recentNotifications: notifications,
       subscriptions: subscriptions.map(mapSubscription)
     });

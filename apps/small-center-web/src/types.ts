@@ -769,6 +769,9 @@ export interface PortalThreadRecord {
   patient: {
     id: string;
     fullName: string;
+    medicalRecordNumber: string;
+    nationalId?: string | null;
+    unifiedId?: string | null;
   };
   doctor: {
     id: string;
@@ -780,12 +783,28 @@ export interface PortalThreadRecord {
     content: string;
     createdAt: string;
     isRead: boolean;
+    attachment?: {
+      fileName: string;
+      mimeType: string;
+      contentBase64: string;
+      sizeBytes: number;
+    } | null;
     sender: {
       id: string;
       fullName: string;
       role: string;
     };
   }>;
+}
+
+export interface PortalConversationPatientOption {
+  id: string;
+  fullName: string;
+  phone?: string | null;
+  medicalRecordNumber: string;
+  nationalId?: string | null;
+  unifiedId?: string | null;
+  threadId?: string | null;
 }
 
 export interface PortalSubscriptionRecord {
@@ -871,4 +890,27 @@ export interface PortalMedicalRecord {
   upcomingAppointments: PortalAppointmentRecord[];
   referrals: PortalReferralRecord[];
   subscriptions: PortalSubscriptionRecord[];
+}
+
+export type AiCareInsightContext = "PATIENT_SELF_CARE" | "CLINICAL_TRIAGE" | "FOLLOW_UP";
+
+export interface AiCareInsightRequest {
+  message: string;
+  patientAge?: number;
+  gender?: string;
+  chronicDiseases?: string;
+  allergies?: string;
+  currentMedications?: string;
+  context?: AiCareInsightContext;
+}
+
+export interface AiCareInsightResponse {
+  source: "gemini";
+  urgency: "LOW" | "ROUTINE" | "URGENT" | "EMERGENCY";
+  summary: string;
+  suggestedActions: string[];
+  questionsForClinician: string[];
+  redFlags: string[];
+  selfCare: string[];
+  disclaimer: string;
 }

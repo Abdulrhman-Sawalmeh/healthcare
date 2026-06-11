@@ -47,10 +47,12 @@ export const systemConfig: FrontendSystemConfig = {
     "/medical-record",
     "/doctors",
     "/messages",
+    "/ai-assistant",
     "/patients",
     "/visits",
     "/visit-workflow",
     "/referrals",
+    "/prescription-verification",
     "/notifications"
   ],
   allowedCenterCode: "M002",

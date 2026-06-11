@@ -15,6 +15,26 @@ function splitCsv(value: string) {
     .filter(Boolean);
 }
 
+function isPlaceholderText(value?: string | null) {
+  const normalizedValue = value?.trim() ?? "";
+
+  return normalizedValue.length > 0 && /^[?\s]+$/.test(normalizedValue);
+}
+
+function getPatientDisplayName(fullName: string, index = 0) {
+  if (isPlaceholderText(fullName)) {
+    return `مريض افتراضي ${index + 1}`;
+  }
+
+  return fullName;
+}
+
+function getChronicDiseasesLabel(chronicDiseases: string[]) {
+  const validDiseases = chronicDiseases.filter((disease) => !isPlaceholderText(disease));
+
+  return validDiseases.length > 0 ? validDiseases.join("، ") : "لا توجد أمراض مزمنة مسجلة.";
+}
+
 export function PatientsPage() {
   const { user } = useAuth();
   const [centralPatients, setCentralPatients] = useState<UnifiedPatientRecord[]>([]);
@@ -142,10 +162,10 @@ export function PatientsPage() {
           {error ? <div className="error-banner">{error}</div> : null}
 
           <div className="card-grid">
-            {centralPatients.map((patient) => (
+            {centralPatients.map((patient, index) => (
               <Link key={patient.id} to={`/patients/${patient.id}`} className="profile-tile interactive-card">
                 <p className="eyebrow">{patient.unifiedId}</p>
-                <h3>{patient.fullName}</h3>
+                <h3>{getPatientDisplayName(patient.fullName, index)}</h3>
                 <p>{patient.primaryPhone}</p>
                 <div className="tile-stats">
                   <span>{patient.visitCount} زيارات حديثة</span>
@@ -153,9 +173,7 @@ export function PatientsPage() {
                   <span>{patient.centersSeenAt.length} مراكز مرتبطة</span>
                 </div>
                 <p className="muted">
-                  {patient.chronicDiseases.length > 0
-                    ? patient.chronicDiseases.join("، ")
-                    : "لا توجد أمراض مزمنة مسجلة."}
+                  {getChronicDiseasesLabel(patient.chronicDiseases)}
                 </p>
                 <div className="chip-row">
                   {patient.centersSeenAt.map((center) => (
@@ -200,7 +218,7 @@ export function PatientsPage() {
               </div>
               {searchResult.patient ? (
                 <article className="stack-item">
-                  <strong>{searchResult.patient.fullName}</strong>
+                  <strong>{getPatientDisplayName(searchResult.patient.fullName)}</strong>
                   <p className="muted">{joinMeta([searchResult.patient.unifiedId, searchResult.patient.primaryPhone])}</p>
                 </article>
               ) : (
@@ -317,10 +335,10 @@ export function PatientsPage() {
         {error ? <div className="error-banner">{error}</div> : null}
 
         <div className="card-grid">
-          {localPatients.map((patient) => (
+          {localPatients.map((patient, index) => (
             <Link key={patient.id} to={`/patients/${patient.id}`} className="profile-tile interactive-card">
               <p className="eyebrow">{patient.unifiedId ?? "سجل محلي فقط"}</p>
-              <h3>{patient.fullName}</h3>
+              <h3>{getPatientDisplayName(patient.fullName, index)}</h3>
               <p>{patient.phone}</p>
               <div className="tile-stats">
                 <span>{patient.visitCount} زيارات</span>
@@ -328,9 +346,7 @@ export function PatientsPage() {
                 <span>{patient.bloodType ?? "فصيلة الدم غير مسجلة"}</span>
               </div>
               <p className="muted">
-                {patient.chronicDiseases.length > 0
-                  ? patient.chronicDiseases.join("، ")
-                  : "لا توجد أمراض مزمنة مسجلة."}
+                {getChronicDiseasesLabel(patient.chronicDiseases)}
               </p>
               <span className="action-hint">عرض أو تعديل ملف المريض</span>
             </Link>
