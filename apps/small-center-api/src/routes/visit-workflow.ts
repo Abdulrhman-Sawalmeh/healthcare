@@ -43,6 +43,10 @@ const doctorAssessmentSchema = z.object({
   })).default([])
 });
 
+const assignDoctorSchema = z.object({
+  doctorId: z.coerce.number().int().positive()
+});
+
 function centerIdFromRequest(req: any) {
   return Number(req.auth?.centerId);
 }
@@ -115,6 +119,50 @@ router.get(
       orderBy: [{ medicineName: "asc" }, { expiryDate: "asc" }]
     });
     res.json({ medicines });
+  })
+);
+
+router.patch(
+  "/:visitId/assign-doctor",
+  authorize("CENTER_MANAGER", "RECEPTIONIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = centerIdFromRequest(req);
+    const visitId = Number(req.params.visitId);
+    const payload = assignDoctorSchema.parse(req.body);
+    await requireVisit(centerId, visitId);
+
+    const doctor = await prisma.centerUserAccount.findFirst({
+      where: { id: payload.doctorId, centerId, role: "DOCTOR", isActive: true },
+      select: { id: true }
+    });
+
+    if (!doctor) {
+      return res.status(400).json({ message: "الطبيب المحدد غير متاح في هذا المركز." });
+    }
+
+    const updatedVisit = await prisma.localVisit.update({
+      where: { id: visitId },
+      data: {
+        doctorId: payload.doctorId,
+        workflowStatus: "WAITING_DOCTOR"
+      },
+      include: {
+        patient: true,
+        doctor: { select: { id: true, fullName: true, role: true } },
+        prescriptions: true,
+        invoice: true
+      }
+    });
+
+    await recordAuditLog(req, {
+      action: "ASSIGN_VISIT_DOCTOR",
+      entityType: "LocalVisit",
+      entityId: visitId,
+      centerId,
+      newValue: { doctorId: payload.doctorId, workflowStatus: updatedVisit.workflowStatus }
+    });
+
+    res.json(updatedVisit);
   })
 );
 

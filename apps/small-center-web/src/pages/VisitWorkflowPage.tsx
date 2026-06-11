@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
@@ -6,19 +6,36 @@ import { useAuth } from "../context/AuthContext";
 
 type WorkflowVisit = {
   id: number;
+  visitDate?: string | null;
+  visitTime?: string | null;
+  visitType?: string | null;
+  symptoms?: string | null;
+  notes?: string | null;
+  bloodPressure?: string | null;
+  temperature?: number | null;
+  heartRate?: number | null;
+  checkedInAt?: string | null;
   priority: "NORMAL" | "URGENT" | "EMERGENCY";
   workflowStatus: string;
   uploadStatus: string;
   uploadError?: string | null;
-  diagnosis?: string;
-  patient: { fullName: string; phone: string };
-  doctor?: { fullName: string } | null;
-  invoice?: { amount: number; paidAmount: number } | null;
-  prescriptions: Array<{ id: number; medicineName: string; dosage: string; quantity: number }>;
+  diagnosis?: string | null;
+  patient: { fullName: string; phone: string; unifiedId?: string | null };
+  doctor?: { id?: number; fullName: string } | null;
+  invoice?: { amount: number; paidAmount?: number | null; status?: string | null } | null;
+  prescriptions?: Array<{
+    id: number;
+    medicineName: string;
+    dosage: string;
+    duration?: string | null;
+    quantity: number;
+    instructions?: string | null;
+    dispensed?: boolean;
+  }>;
 };
 
 type IntakeOptions = {
-  patients: Array<{ id: number; fullName: string; phone: string }>;
+  patients: Array<{ id: number; fullName: string; phone: string; unifiedId?: string | null }>;
   doctors: Array<{ id: number; fullName: string }>;
 };
 
@@ -27,15 +44,22 @@ type Catalogs = {
 };
 
 const statusLabels: Record<string, string> = {
+  WAITING_RECEPTION: "بانتظار الاستقبال",
   WAITING_DOCTOR: "بانتظار الطبيب",
   IN_TREATMENT: "قيد المعالجة",
   READY_TO_UPLOAD: "جاهز للرفع",
   UPLOAD_PENDING: "قيد الرفع",
+  UPLOADED: "تم الرفع",
   COMPLETED: "مكتمل",
   CANCELLED: "ملغي"
 };
 
-const priorityLabels = { NORMAL: "عادي", URGENT: "عاجل", EMERGENCY: "طارئ" };
+const priorityLabels: Record<WorkflowVisit["priority"], string> = {
+  NORMAL: "عادي",
+  URGENT: "عاجل",
+  EMERGENCY: "طارئ"
+};
+
 const uploadLabels: Record<string, string> = {
   NOT_READY: "غير جاهز",
   READY: "جاهز",
@@ -44,42 +68,89 @@ const uploadLabels: Record<string, string> = {
   FAILED: "فشل الرفع"
 };
 
+const visitTypeLabels: Record<string, string> = {
+  CONSULTATION: "استشارة",
+  FOLLOW_UP: "متابعة",
+  EMERGENCY: "طوارئ",
+  LAB: "فحص"
+};
+
 function optionalNumber(value: FormDataEntryValue | null) {
   return value ? Number(value) : undefined;
 }
 
+function hasRole(role: string | undefined, allowed: string[]) {
+  return Boolean(role && allowed.includes(role));
+}
+
+function valueOrDash(value?: string | number | null) {
+  return value === undefined || value === null || value === "" ? "غير مسجل" : String(value);
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "غير مسجل";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("ar");
+}
+
+function priorityClass(priority: WorkflowVisit["priority"]) {
+  if (priority === "EMERGENCY") return "danger";
+  if (priority === "URGENT") return "warning";
+  return "neutral";
+}
+
+function statusClass(status: string) {
+  if (["COMPLETED", "UPLOADED", "READY_TO_UPLOAD"].includes(status)) return "success";
+  if (["WAITING_RECEPTION", "WAITING_DOCTOR"].includes(status)) return "warning";
+  if (["CANCELLED", "FAILED"].includes(status)) return "danger";
+  return "neutral";
+}
+
 export function VisitWorkflowPage() {
   const { user } = useAuth();
+  const role = user?.role;
   const [visits, setVisits] = useState<WorkflowVisit[]>([]);
   const [options, setOptions] = useState<IntakeOptions>({ patients: [], doctors: [] });
   const [catalogs, setCatalogs] = useState<Catalogs>({ medicines: [] });
   const [status, setStatus] = useState("");
+  const [selectedVisitId, setSelectedVisitId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const canIntake = user?.role === "CENTER_MANAGER" || user?.role === "RECEPTIONIST";
-  const canAssess = user?.role === "CENTER_MANAGER" || user?.role === "DOCTOR";
+
+  const canIntake = hasRole(role, ["CENTER_MANAGER", "RECEPTIONIST"]);
+  const canAssess = hasRole(role, ["CENTER_MANAGER", "DOCTOR"]);
+  const selectedVisit = useMemo(
+    () => visits.find((visit) => visit.id === selectedVisitId) ?? null,
+    [selectedVisitId, visits]
+  );
 
   const loadVisits = useCallback(async () => {
     const query = status ? `?status=${encodeURIComponent(status)}` : "";
-    setVisits(await apiRequest<WorkflowVisit[]>(`/center/visit-workflow${query}`));
+    const loadedVisits = await apiRequest<WorkflowVisit[]>(`/center/visit-workflow${query}`);
+    setVisits(loadedVisits);
+    setSelectedVisitId((current) => (current && loadedVisits.some((visit) => visit.id === current) ? current : null));
   }, [status]);
 
   const loadPage = useCallback(async () => {
     try {
       setError("");
-      const requests: Promise<unknown>[] = [
-        loadVisits(),
-        apiRequest<IntakeOptions>("/center/visit-workflow/intake-options").then(setOptions)
-      ];
-      if (canAssess) requests.push(apiRequest<Catalogs>("/center/visit-workflow/catalogs").then(setCatalogs));
+      const requests: Promise<unknown>[] = [loadVisits()];
+      if (canIntake || canAssess) {
+        requests.push(apiRequest<IntakeOptions>("/center/visit-workflow/intake-options").then(setOptions));
+      }
+      if (canAssess) {
+        requests.push(apiRequest<Catalogs>("/center/visit-workflow/catalogs").then(setCatalogs));
+      }
       await Promise.all(requests);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر تحميل ملفات الزيارة.");
     }
-  }, [canAssess, loadVisits]);
+  }, [canAssess, canIntake, loadVisits]);
 
-  useEffect(() => { void loadPage(); }, [loadPage]);
+  useEffect(() => {
+    void loadPage();
+  }, [loadPage]);
 
   async function runAction(visitId: number, action: () => Promise<unknown>, success: string) {
     try {
@@ -103,7 +174,7 @@ export function VisitWorkflowPage() {
     try {
       setBusyId(0);
       setError("");
-      await apiRequest("/center/visit-workflow", {
+      const createdVisit = await apiRequest<{ id: number }>("/center/visit-workflow", {
         method: "POST",
         body: JSON.stringify({
           patientId: Number(form.get("patientId")),
@@ -119,6 +190,7 @@ export function VisitWorkflowPage() {
       formElement.reset();
       setMessage("تم تسجيل الزيارة وتحويلها إلى الطبيب.");
       await loadVisits();
+      setSelectedVisitId(createdVisit.id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر تسجيل الزيارة.");
     } finally {
@@ -126,45 +198,72 @@ export function VisitWorkflowPage() {
     }
   }
 
+  function submitAssignDoctor(event: FormEvent<HTMLFormElement>, visitId: number) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    void runAction(
+      visitId,
+      () =>
+        apiRequest(`/center/visit-workflow/${visitId}/assign-doctor`, {
+          method: "PATCH",
+          body: JSON.stringify({ doctorId: Number(form.get("doctorId")) })
+        }),
+      "تم تعيين الطبيب لملف الزيارة."
+    );
+  }
+
   function submitAssessment(event: FormEvent<HTMLFormElement>, visitId: number) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const medicineId = optionalNumber(form.get("medicineId"));
-    const prescriptions = medicineId ? [{
-      medicineId,
-      dosage: String(form.get("dosage") || ""),
-      duration: String(form.get("duration") || ""),
-      quantity: Number(form.get("quantity") || 1),
-      instructions: form.get("instructions") || undefined
-    }] : [];
+    const prescriptions = medicineId
+      ? [
+          {
+            medicineId,
+            dosage: String(form.get("dosage") || ""),
+            duration: String(form.get("duration") || ""),
+            quantity: Number(form.get("quantity") || 1),
+            instructions: form.get("instructions") || undefined
+          }
+        ]
+      : [];
 
-    void runAction(visitId, () => apiRequest(`/center/visit-workflow/${visitId}/doctor`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        diagnosis: form.get("diagnosis"),
-        symptoms: form.get("symptoms") || undefined,
-        bloodPressure: form.get("bloodPressure") || undefined,
-        temperature: optionalNumber(form.get("temperature")),
-        heartRate: optionalNumber(form.get("heartRate")),
-        notes: form.get("notes") || undefined,
-        prescriptions
-      })
-    }), "تم حفظ تقييم الطبيب.");
+    void runAction(
+      visitId,
+      () =>
+        apiRequest(`/center/visit-workflow/${visitId}/doctor`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            diagnosis: form.get("diagnosis"),
+            symptoms: form.get("symptoms") || undefined,
+            bloodPressure: form.get("bloodPressure") || undefined,
+            temperature: optionalNumber(form.get("temperature")),
+            heartRate: optionalNumber(form.get("heartRate")),
+            notes: form.get("notes") || undefined,
+            prescriptions
+          })
+        }),
+      "تم حفظ تقييم الطبيب."
+    );
   }
 
   return (
     <div className="page-stack">
       <header className="page-panel section-header">
         <div>
-          <p className="eyebrow">سير عمل الأدوار داخل المركز</p>
+          <p className="eyebrow">سير عمل الزيارة داخل المركز</p>
           <h1>ملفات الزيارة والمتابعة</h1>
-          <p className="muted">الاستقبال يسجل الزيارة، والطبيب يكمل الملف، والمدير يتابع الفاتورة والرفع.</p>
+          <p className="muted">تظهر الملفات في جدول، ويتم فتح ملف واحد فقط عند الحاجة لمراجعته أو تعديله.</p>
         </div>
         <label className="field">
           <span>حالة الملف</span>
           <select value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="">جميع الحالات</option>
-            {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            {Object.entries(statusLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
           </select>
         </label>
       </header>
@@ -173,24 +272,40 @@ export function VisitWorkflowPage() {
       {message ? <div className="success-banner">{message}</div> : null}
 
       {canIntake ? (
-        <SectionCard title="تسجيل زيارة جديدة" subtitle="إدخال المريض والطبيب وأولوية الحالة">
+        <SectionCard title="تسجيل زيارة جديدة" subtitle="إدخال المريض من حجز موعد أو إحالة أو وصول مباشر إلى المركز">
           <form className="form-grid" onSubmit={submitVisit}>
             <label className="field">
               <span>المريض</span>
               <select name="patientId" required defaultValue="">
-                <option value="" disabled>اختر المريض</option>
-                {options.patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.fullName} - {patient.phone}</option>)}
+                <option value="" disabled>
+                  اختر المريض
+                </option>
+                {options.patients.map((patient) => (
+                  <option key={patient.id} value={patient.id}>
+                    {patient.fullName} - {patient.phone}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="field">
               <span>الطبيب</span>
               <select name="doctorId" defaultValue="">
-                <option value="">يحدد لاحقاً</option>
-                {options.doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.fullName}</option>)}
+                <option value="">يحدد لاحقًا</option>
+                {options.doctors.map((doctor) => (
+                  <option key={doctor.id} value={doctor.id}>
+                    {doctor.fullName}
+                  </option>
+                ))}
               </select>
             </label>
-            <label className="field"><span>تاريخ الزيارة</span><input name="visitDate" type="date" required /></label>
-            <label className="field"><span>وقت الزيارة</span><input name="visitTime" type="time" /></label>
+            <label className="field">
+              <span>تاريخ الزيارة</span>
+              <input name="visitDate" type="date" required />
+            </label>
+            <label className="field">
+              <span>وقت الزيارة</span>
+              <input name="visitTime" type="time" />
+            </label>
             <label className="field">
               <span>نوع الزيارة</span>
               <select name="visitType" defaultValue="CONSULTATION">
@@ -208,73 +323,329 @@ export function VisitWorkflowPage() {
                 <option value="EMERGENCY">طارئ</option>
               </select>
             </label>
-            <label className="field"><span>الأعراض الأولية</span><textarea name="symptoms" /></label>
-            <label className="field"><span>ملاحظات الاستقبال</span><textarea name="notes" /></label>
-            <button className="primary-button" disabled={busyId === 0} type="submit">تسجيل الزيارة</button>
+            <label className="field">
+              <span>الأعراض الأولية</span>
+              <textarea name="symptoms" />
+            </label>
+            <label className="field">
+              <span>ملاحظات الاستقبال</span>
+              <textarea name="notes" />
+            </label>
+            <button className="primary-button" disabled={busyId === 0} type="submit">
+              تسجيل الزيارة
+            </button>
           </form>
         </SectionCard>
       ) : null}
 
-      {visits.map((visit) => (
-        <SectionCard key={visit.id} title={`${visit.patient.fullName} - زيارة رقم ${visit.id}`} subtitle={`${visit.patient.phone} | الطبيب: ${visit.doctor?.fullName ?? "لم يحدد بعد"}`}>
-          <div className="section-header">
-            <div>
-              <strong>{statusLabels[visit.workflowStatus] ?? visit.workflowStatus}</strong>
-              <p className="muted">التشخيص: {visit.diagnosis || "بانتظار الطبيب"}</p>
-              <p className="muted">حالة الرفع: {uploadLabels[visit.uploadStatus] ?? visit.uploadStatus}</p>
-            </div>
-            <span className={`status-badge ${visit.priority === "EMERGENCY" ? "danger" : visit.priority === "URGENT" ? "warning" : "neutral"}`}>{priorityLabels[visit.priority]}</span>
+      <SectionCard title="جدول ملفات الزيارة" subtitle="كل زيارة تظهر كسطر مستقل، والتفاصيل تظهر فقط بعد اختيار الملف.">
+        {visits.length > 0 ? (
+          <div className="table-shell">
+            <table className="data-table visit-files-table">
+              <thead>
+                <tr>
+                  <th>المريض</th>
+                  <th>الطبيب</th>
+                  <th>حالة الملف</th>
+                  <th>الأولوية</th>
+                  <th>الأدوية</th>
+                  <th>إجراء</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visits.map((visit) => (
+                  <tr key={visit.id} className={selectedVisitId === visit.id ? "is-selected" : undefined}>
+                    <td>
+                      <strong>{visit.patient.fullName}</strong>
+                      <span>{visit.patient.phone}</span>
+                    </td>
+                    <td>{visit.doctor?.fullName ?? "لم يحدد بعد"}</td>
+                    <td>
+                      <span className={`status-badge ${statusClass(visit.workflowStatus)}`}>
+                        {statusLabels[visit.workflowStatus] ?? visit.workflowStatus}
+                      </span>
+                      <span>{uploadLabels[visit.uploadStatus] ?? visit.uploadStatus}</span>
+                    </td>
+                    <td>
+                      <span className={`status-badge ${priorityClass(visit.priority)}`}>
+                        {priorityLabels[visit.priority]}
+                      </span>
+                    </td>
+                    <td>{visit.prescriptions?.length ?? 0}</td>
+                    <td>
+                      <button
+                        className={selectedVisitId === visit.id ? "primary-button" : "ghost-button"}
+                        type="button"
+                        onClick={() => setSelectedVisitId(visit.id)}
+                      >
+                        {selectedVisitId === visit.id ? "مفتوح" : "فتح الملف"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
+        ) : (
+          <div className="empty-state compact">لا توجد ملفات زيارة ضمن هذا التصنيف.</div>
+        )}
+      </SectionCard>
 
-          {visit.uploadError ? <div className="error-banner">{visit.uploadError}</div> : null}
-          {visit.invoice ? <div className="inline-note">قيمة الفاتورة: {visit.invoice.amount.toFixed(2)} شيكل</div> : null}
+      {selectedVisit ? (
+        <SectionCard
+          title={`ملف زيارة ${selectedVisit.patient.fullName}`}
+          subtitle={`رقم الملف ${selectedVisit.id} | ${statusLabels[selectedVisit.workflowStatus] ?? selectedVisit.workflowStatus}`}
+          action={
+            <button className="ghost-button" type="button" onClick={() => setSelectedVisitId(null)}>
+              إغلاق الملف
+            </button>
+          }
+        >
+          {selectedVisit.uploadError ? <div className="error-banner">{selectedVisit.uploadError}</div> : null}
+          <div className="visit-section-stack">
+            <article className="visit-file-section">
+              <header className="section-header">
+                <div>
+                  <h3>البيانات الأساسية والاستقبال</h3>
+                  <p className="muted">تعريف المريض ومصدر الزيارة والطبيب المسؤول عنها.</p>
+                </div>
+              </header>
+              <div className="detail-grid">
+                <div className="detail-field">
+                  <span>اسم المريض</span>
+                  <strong>{selectedVisit.patient.fullName}</strong>
+                </div>
+                <div className="detail-field">
+                  <span>هاتف المريض</span>
+                  <strong>{selectedVisit.patient.phone}</strong>
+                </div>
+                <div className="detail-field">
+                  <span>الطبيب</span>
+                  <strong>{selectedVisit.doctor?.fullName ?? "لم يحدد بعد"}</strong>
+                </div>
+                <div className="detail-field">
+                  <span>نوع الزيارة</span>
+                  <strong>{visitTypeLabels[selectedVisit.visitType ?? ""] ?? valueOrDash(selectedVisit.visitType)}</strong>
+                </div>
+                <div className="detail-field">
+                  <span>تاريخ الزيارة</span>
+                  <strong>{formatDate(selectedVisit.visitDate)}</strong>
+                </div>
+                <div className="detail-field">
+                  <span>وقت الزيارة</span>
+                  <strong>{valueOrDash(selectedVisit.visitTime)}</strong>
+                </div>
+                <div className="detail-field">
+                  <span>الأعراض الأولية</span>
+                  <strong>{valueOrDash(selectedVisit.symptoms)}</strong>
+                </div>
+                <div className="detail-field">
+                  <span>ملاحظات الاستقبال</span>
+                  <strong>{valueOrDash(selectedVisit.notes)}</strong>
+                </div>
+              </div>
 
-          {canAssess && ["WAITING_DOCTOR", "IN_TREATMENT"].includes(visit.workflowStatus) ? (
-            <form className="form-grid" onSubmit={(event) => submitAssessment(event, visit.id)}>
-              <label className="field field-span-2"><span>التشخيص</span><input name="diagnosis" required minLength={3} /></label>
-              <label className="field"><span>الأعراض</span><textarea name="symptoms" /></label>
-              <label className="field"><span>ملاحظات الطبيب</span><textarea name="notes" /></label>
-              <label className="field"><span>ضغط الدم</span><input name="bloodPressure" placeholder="120/80" /></label>
-              <label className="field"><span>درجة الحرارة</span><input name="temperature" type="number" step="0.1" /></label>
-              <label className="field"><span>معدل النبض</span><input name="heartRate" type="number" /></label>
-              <label className="field">
-                <span>دواء من المخزون</span>
-                <select name="medicineId" defaultValue="">
-                  <option value="">دون وصفة دوائية</option>
-                  {catalogs.medicines.map((medicine) => <option key={medicine.id} value={medicine.id}>{medicine.medicineName} - المتاح {medicine.quantity} {medicine.unit}</option>)}
-                </select>
-              </label>
-              <label className="field"><span>الجرعة</span><input name="dosage" placeholder="مثال: حبة مرتين يومياً" /></label>
-              <label className="field"><span>المدة</span><input name="duration" placeholder="مثال: خمسة أيام" /></label>
-              <label className="field"><span>الكمية</span><input name="quantity" type="number" min="1" defaultValue="1" /></label>
-              <label className="field"><span>تعليمات الدواء</span><input name="instructions" /></label>
-              <button className="primary-button" disabled={busyId === visit.id} type="submit">حفظ تقييم الطبيب</button>
-            </form>
-          ) : null}
+              {canIntake && ["WAITING_RECEPTION", "WAITING_DOCTOR"].includes(selectedVisit.workflowStatus) ? (
+                <form
+                  className="form-grid visit-inline-form"
+                  onSubmit={(event) => submitAssignDoctor(event, selectedVisit.id)}
+                  key={`assign-${selectedVisit.id}-${selectedVisit.doctor?.id ?? "none"}`}
+                >
+                  <label className="field">
+                    <span>تعيين الطبيب</span>
+                    <select name="doctorId" required defaultValue={selectedVisit.doctor?.id ? String(selectedVisit.doctor.id) : ""}>
+                      <option value="" disabled>
+                        اختر الطبيب
+                      </option>
+                      {options.doctors.map((doctor) => (
+                        <option key={doctor.id} value={doctor.id}>
+                          {doctor.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button className="primary-button" disabled={busyId === selectedVisit.id} type="submit">
+                    حفظ تعيين الطبيب
+                  </button>
+                </form>
+              ) : null}
+            </article>
 
-          {visit.prescriptions.length > 0 ? (
-            <div className="table-scroll">
-              <table className="data-table">
-                <thead><tr><th>الدواء</th><th>الجرعة</th><th>الكمية</th></tr></thead>
-                <tbody>{visit.prescriptions.map((item) => <tr key={item.id}><td>{item.medicineName}</td><td>{item.dosage}</td><td>{item.quantity}</td></tr>)}</tbody>
-              </table>
-            </div>
-          ) : null}
+            <article className="visit-file-section">
+              <header className="section-header">
+                <div>
+                  <h3>قسم الطبيب</h3>
+                  <p className="muted">التشخيص والقياسات والخطة العلاجية في المركز الصغير.</p>
+                </div>
+              </header>
+              <div className="detail-grid">
+                <div className="detail-field">
+                  <span>التشخيص</span>
+                  <strong>{valueOrDash(selectedVisit.diagnosis)}</strong>
+                </div>
+                <div className="detail-field">
+                  <span>ضغط الدم</span>
+                  <strong>{valueOrDash(selectedVisit.bloodPressure)}</strong>
+                </div>
+                <div className="detail-field">
+                  <span>الحرارة</span>
+                  <strong>{valueOrDash(selectedVisit.temperature)}</strong>
+                </div>
+                <div className="detail-field">
+                  <span>النبض</span>
+                  <strong>{valueOrDash(selectedVisit.heartRate)}</strong>
+                </div>
+                <div className="detail-field field-span-2">
+                  <span>ملاحظات الطبيب</span>
+                  <strong>{valueOrDash(selectedVisit.notes)}</strong>
+                </div>
+              </div>
 
-          {canAssess && visit.workflowStatus === "READY_TO_UPLOAD" && visit.uploadStatus === "NOT_READY" ? (
-            <button className="primary-button" disabled={busyId === visit.id} type="button" onClick={() =>
-              void runAction(visit.id, () => apiRequest(`/center/visit-workflow/${visit.id}/complete`, { method: "POST" }), "تم إنشاء الفاتورة وتجهيز الملف.")
-            }>إنشاء الفاتورة وتجهيز الملف</button>
-          ) : null}
-          {canAssess && ["READY", "FAILED"].includes(visit.uploadStatus) ? (
-            <button className="primary-button" disabled={busyId === visit.id} type="button" onClick={() =>
-              void runAction(visit.id, () => apiRequest(`/center/visit-workflow/${visit.id}/upload`, { method: "POST" }), "تم رفع الزيارة إلى النظام المركزي.")
-            }>{visit.uploadStatus === "FAILED" ? "إعادة محاولة الرفع" : "رفع إلى النظام المركزي"}</button>
-          ) : null}
+              {canAssess && ["WAITING_DOCTOR", "IN_TREATMENT"].includes(selectedVisit.workflowStatus) ? (
+                <form className="form-grid visit-inline-form" onSubmit={(event) => submitAssessment(event, selectedVisit.id)}>
+                  <label className="field field-span-2">
+                    <span>التشخيص</span>
+                    <input name="diagnosis" required minLength={3} />
+                  </label>
+                  <label className="field">
+                    <span>الأعراض</span>
+                    <textarea name="symptoms" />
+                  </label>
+                  <label className="field">
+                    <span>ملاحظات الطبيب</span>
+                    <textarea name="notes" />
+                  </label>
+                  <label className="field">
+                    <span>ضغط الدم</span>
+                    <input name="bloodPressure" placeholder="120/80" />
+                  </label>
+                  <label className="field">
+                    <span>درجة الحرارة</span>
+                    <input name="temperature" type="number" step="0.1" />
+                  </label>
+                  <label className="field">
+                    <span>معدل النبض</span>
+                    <input name="heartRate" type="number" />
+                  </label>
+                  <label className="field">
+                    <span>دواء من المخزون</span>
+                    <select name="medicineId" defaultValue="">
+                      <option value="">دون وصفة دوائية</option>
+                      {catalogs.medicines.map((medicine) => (
+                        <option key={medicine.id} value={medicine.id}>
+                          {medicine.medicineName} - المتاح {medicine.quantity} {medicine.unit}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>الجرعة</span>
+                    <input name="dosage" placeholder="مثال: حبة مرتين يوميًا" />
+                  </label>
+                  <label className="field">
+                    <span>المدة</span>
+                    <input name="duration" placeholder="مثال: خمسة أيام" />
+                  </label>
+                  <label className="field">
+                    <span>الكمية</span>
+                    <input name="quantity" type="number" min="1" defaultValue="1" />
+                  </label>
+                  <label className="field">
+                    <span>تعليمات الدواء</span>
+                    <input name="instructions" />
+                  </label>
+                  <button className="primary-button" disabled={busyId === selectedVisit.id} type="submit">
+                    حفظ تقييم الطبيب
+                  </button>
+                </form>
+              ) : null}
+            </article>
+
+            <article className="visit-file-section">
+              <header className="section-header">
+                <div>
+                  <h3>الوصفات الدوائية</h3>
+                  <p className="muted">الأدوية التي أضافها الطبيب لهذا الملف.</p>
+                </div>
+              </header>
+              {(selectedVisit.prescriptions?.length ?? 0) > 0 ? (
+                <div className="table-shell">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>الدواء</th>
+                        <th>الجرعة</th>
+                        <th>المدة</th>
+                        <th>الكمية</th>
+                        <th>ملاحظات</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedVisit.prescriptions?.map((item) => (
+                        <tr key={item.id}>
+                          <td>{item.medicineName}</td>
+                          <td>{item.dosage}</td>
+                          <td>{valueOrDash(item.duration)}</td>
+                          <td>{item.quantity}</td>
+                          <td>{valueOrDash(item.instructions)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="empty-state compact">لا توجد وصفات دوائية لهذه الزيارة.</div>
+              )}
+            </article>
+
+            {selectedVisit.invoice ? (
+              <div className="inline-note">
+                قيمة الفاتورة: {selectedVisit.invoice.amount.toFixed(2)} شيكل
+                {selectedVisit.invoice.paidAmount != null ? ` | المدفوع: ${selectedVisit.invoice.paidAmount.toFixed(2)} شيكل` : ""}
+              </div>
+            ) : null}
+
+            {canAssess ? (
+              <div className="visit-detail-actions">
+                {selectedVisit.workflowStatus === "READY_TO_UPLOAD" && selectedVisit.uploadStatus === "NOT_READY" ? (
+                  <button
+                    className="primary-button"
+                    disabled={busyId === selectedVisit.id}
+                    type="button"
+                    onClick={() =>
+                      void runAction(
+                        selectedVisit.id,
+                        () => apiRequest(`/center/visit-workflow/${selectedVisit.id}/complete`, { method: "POST" }),
+                        "تم إنشاء الفاتورة وتجهيز الملف."
+                      )
+                    }
+                  >
+                    إنشاء الفاتورة وتجهيز الملف
+                  </button>
+                ) : null}
+                {["READY", "FAILED"].includes(selectedVisit.uploadStatus) ? (
+                  <button
+                    className="primary-button"
+                    disabled={busyId === selectedVisit.id}
+                    type="button"
+                    onClick={() =>
+                      void runAction(
+                        selectedVisit.id,
+                        () => apiRequest(`/center/visit-workflow/${selectedVisit.id}/upload`, { method: "POST" }),
+                        "تم رفع الزيارة إلى النظام المركزي."
+                      )
+                    }
+                  >
+                    {selectedVisit.uploadStatus === "FAILED" ? "إعادة محاولة الرفع" : "رفع إلى النظام المركزي"}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         </SectionCard>
-      ))}
-
-      {visits.length === 0 ? <div className="empty-state">لا توجد ملفات زيارة ضمن هذا التصنيف.</div> : null}
+      ) : visits.length > 0 ? (
+        <div className="empty-state">اختر ملف زيارة من الجدول لعرض تفاصيله.</div>
+      ) : null}
     </div>
   );
 }

@@ -65,6 +65,10 @@ const labResultSchema = z.object({
   resultBase64: z.string().optional()
 });
 
+const assignDoctorSchema = z.object({
+  doctorId: z.coerce.number().int().positive()
+});
+
 const employeeSchema = z.object({
   username: z.string().min(3),
   password: z.string().min(8),
@@ -285,6 +289,81 @@ router.get(
     });
 
     res.json(visits);
+  })
+);
+
+router.patch(
+  "/:visitId/assign-doctor",
+  authorize("CENTER_MANAGER", "RECEPTIONIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = centerIdFromRequest(req);
+    const visitId = Number(req.params.visitId);
+    const payload = assignDoctorSchema.parse(req.body);
+    const visit = await requireVisit(centerId, visitId);
+
+    const doctor = await prisma.centerUserAccount.findFirst({
+      where: { id: payload.doctorId, centerId, role: "DOCTOR", isActive: true },
+      select: { id: true }
+    });
+
+    if (!doctor) {
+      return res.status(400).json({ message: "الطبيب المحدد غير متاح في هذا المركز." });
+    }
+
+    const updatedVisit = await prisma.$transaction(async (tx) => {
+      const nextStatus =
+        visit.workflowStatus === "WAITING_RECEPTION" || !visit.doctorId ? "WAITING_TRIAGE" : visit.workflowStatus;
+
+      const updated = await tx.localVisit.update({
+        where: { id: visitId },
+        data: {
+          doctorId: payload.doctorId,
+          workflowStatus: nextStatus
+        },
+        include: {
+          patient: true,
+          doctor: { select: { id: true, fullName: true, role: true } },
+          workflowTasks: { orderBy: { createdAt: "asc" } },
+          nursingAssessments: { orderBy: { assessedAt: "desc" } },
+          prescriptions: true,
+          labRequests: { include: { test: true }, orderBy: { requestDate: "asc" } },
+          invoice: true
+        }
+      });
+
+      const doctorTask = await tx.visitWorkflowTask.findFirst({
+        where: { visitId, taskType: "DOCTOR_ASSESSMENT" },
+        orderBy: { createdAt: "asc" }
+      });
+
+      if (doctorTask) {
+        await tx.visitWorkflowTask.update({
+          where: { id: doctorTask.id },
+          data: { assignedToId: payload.doctorId, assignedRole: "DOCTOR" }
+        });
+      } else {
+        await tx.visitWorkflowTask.create({
+          data: {
+            visitId,
+            taskType: "DOCTOR_ASSESSMENT",
+            assignedRole: "DOCTOR",
+            assignedToId: payload.doctorId
+          }
+        });
+      }
+
+      return updated;
+    });
+
+    await recordAuditLog(req, {
+      action: "ASSIGN_VISIT_DOCTOR",
+      entityType: "LocalVisit",
+      entityId: visitId,
+      centerId,
+      newValue: { doctorId: payload.doctorId, workflowStatus: updatedVisit.workflowStatus }
+    });
+
+    res.json(updatedVisit);
   })
 );
 
