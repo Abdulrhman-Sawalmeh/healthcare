@@ -610,6 +610,7 @@ export interface PortalPatientRecord {
   center: {
     id: string;
     name: string;
+    phone?: string | null;
   };
   appointmentsCount: number;
   referralsCount: number;
@@ -765,6 +766,9 @@ export interface PortalNotificationRecord {
 
 export interface PortalThreadRecord {
   id: string;
+  status: "OPEN" | "CLOSED";
+  closedAt?: string | null;
+  closedById?: string | null;
   updatedAt: string;
   patient: {
     id: string;
@@ -884,6 +888,7 @@ export interface PortalMedicalRecord {
       name: string;
       city: string;
       address: string;
+      phone?: string | null;
     };
   };
   clinicalReports: PortalClinicalReportRecord[];
@@ -905,7 +910,7 @@ export interface AiCareInsightRequest {
 }
 
 export interface AiCareInsightResponse {
-  source: "gemini";
+  source: "gemini" | "local-fallback";
   urgency: "LOW" | "ROUTINE" | "URGENT" | "EMERGENCY";
   summary: string;
   suggestedActions: string[];

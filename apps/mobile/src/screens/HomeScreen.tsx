@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { PatientContactCard } from "../components/PatientContactCard";
 import { StatCard } from "../components/StatCard";
 import { Card, EmptyState, HeaderCard, LoadingState, Notice, Screen, StatusPill } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
@@ -81,6 +82,8 @@ export function HomeScreen() {
 
       {user?.role === "PATIENT" ? (
         <>
+          <PatientContactCard centerName={patientData?.patient.center.name} phone={patientData?.patient.center.phone} />
+
           <Card>
             <Text style={styles.cardTitle}>الموعد القادم</Text>
             {patientData?.nextAppointment ? (

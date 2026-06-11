@@ -5,6 +5,7 @@ export type IconName = string;
 const symbolMap: Record<string, string> = {
   "add-circle-outline": "+",
   "attach-outline": "#",
+  "call-outline": "☎",
   "arrow-forward-outline": "‹",
   "calendar-outline": "▣",
   "card-outline": "▤",

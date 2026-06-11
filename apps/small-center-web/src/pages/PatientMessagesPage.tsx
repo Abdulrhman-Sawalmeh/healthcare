@@ -107,6 +107,10 @@ function getPartnerName(thread: PortalThreadRecord, isDoctorView: boolean) {
   return isDoctorView ? thread.patient.fullName : thread.doctor.fullName;
 }
 
+function isThreadClosed(thread?: PortalThreadRecord | null) {
+  return thread?.status === "CLOSED";
+}
+
 function getPatientIdentifierLabel(patient: Pick<PortalThreadRecord["patient"], "medicalRecordNumber" | "nationalId">) {
   return patient.nationalId ? `رقم الهوية: ${patient.nationalId}` : `رقم الملف: ${patient.medicalRecordNumber}`;
 }
@@ -253,6 +257,8 @@ export function PatientMessagesPage() {
     () => threads.find((thread) => thread.id === selectedThreadId) ?? null,
     [threads, selectedThreadId]
   );
+  const selectedThreadClosed = isThreadClosed(selectedThread);
+  const replyDisabled = selectedThreadClosed || (!isDoctorView && !patientSubscriptionActive);
   const unreadMessagesCount = useMemo(
     () =>
       threads.reduce(
@@ -383,6 +389,35 @@ export function PatientMessagesPage() {
     }
   }
 
+  async function handleToggleThreadStatus() {
+    if (!selectedThread) {
+      return;
+    }
+
+    const nextStatus = selectedThreadClosed ? "OPEN" : "CLOSED";
+
+    try {
+      const updatedThread = await apiRequest<PortalThreadRecord>(
+        `/portal/communications/threads/${selectedThread.id}/status`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ status: nextStatus })
+        }
+      );
+
+      if (nextStatus === "CLOSED") {
+        setReplyMessage("");
+        setReplyAttachment(null);
+      }
+
+      setThreads((currentThreads) => upsertThread(currentThreads, updatedThread));
+      setSelectedThreadId(updatedThread.id);
+      setError("");
+    } catch {
+      setError(t("تعذر تغيير حالة المحادثة.", "Could not update conversation status."));
+    }
+  }
+
   async function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -400,6 +435,11 @@ export function PatientMessagesPage() {
   }
 
   async function startRecording() {
+    if (selectedThreadClosed) {
+      setError(t("هذه المحادثة مغلقة. أعد فتحها قبل إرسال تسجيل صوتي.", "This conversation is closed. Reopen it before sending a voice note."));
+      return;
+    }
+
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       setError("التسجيل الصوتي غير مدعوم في هذا المتصفح.");
       return;
@@ -458,6 +498,11 @@ export function PatientMessagesPage() {
     event.preventDefault();
 
     if (!selectedThread || (!replyMessage.trim() && !replyAttachment)) {
+      return;
+    }
+
+    if (selectedThreadClosed) {
+      setError(t("هذه المحادثة مغلقة. أعد فتحها قبل إرسال رسالة جديدة.", "This conversation is closed. Reopen it before sending a new message."));
       return;
     }
 
@@ -619,9 +664,14 @@ export function PatientMessagesPage() {
                 >
                   <div className="thread-item-top">
                     <strong>{partnerName}</strong>
-                    {unreadCount > 0 ? (
-                      <span className="thread-unread-badge">{unreadCount}</span>
-                    ) : null}
+                    <span className="thread-item-badges">
+                      {isThreadClosed(thread) ? (
+                        <span className="status-badge neutral">{t("مغلقة", "Closed")}</span>
+                      ) : null}
+                      {unreadCount > 0 ? (
+                        <span className="thread-unread-badge">{unreadCount}</span>
+                      ) : null}
+                    </span>
                   </div>
                   <span className="thread-meta">
                     {isDoctorView
@@ -669,9 +719,14 @@ export function PatientMessagesPage() {
               ) : null}
             </div>
             {selectedThread ? (
-              <span className="status-badge status-success">
-                {t("مفتوحة", "Open")}
-              </span>
+              <div className="chat-heading-actions">
+                <span className={selectedThreadClosed ? "status-badge neutral" : "status-badge success"}>
+                  {selectedThreadClosed ? t("مغلقة", "Closed") : t("مفتوحة", "Open")}
+                </span>
+                <button className="ghost-button" type="button" onClick={() => void handleToggleThreadStatus()}>
+                  {selectedThreadClosed ? t("إعادة فتح المحادثة", "Reopen conversation") : t("إغلاق المحادثة", "Close conversation")}
+                </button>
+              </div>
             ) : null}
           </div>
 
@@ -696,12 +751,19 @@ export function PatientMessagesPage() {
               </div>
 
               <form className="message-form" onSubmit={handleReply}>
+                {selectedThreadClosed ? (
+                  <p className="inline-note">
+                    {t("هذه المحادثة مغلقة حاليا. أعد فتحها حتى تتمكن من إرسال رسائل أو ملفات.", "This conversation is currently closed. Reopen it to send messages or files.")}
+                  </p>
+                ) : null}
                 <textarea
                   value={replyMessage}
                   onChange={(event) => setReplyMessage(event.target.value)}
-                  disabled={!isDoctorView && !patientSubscriptionActive}
+                  disabled={replyDisabled}
                   placeholder={
-                    isDoctorView
+                    selectedThreadClosed
+                      ? t("المحادثة مغلقة حاليا.", "The conversation is currently closed.")
+                      : isDoctorView
                       ? t("اكتب ردك للمريض هنا...", "Write your reply to the patient here...")
                       : t("اكتب رسالتك للطبيب هنا...", "Write your message to the doctor here...")
                   }
@@ -712,13 +774,13 @@ export function PatientMessagesPage() {
                     <input
                       type="file"
                       accept="image/*,audio/*,application/pdf,.doc,.docx,.txt"
-                      disabled={!isDoctorView && !patientSubscriptionActive}
+                      disabled={replyDisabled}
                       onChange={handleAttachmentChange}
                     />
                   </label>
                   <button
                     className={isRecording ? "ghost-button active-filter" : "ghost-button"}
-                    disabled={!isDoctorView && !patientSubscriptionActive}
+                    disabled={replyDisabled}
                     type="button"
                     onClick={isRecording ? stopRecording : startRecording}
                   >
@@ -735,7 +797,7 @@ export function PatientMessagesPage() {
                 ) : null}
                 <button
                   className="primary-button"
-                  disabled={(!isDoctorView && !patientSubscriptionActive) || (!replyMessage.trim() && !replyAttachment)}
+                  disabled={replyDisabled || (!replyMessage.trim() && !replyAttachment)}
                   type="submit"
                 >
                   {t("إرسال الرسالة", "Send message")}

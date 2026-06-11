@@ -133,7 +133,7 @@ export function CareAssistantPage() {
 
       <SectionCard
         title="تحليل حالة أو سؤال صحي"
-        subtitle="الميزة متصلة مباشرة مع Gemini، وتتطلب ضبط GEMINI_API_KEY في بيئة تشغيل الـAPI."
+        subtitle="يستخدم Gemini عند توفر المفتاح، ويعمل بتحليل محلي احتياطي عندما لا يكون GEMINI_API_KEY مضبوطا."
       >
         <form className="form-grid" onSubmit={submitPrompt}>
           <label className="field field-span-2">
@@ -193,7 +193,7 @@ export function CareAssistantPage() {
       {result ? (
         <SectionCard
           title="نتيجة المساعد"
-          subtitle="تم توليد النتيجة عبر Gemini."
+          subtitle={result.source === "gemini" ? "تم توليد النتيجة عبر Gemini." : "تم توليد النتيجة عبر التحليل المحلي الاحتياطي."}
           action={<span className={`status-badge ${urgencyClasses[result.urgency]}`}>{urgencyLabels[result.urgency]}</span>}
         >
           <div className="stack-item">

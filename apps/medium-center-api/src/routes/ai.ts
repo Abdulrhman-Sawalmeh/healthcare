@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 
+import { env } from "../config/env";
 import { authenticate, authorize } from "../middleware/auth";
 import { generateCareInsights } from "../services/ai-assistant";
 import { AppRole } from "../types/auth";
@@ -35,8 +36,8 @@ router.get(
   asyncHandler(async (_req, res) => {
     res.json({
       features: ["care-insights", "triage-support", "follow-up-questions", "red-flags"],
-      model: "gemini-1.5-flash",
-      fallback: false
+      model: env.GEMINI_MODEL,
+      fallback: !env.GEMINI_API_KEY?.trim()
     });
   })
 );

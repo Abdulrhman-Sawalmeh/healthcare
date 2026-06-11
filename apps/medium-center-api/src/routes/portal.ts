@@ -435,7 +435,8 @@ router.get(
           code: patient.center.code,
           name: patient.center.name,
           city: patient.center.city,
-          address: patient.center.address
+          address: patient.center.address,
+          phone: patient.center.phone
         }
       },
       clinicalReports,

@@ -16,7 +16,7 @@ export interface CareInsightInput {
 }
 
 export interface CareInsightResponse {
-  source: "gemini";
+  source: "gemini" | "local-fallback";
   urgency: "LOW" | "ROUTINE" | "URGENT" | "EMERGENCY";
   summary: string;
   suggestedActions: string[];
@@ -103,7 +103,7 @@ function buildLocalResponse(input: CareInsightInput): CareInsightResponse {
   const isPatient = input.context === "PATIENT_SELF_CARE";
 
   return {
-    source: "gemini",
+    source: "local-fallback",
     urgency,
     summary: `تم رصد طلب متعلق بـ: ${shortMessage}`,
     suggestedActions:
@@ -227,7 +227,7 @@ async function generateWithGemini(input: CareInsightInput, fallback: CareInsight
   const apiKey = env.GEMINI_API_KEY?.trim();
 
   if (!apiKey) {
-    throw new AppError("Gemini API key is not configured. Add GEMINI_API_KEY to .env and restart the API server.", 503);
+    return fallback;
   }
 
   const response = await fetch(

@@ -152,6 +152,7 @@ export function TextField({
   multiline,
   keyboardType,
   secureTextEntry,
+  editable = true,
   style,
   inputStyle
 }: {
@@ -162,6 +163,7 @@ export function TextField({
   multiline?: boolean;
   keyboardType?: TextInputProps["keyboardType"];
   secureTextEntry?: boolean;
+  editable?: boolean;
   style?: StyleProp<ViewStyle>;
   inputStyle?: StyleProp<TextStyle>;
 }) {
@@ -170,6 +172,7 @@ export function TextField({
       {label ? <Text style={styles.label}>{label}</Text> : null}
       <TextInput
         keyboardType={keyboardType}
+        editable={editable}
         multiline={multiline}
         onChangeText={onChangeText}
         placeholder={placeholder}

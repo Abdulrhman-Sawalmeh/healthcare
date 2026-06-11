@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
+import { PatientContactCard } from "../components/PatientContactCard";
 import {
   AppButton,
   Card,
@@ -104,6 +105,8 @@ export function MedicalRecordScreen() {
 
       {record ? (
         <>
+          <PatientContactCard centerName={record.profile.center.name} phone={record.profile.center.phone} />
+
           <Card>
             <SectionTitle title={record.patient.fullName} subtitle={record.patient.medicalRecordNumber} />
             <View style={styles.detailGrid}>

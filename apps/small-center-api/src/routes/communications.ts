@@ -1,4 +1,4 @@
-import { Prisma, SubscriptionStatus, UserRole } from "@prisma/client";
+import { MessageThreadStatus, Prisma, SubscriptionStatus, UserRole } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
 
@@ -33,6 +33,10 @@ const sendMessageSchema = z
   .refine((payload) => payload.content.length > 0 || Boolean(payload.attachment), {
     message: "Message content or an attachment is required."
   });
+
+const threadStatusSchema = z.object({
+  status: z.nativeEnum(MessageThreadStatus)
+});
 
 const threadInclude = {
   patient: {
@@ -381,10 +385,15 @@ router.post(
           doctorId
         }
       },
-      update: {},
+      update: {
+        status: MessageThreadStatus.OPEN,
+        closedAt: null,
+        closedById: null
+      },
       create: {
         patientId,
-        doctorId
+        doctorId,
+        status: MessageThreadStatus.OPEN
       }
     });
 
@@ -448,6 +457,10 @@ router.post(
 
     assertThreadAccess(thread, actor);
 
+    if (thread.status === MessageThreadStatus.CLOSED) {
+      throw new AppError("This conversation is closed. Reopen it before sending a new message.", 409);
+    }
+
     await prisma.message.create({
       data: {
         threadId: thread.id,
@@ -467,6 +480,49 @@ router.post(
 
     const updatedThread = await prisma.messageThread.findUnique({
       where: { id: thread.id },
+      include: threadInclude
+    });
+
+    res.json(await mapThreadWithIdentity(updatedThread));
+  })
+);
+
+router.patch(
+  "/threads/:threadId/status",
+  authenticate,
+  authorize(UserRole.DOCTOR, UserRole.PATIENT),
+  asyncHandler(async (req, res) => {
+    const threadId = getSingleParam(req.params.threadId, "Thread ID");
+    const { status } = threadStatusSchema.parse(req.body);
+    const actor = await resolvePortalActor(req.auth!);
+    await assertPatientMessagingSubscription(actor);
+
+    const thread = await prisma.messageThread.findUnique({
+      where: { id: threadId }
+    });
+
+    if (!thread) {
+      throw new AppError("Thread not found.", 404);
+    }
+
+    assertThreadAccess(thread, actor);
+
+    const updatedThread = await prisma.messageThread.update({
+      where: { id: thread.id },
+      data:
+        status === MessageThreadStatus.CLOSED
+          ? {
+              status,
+              closedAt: new Date(),
+              closedById: actor.userId,
+              updatedAt: new Date()
+            }
+          : {
+              status,
+              closedAt: null,
+              closedById: null,
+              updatedAt: new Date()
+            },
       include: threadInclude
     });
 

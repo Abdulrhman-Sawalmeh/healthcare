@@ -71,6 +71,11 @@ enum PaymentStatus {
   REFUNDED
 }
 
+enum MessageThreadStatus {
+  OPEN
+  CLOSED
+}
+
 model User {
   id               String                @id @default(uuid())
   email            String                @unique
@@ -83,6 +88,7 @@ model User {
   updatedAt        DateTime              @updatedAt
   notifications    Notification[]
   sentMessages     Message[]             @relation("SentMessages")
+  closedThreads    MessageThread[]       @relation("ClosedMessageThreads")
   patientProfile   PatientProfile?
   doctorProfile    DoctorProfile?
   adminMemberships CenterAdministrator[]
@@ -236,16 +242,21 @@ model Referral {
 }
 
 model MessageThread {
-  id        String         @id @default(uuid())
-  patientId String
-  doctorId  String
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
-  patient   PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  doctor    DoctorProfile  @relation(fields: [doctorId], references: [id], onDelete: Cascade)
-  messages  Message[]
+  id         String              @id @default(uuid())
+  patientId  String
+  doctorId   String
+  status     MessageThreadStatus @default(OPEN)
+  closedAt   DateTime?
+  closedById String?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  patient    PatientProfile      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor     DoctorProfile       @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  closedBy   User?               @relation("ClosedMessageThreads", fields: [closedById], references: [id], onDelete: SetNull)
+  messages   Message[]
 
   @@unique([patientId, doctorId])
+  @@index([status, updatedAt])
 }
 
 model Message {

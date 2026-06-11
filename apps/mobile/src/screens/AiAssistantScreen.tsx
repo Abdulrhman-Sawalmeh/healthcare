@@ -121,6 +121,9 @@ export function AiAssistantScreen() {
         {capabilities ? (
           <>
             <Text style={styles.meta}>النموذج: {capabilities.model}</Text>
+            <Text style={styles.meta}>
+              وضع التشغيل: {capabilities.fallback ? "تحليل محلي احتياطي" : "Gemini"}
+            </Text>
             <ChipRow>
               {capabilities.features.map((feature) => (
                 <ChoiceChip key={feature} label={feature} onPress={() => undefined} />
@@ -139,6 +142,9 @@ export function AiAssistantScreen() {
             <Text style={styles.title}>نتيجة المساعد</Text>
           </View>
           <Text style={styles.summary}>{result.summary}</Text>
+          <Text style={styles.meta}>
+            المصدر: {result.source === "gemini" ? "Gemini" : "تحليل محلي احتياطي"}
+          </Text>
           <ResultList title="إجراءات مقترحة" items={result.suggestedActions} />
           <ResultList title="أسئلة للطبيب" items={result.questionsForClinician} />
           <ResultList title="علامات خطر" items={result.redFlags} />

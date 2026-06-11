@@ -2490,3 +2490,197 @@ textarea:focus-visible {
     flex: 1;
   }
 }
+
+/* Ochsner-inspired small center palette */
+:root {
+  --bg: #f4f9fc;
+  --bg-strong: #1b3e6f;
+  --surface: rgba(255, 255, 255, 0.97);
+  --surface-strong: #ffffff;
+  --surface-muted: #eaf6f8;
+  --border: rgba(27, 62, 111, 0.16);
+  --text: #1d252d;
+  --muted: #637685;
+  --accent: #1b3e6f;
+  --accent-secondary: #27b1bd;
+  --accent-soft: rgba(39, 177, 189, 0.14);
+  --primary: #1b3e6f;
+  --primary-soft: rgba(39, 177, 189, 0.14);
+  --danger: #b3261e;
+  --warning: #f0ad00;
+  --success: #008a7a;
+  --shadow: 0 18px 42px rgba(27, 62, 111, 0.13);
+  --shadow-hover: 0 22px 54px rgba(27, 62, 111, 0.2);
+}
+
+body {
+  background:
+    radial-gradient(circle at 14% 10%, rgba(39, 177, 189, 0.16), transparent 24rem),
+    radial-gradient(circle at 88% 4%, rgba(0, 150, 214, 0.12), transparent 26rem),
+    linear-gradient(135deg, #ffffff 0%, #f4f9fc 45%, #e9f7fa 100%);
+  color: var(--text);
+}
+
+.login-shell {
+  background:
+    radial-gradient(circle at 12% 14%, rgba(39, 177, 189, 0.18), transparent 24rem),
+    linear-gradient(135deg, #ffffff 0%, #eef8fb 46%, #d9f3f7 100%);
+}
+
+.login-panel.hero,
+.auth-brand-panel {
+  background: linear-gradient(135deg, #1b3e6f 0%, #13477d 52%, #27b1bd 100%);
+  color: #ffffff;
+}
+
+.form-panel,
+.login-card {
+  border-color: rgba(27, 62, 111, 0.18);
+  box-shadow: 0 24px 64px rgba(27, 62, 111, 0.15);
+}
+
+.primary-button,
+button.primary-button,
+a.primary-button {
+  background: linear-gradient(135deg, #1b3e6f 0%, #0096d6 100%);
+  color: #ffffff;
+}
+
+.ghost-button,
+button.ghost-button,
+a.ghost-button {
+  border-color: rgba(27, 62, 111, 0.18);
+  color: var(--accent);
+}
+
+.search-box.content-tools,
+.content-tools.search-box {
+  align-items: center;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 34px rgba(27, 62, 111, 0.08);
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  padding: 0.75rem;
+}
+
+.search-box label {
+  min-width: 0;
+  width: 100%;
+}
+
+.search-box .toolbar-input {
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: none;
+  margin: 0;
+  min-height: 46px;
+  width: 100%;
+}
+
+.search-box .ghost-button {
+  background: var(--accent);
+  border-color: transparent;
+  color: #ffffff;
+  min-height: 46px;
+  padding-inline: 1.25rem;
+}
+
+.conversation-tools {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.8rem;
+}
+
+.conversation-tools .field input,
+.conversation-tools .field select {
+  background: var(--surface-strong);
+  border-color: var(--border);
+  min-height: 46px;
+}
+
+.thread-item-badges,
+.chat-heading-actions {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.patient-contact-bar {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 14px 32px rgba(27, 62, 111, 0.1);
+  direction: ltr;
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: auto minmax(220px, 1fr) auto;
+  padding: 0.65rem 0.75rem;
+}
+
+.patient-contact-label,
+.patient-contact-phone,
+.patient-contact-action {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.55rem;
+  min-height: 42px;
+}
+
+.patient-contact-label {
+  color: var(--bg-strong);
+  font-weight: 900;
+}
+
+.patient-contact-search {
+  align-items: center;
+  background: var(--surface-muted);
+  border-radius: 12px;
+  display: inline-flex;
+  height: 38px;
+  justify-content: center;
+  width: 38px;
+}
+
+.patient-contact-phone {
+  color: var(--bg-strong);
+  font-size: 1.05rem;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.patient-contact-action {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-secondary) 100%);
+  border-radius: 14px;
+  color: #ffffff;
+  flex-direction: column;
+  font-weight: 900;
+  justify-content: center;
+  padding: 0.45rem 1rem;
+  text-decoration: none;
+}
+
+.patient-contact-action small {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.72rem;
+}
+
+@media (max-width: 700px) {
+  .patient-contact-bar,
+  .search-box.content-tools,
+  .content-tools.search-box {
+    grid-template-columns: 1fr;
+  }
+
+  .patient-contact-phone,
+  .patient-contact-action,
+  .patient-contact-label {
+    justify-content: center;
+  }
+}

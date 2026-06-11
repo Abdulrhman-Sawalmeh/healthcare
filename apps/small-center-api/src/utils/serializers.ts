@@ -169,6 +169,9 @@ export function mapReferral(referral: ReferralPayload) {
 export function mapThread(thread: ThreadPayload, patientIdentity: PatientIdentity = {}) {
   return {
     id: thread.id,
+    status: thread.status,
+    closedAt: thread.closedAt,
+    closedById: thread.closedById,
     updatedAt: thread.updatedAt,
     patient: {
       id: thread.patient.id,
@@ -262,7 +265,8 @@ export function mapPatient(patient: PatientPayload) {
     insuranceNumber: patient.insuranceNumber,
     center: {
       id: patient.center.id,
-      name: patient.center.name
+      name: patient.center.name,
+      phone: patient.center.phone
     },
     appointmentsCount: patient.appointments.length,
     referralsCount: patient.referrals.length

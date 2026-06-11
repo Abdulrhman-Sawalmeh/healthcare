@@ -2,6 +2,7 @@ import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
+import { PatientContactBar } from "../components/PatientContactBar";
 import { formatDate, formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
 import {
   PortalAppointmentRecord,
@@ -681,6 +682,8 @@ export function PatientMedicalRecordPage() {
 
   return (
     <div className="page-stack">
+      <PatientContactBar centerName={record.profile.center.name} phone={record.profile.center.phone} />
+
       <section className="hero-strip">
         <div>
           <p className="eyebrow">السجل الصحي والتقارير الطبية</p>

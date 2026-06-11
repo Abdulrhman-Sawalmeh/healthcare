@@ -215,6 +215,11 @@ export const mediumApi = {
     }),
   markThreadRead: (threadId: string) =>
     apiRequest<ThreadRecord>(`/portal/communications/threads/${threadId}/read`, { method: "PATCH" }),
+  updateThreadStatus: (threadId: string, status: "OPEN" | "CLOSED") =>
+    apiRequest<ThreadRecord>(`/portal/communications/threads/${threadId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status })
+    }),
 
   subscriptionPlans: () => apiRequest<SubscriptionPlanRecord[]>("/portal/subscriptions/plans"),
   activateSubscription: (payload: { planId: string; securePaymentToken: string; autoRenew: boolean; method: string }) =>

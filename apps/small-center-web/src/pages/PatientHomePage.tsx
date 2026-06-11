@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
+import { PatientContactBar } from "../components/PatientContactBar";
 import { formatDate, formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
 import { PortalSummary } from "../types";
 
@@ -29,6 +30,8 @@ export function PatientHomePage() {
 
   return (
     <div className="page-stack">
+      <PatientContactBar centerName={summary.patient.center.name} phone={summary.patient.center.phone} />
+
       <section className="hero-strip">
         <div>
           <p className="eyebrow">ملف المريض</p>

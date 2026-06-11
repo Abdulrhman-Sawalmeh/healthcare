@@ -129,6 +129,7 @@ export function MessagesScreen() {
     () => threads.find((thread) => thread.id === selectedThreadId) ?? threads[0],
     [threads, selectedThreadId]
   );
+  const selectedThreadClosed = selectedThread?.status === "CLOSED";
 
   useEffect(() => {
     if (selectedThread) {
@@ -136,7 +137,7 @@ export function MessagesScreen() {
     }
   }, [selectedThread?.id]);
 
-  const canSend = Boolean(selectedThread && (draft.trim() || attachment) && !isRecording);
+  const canSend = Boolean(selectedThread && !selectedThreadClosed && (draft.trim() || attachment) && !isRecording);
 
   async function startThread() {
     setBusy(true);
@@ -161,6 +162,11 @@ export function MessagesScreen() {
   async function sendMessage() {
     if (!selectedThread || (!draft.trim() && !attachment)) return;
 
+    if (selectedThreadClosed) {
+      setError("هذه المحادثة مغلقة. أعد فتحها قبل إرسال رسالة جديدة.");
+      return;
+    }
+
     setBusy(true);
     setError("");
     setMessage("");
@@ -179,7 +185,37 @@ export function MessagesScreen() {
     }
   }
 
+  async function toggleThreadStatus() {
+    if (!selectedThread) return;
+
+    const nextStatus = selectedThreadClosed ? "OPEN" : "CLOSED";
+    setBusy(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const updated = await mediumApi.updateThreadStatus(selectedThread.id, nextStatus);
+      if (nextStatus === "CLOSED") {
+        setDraft("");
+        setAttachment(null);
+      }
+      setThreads((current) => current.map((thread) => (thread.id === updated.id ? updated : thread)));
+      setSelectedThreadId(updated.id);
+      setMessage(nextStatus === "CLOSED" ? "تم إغلاق المحادثة." : "تمت إعادة فتح المحادثة.");
+      await loadData();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "تعذر تغيير حالة المحادثة.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function chooseAttachment() {
+    if (selectedThreadClosed) {
+      setError("هذه المحادثة مغلقة. أعد فتحها قبل إرفاق ملف.");
+      return;
+    }
+
     setError("");
     setMessage("");
 
@@ -195,6 +231,11 @@ export function MessagesScreen() {
   }
 
   async function startRecording() {
+    if (selectedThreadClosed) {
+      setError("هذه المحادثة مغلقة. أعد فتحها قبل إرسال تسجيل صوتي.");
+      return;
+    }
+
     setError("");
     setMessage("");
     setRecordingBusy(true);
@@ -373,7 +414,7 @@ export function MessagesScreen() {
             return (
               <ChoiceChip
                 key={thread.id}
-                label={isPatient ? thread.doctor.fullName : thread.patient.fullName}
+                label={`${isPatient ? thread.doctor.fullName : thread.patient.fullName}${thread.status === "CLOSED" ? " - مغلقة" : ""}`}
                 onPress={() => setSelectedThreadId(thread.id)}
                 selected={active}
               />
@@ -387,7 +428,17 @@ export function MessagesScreen() {
         <Card style={styles.chatCard}>
           <SectionTitle
             title={isPatient ? selectedThread.doctor.fullName : selectedThread.patient.fullName}
-            subtitle={isPatient ? selectedThread.doctor.departmentName : selectedThread.patient.medicalRecordNumber}
+            subtitle={`${isPatient ? selectedThread.doctor.departmentName : selectedThread.patient.medicalRecordNumber}${selectedThreadClosed ? " | مغلقة" : " | مفتوحة"}`}
+          />
+          {selectedThreadClosed ? (
+            <Notice text="هذه المحادثة مغلقة حاليا. أعد فتحها حتى تتمكن من إرسال رسائل أو ملفات." tone="info" />
+          ) : null}
+          <AppButton
+            disabled={busy}
+            icon={selectedThreadClosed ? "sync-outline" : "close-circle-outline"}
+            label={selectedThreadClosed ? "إعادة فتح المحادثة" : "إغلاق المحادثة"}
+            onPress={() => void toggleThreadStatus()}
+            tone="ghost"
           />
 
           <View style={styles.messageStack}>
@@ -407,11 +458,17 @@ export function MessagesScreen() {
             })}
           </View>
 
-          <TextField multiline onChangeText={setDraft} placeholder="اكتب رسالتك هنا..." value={draft} />
+          <TextField
+            editable={!selectedThreadClosed}
+            multiline
+            onChangeText={setDraft}
+            placeholder={selectedThreadClosed ? "المحادثة مغلقة حاليا." : "اكتب رسالتك هنا..."}
+            value={draft}
+          />
 
           <View style={styles.attachmentActions}>
             <AppButton
-              disabled={busy || recordingBusy || isRecording}
+              disabled={busy || recordingBusy || isRecording || selectedThreadClosed}
               icon="attach-outline"
               label="إرفاق ملف"
               onPress={() => void chooseAttachment()}
@@ -419,7 +476,7 @@ export function MessagesScreen() {
               tone="ghost"
             />
             <AppButton
-              disabled={busy || recordingBusy}
+              disabled={busy || recordingBusy || selectedThreadClosed}
               icon={isRecording ? "stop-circle-outline" : "mic-outline"}
               label={isRecording ? "إيقاف التسجيل" : "تسجيل صوتي"}
               onPress={() => void (isRecording ? stopRecording() : startRecording())}
