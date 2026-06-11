@@ -10,11 +10,13 @@ interface AuthContextValue {
   logout: () => Promise<void>;
 }
 
+const allowedRoles = ["CENTER_MANAGER", "DOCTOR", "PATIENT", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"];
+const mediumCenterCode = "M002";
+
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 function isMediumCenterUser(user: SessionUser) {
-  return user.center?.code === "M002" &&
-    ["CENTER_MANAGER", "DOCTOR", "PATIENT", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"].includes(user.role);
+  return user.center?.code === mediumCenterCode && allowedRoles.includes(user.role);
 }
 
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -23,11 +25,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     loadStoredToken()
-      .then((token) => token ? apiRequest<{ user: SessionUser }>("/auth/me") : null)
+      .then((token) => (token ? apiRequest<{ user: SessionUser }>("/auth/me") : null))
       .then(async (payload) => {
         if (payload && isMediumCenterUser(payload.user)) {
           setUser(payload.user);
-        } else if (payload) {
+          return;
+        }
+
+        if (payload) {
           await setApiToken(null);
         }
       })
@@ -43,9 +48,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
       method: "POST",
       body: JSON.stringify({ identifier, password })
     });
+
     if (!isMediumCenterUser(payload.user)) {
       throw new Error("هذا الحساب لا ينتمي إلى المركز الصحي المتوسط.");
     }
+
     await setApiToken(payload.token);
     setUser(payload.user);
   }
@@ -60,6 +67,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context) throw new Error("يجب استخدام AuthProvider.");
+
+  if (!context) {
+    throw new Error("يجب استخدام AuthProvider داخل التطبيق.");
+  }
+
   return context;
 }

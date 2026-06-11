@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
 import { StatusBadge } from "../components/StatusBadge";
+import { Breadcrumbs, EmptyState, ErrorState, LoadingState, PageHeader, ResultSummary, SearchBox } from "../components/UiStates";
 import { useAuth } from "../context/AuthContext";
 import { joinMeta, toArabicLabel } from "../lib/arabic";
 import { LocalPatientRecord, NetworkPatientSearchResult, UnifiedPatientRecord } from "../types";
@@ -43,6 +44,7 @@ export function PatientsPage() {
   const [searchResult, setSearchResult] = useState<NetworkPatientSearchResult | null>(null);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
     fullName: "",
     dateOfBirth: "",
@@ -56,17 +58,22 @@ export function PatientsPage() {
   });
 
   async function loadPatients(search?: string) {
+    setLoading(true);
     const path =
       user?.workspace === "central"
         ? `/central/patients${search ? `?search=${encodeURIComponent(search)}` : ""}`
         : `/center/patients${search ? `?search=${encodeURIComponent(search)}` : ""}`;
 
-    const payload = await apiRequest<UnifiedPatientRecord[] | LocalPatientRecord[]>(path);
+    try {
+      const payload = await apiRequest<UnifiedPatientRecord[] | LocalPatientRecord[]>(path);
 
-    if (user?.workspace === "central") {
-      setCentralPatients(payload as UnifiedPatientRecord[]);
-    } else {
-      setLocalPatients(payload as LocalPatientRecord[]);
+      if (user?.workspace === "central") {
+        setCentralPatients(payload as UnifiedPatientRecord[]);
+      } else {
+        setLocalPatients(payload as LocalPatientRecord[]);
+      }
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -140,52 +147,70 @@ export function PatientsPage() {
     }
   }
 
+  function retryLoadPatients(search = query) {
+    void loadPatients(search)
+      .then(() => setError(""))
+      .catch((cause: Error) => setError(cause.message));
+  }
+
   if (user?.workspace === "central") {
     return (
       <div className="page-stack">
+        <Breadcrumbs items={[{ label: "لوحة المتابعة", to: "/" }, { label: "المرضى" }]} />
+        <PageHeader
+          eyebrow="النظام المركزي"
+          title="السجل الموحد للمرضى"
+          subtitle="ابحث وتابع هوية المريض ونشاطه الأخير عبر جميع المراكز الصحية."
+          meta={`${centralPatients.length} ملف`}
+        />
         <SectionCard
           title="السجل الموحد للمرضى"
           subtitle="المرجع المركزي لهوية المريض ونشاطه الأخير عبر المراكز الصحية."
         >
-          <form className="toolbar" onSubmit={handleFilterSubmit}>
-            <input
-              className="toolbar-input"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="ابحث بالرقم الموحد أو الاسم أو رقم الهاتف"
+          <SearchBox
+            value={query}
+            onChange={setQuery}
+            onSubmit={handleFilterSubmit}
+            placeholder="ابحث بالرقم الموحد أو الاسم أو رقم الهاتف"
+          />
+
+          {error ? <ErrorState message={error} onRetry={() => retryLoadPatients(query)} /> : null}
+
+          {loading ? (
+            <LoadingState text="جار تحميل سجل المرضى..." />
+          ) : centralPatients.length === 0 ? (
+            <EmptyState
+              title="لا توجد ملفات مطابقة"
+              description="غيّر كلمات البحث أو امسح التصفية لعرض كل المرضى المسجلين."
             />
-            <button className="ghost-button" type="submit">
-              بحث
-            </button>
-          </form>
-
-          {error ? <div className="error-banner">{error}</div> : null}
-
-          <div className="card-grid">
-            {centralPatients.map((patient, index) => (
-              <Link key={patient.id} to={`/patients/${patient.id}`} className="profile-tile interactive-card">
-                <p className="eyebrow">{patient.unifiedId}</p>
-                <h3>{getPatientDisplayName(patient.fullName, index)}</h3>
-                <p>{patient.primaryPhone}</p>
-                <div className="tile-stats">
-                  <span>{patient.visitCount} زيارات حديثة</span>
-                  <span>{patient.referralCount} إحالات</span>
-                  <span>{patient.centersSeenAt.length} مراكز مرتبطة</span>
-                </div>
-                <p className="muted">
-                  {getChronicDiseasesLabel(patient.chronicDiseases)}
-                </p>
-                <div className="chip-row">
-                  {patient.centersSeenAt.map((center) => (
-                    <span key={center.centerId} className="tag">
-                      {center.centerName}
-                    </span>
-                  ))}
-                </div>
-                <span className="action-hint">عرض أو تعديل ملف المريض</span>
-              </Link>
-            ))}
-          </div>
+          ) : (
+            <>
+              <ResultSummary count={centralPatients.length} label="ملف مريض" query={query.trim() || undefined} />
+              <div className="card-grid">
+                {centralPatients.map((patient, index) => (
+                  <Link key={patient.id} to={`/patients/${patient.id}`} className="profile-tile interactive-card">
+                    <p className="eyebrow">{patient.unifiedId}</p>
+                    <h3>{getPatientDisplayName(patient.fullName, index)}</h3>
+                    <p>{patient.primaryPhone}</p>
+                    <div className="tile-stats">
+                      <span>{patient.visitCount} زيارات حديثة</span>
+                      <span>{patient.referralCount} إحالات</span>
+                      <span>{patient.centersSeenAt.length} مراكز مرتبطة</span>
+                    </div>
+                    <p className="muted">{getChronicDiseasesLabel(patient.chronicDiseases)}</p>
+                    <div className="chip-row">
+                      {patient.centersSeenAt.map((center) => (
+                        <span key={center.centerId} className="tag">
+                          {center.centerName}
+                        </span>
+                      ))}
+                    </div>
+                    <span className="action-hint">عرض أو تعديل ملف المريض</span>
+                  </Link>
+                ))}
+              </div>
+            </>
+          )}
         </SectionCard>
       </div>
     );
@@ -193,22 +218,24 @@ export function PatientsPage() {
 
   return (
     <div className="page-stack">
+      <Breadcrumbs items={[{ label: "لوحة المتابعة", to: "/" }, { label: "المرضى" }]} />
+      <PageHeader
+        eyebrow="إدارة المرضى"
+        title="ملفات المرضى المحليين"
+        subtitle="ابحث في السجل المحلي والموحد وأنشئ ملف مريض عند الحاجة."
+        meta={`${localPatients.length} ملف`}
+      />
       <div className="split-grid">
         <SectionCard
           title="بحث الاستقبال"
           subtitle="ابحث برقم الهاتف في السجل المحلي والموحد قبل إنشاء ملف مريض جديد."
         >
-          <form className="toolbar" onSubmit={handleSearchSubmit}>
-            <input
-              className="toolbar-input"
-              value={searchPhone}
-              onChange={(event) => setSearchPhone(event.target.value)}
-              placeholder="أدخل رقم الهاتف"
-            />
-            <button className="ghost-button" type="submit">
-              بحث
-            </button>
-          </form>
+          <SearchBox
+            value={searchPhone}
+            onChange={setSearchPhone}
+            onSubmit={handleSearchSubmit}
+            placeholder="أدخل رقم الهاتف"
+          />
 
           {searchResult ? (
             <div className="stack-list">
@@ -222,7 +249,10 @@ export function PatientsPage() {
                   <p className="muted">{joinMeta([searchResult.patient.unifiedId, searchResult.patient.primaryPhone])}</p>
                 </article>
               ) : (
-                <div className="empty-state compact">لم يتم العثور على مريض موحد بهذا الرقم.</div>
+                <EmptyState
+                  title="لم يتم العثور على مريض"
+                  description="يمكن إنشاء ملف محلي جديد ثم ربطه لاحقًا عند المزامنة."
+                />
               )}
             </div>
           ) : null}
@@ -320,38 +350,44 @@ export function PatientsPage() {
       </div>
 
       <SectionCard title="سجل المرضى المحلي" subtitle="المرضى المخزنون حاليًا في قاعدة بيانات هذا المركز.">
-        <form className="toolbar" onSubmit={handleFilterSubmit}>
-          <input
-            className="toolbar-input"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="تصفية بالاسم أو الهاتف أو الرقم الموحد"
+        <SearchBox
+          value={query}
+          onChange={setQuery}
+          onSubmit={handleFilterSubmit}
+          placeholder="تصفية بالاسم أو الهاتف أو الرقم الموحد"
+          buttonLabel="تصفية"
+        />
+
+        {error ? <ErrorState message={error} onRetry={() => retryLoadPatients(query)} /> : null}
+
+        {loading ? (
+          <LoadingState text="جار تحميل المرضى المحليين..." />
+        ) : localPatients.length === 0 ? (
+          <EmptyState
+            title="لا توجد ملفات محلية"
+            description="أنشئ ملفًا جديدًا أو امسح التصفية إذا كنت تبحث عن نتيجة محددة."
           />
-          <button className="ghost-button" type="submit">
-            تصفية
-          </button>
-        </form>
-
-        {error ? <div className="error-banner">{error}</div> : null}
-
-        <div className="card-grid">
-          {localPatients.map((patient, index) => (
-            <Link key={patient.id} to={`/patients/${patient.id}`} className="profile-tile interactive-card">
-              <p className="eyebrow">{patient.unifiedId ?? "سجل محلي فقط"}</p>
-              <h3>{getPatientDisplayName(patient.fullName, index)}</h3>
-              <p>{patient.phone}</p>
-              <div className="tile-stats">
-                <span>{patient.visitCount} زيارات</span>
-                <span>{toArabicLabel(patient.billingStatus)}</span>
-                <span>{patient.bloodType ?? "فصيلة الدم غير مسجلة"}</span>
-              </div>
-              <p className="muted">
-                {getChronicDiseasesLabel(patient.chronicDiseases)}
-              </p>
-              <span className="action-hint">عرض أو تعديل ملف المريض</span>
-            </Link>
-          ))}
-        </div>
+        ) : (
+          <>
+            <ResultSummary count={localPatients.length} label="ملف محلي" query={query.trim() || undefined} />
+            <div className="card-grid">
+              {localPatients.map((patient, index) => (
+                <Link key={patient.id} to={`/patients/${patient.id}`} className="profile-tile interactive-card">
+                  <p className="eyebrow">{patient.unifiedId ?? "سجل محلي فقط"}</p>
+                  <h3>{getPatientDisplayName(patient.fullName, index)}</h3>
+                  <p>{patient.phone}</p>
+                  <div className="tile-stats">
+                    <span>{patient.visitCount} زيارات</span>
+                    <span>{toArabicLabel(patient.billingStatus)}</span>
+                    <span>{patient.bloodType ?? "فصيلة الدم غير مسجلة"}</span>
+                  </div>
+                  <p className="muted">{getChronicDiseasesLabel(patient.chronicDiseases)}</p>
+                  <span className="action-hint">عرض أو تعديل ملف المريض</span>
+                </Link>
+              ))}
+            </div>
+          </>
+        )}
       </SectionCard>
     </div>
   );

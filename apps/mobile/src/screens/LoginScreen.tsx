@@ -1,18 +1,28 @@
 import { useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View
+} from "react-native";
 
 import { ApiError, getApiUrl } from "../api/client";
+import { AppIcon } from "../components/Icon";
+import { AppButton, TextField } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { colors, radii, spacing } from "../theme/tokens";
 
-const accounts = [
+const demoAccounts = [
   { label: "مدير المركز", identifier: "medium-manager" },
   { label: "طبيب", identifier: "medium-doctor" },
-  { label: "موظف استقبال", identifier: "medium-receptionist" },
-  { label: "ممرض", identifier: "medium-nurse" },
-  { label: "فني مختبر", identifier: "medium-lab" },
-  { label: "صيدلي", identifier: "medium-pharmacist" },
+  { label: "استقبال", identifier: "medium-receptionist" },
+  { label: "تمريض", identifier: "medium-nurse" },
+  { label: "مختبر", identifier: "medium-lab" },
+  { label: "صيدلية", identifier: "medium-pharmacist" },
   { label: "مريض", identifier: "medium-patient" }
 ];
 
@@ -29,8 +39,10 @@ export function LoginScreen() {
       setError("أدخل اسم المستخدم وكلمة المرور.");
       return;
     }
+
     setSubmitting(true);
     setError("");
+
     try {
       await login(identifier.trim(), password);
     } catch (cause) {
@@ -40,7 +52,7 @@ export function LoginScreen() {
     }
   }
 
-  function fillAccount(account: typeof accounts[number]) {
+  function fillAccount(account: (typeof demoAccounts)[number]) {
     setIdentifier(account.identifier);
     setPassword("Password123!");
     setError("");
@@ -50,53 +62,55 @@ export function LoginScreen() {
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.page}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.brand}>
-          <View style={styles.brandIcon}><Ionicons name="medical" color="#fff" size={30} /></View>
+          <View style={styles.brandIcon}>
+            <AppIcon name="medical" color="#fff" size={30} />
+          </View>
           <Text style={styles.brandTitle}>المركز الصحي المتوسط</Text>
-          <Text style={styles.brandSub}>الوصول الآمن إلى خدمات المركز ودورة رعاية المريض</Text>
+          <Text style={styles.brandSub}>تطبيق موبايل لإدارة استقبال المركز، الزيارات، المتابعة الطبية وخدمات المريض.</Text>
         </View>
 
         <View style={styles.form}>
           <Text style={styles.title}>تسجيل الدخول</Text>
-          <Text style={styles.label}>اسم المستخدم أو البريد الإلكتروني</Text>
-          <TextInput
-            autoCapitalize="none"
-            autoCorrect={false}
+          <TextField
+            label="اسم المستخدم أو البريد الإلكتروني"
             onChangeText={setIdentifier}
             placeholder="أدخل بيانات الحساب"
-            placeholderTextColor={colors.muted}
-            style={styles.input}
-            textAlign="right"
             value={identifier}
           />
-          <Text style={styles.label}>كلمة المرور</Text>
-          <View style={styles.passwordRow}>
-            <TextInput
+
+          <View style={styles.passwordField}>
+            <TextField
+              label="كلمة المرور"
               onChangeText={setPassword}
               placeholder="أدخل كلمة المرور"
-              placeholderTextColor={colors.muted}
               secureTextEntry={!showPassword}
-              style={styles.passwordInput}
-              textAlign="right"
+              inputStyle={styles.passwordInput}
               value={password}
             />
-            <Pressable onPress={() => setShowPassword((value) => !value)} style={styles.iconButton}>
-              <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={22} color={colors.muted} />
+            <Pressable onPress={() => setShowPassword((value) => !value)} style={styles.passwordIcon}>
+              <AppIcon name={showPassword ? "eye-off-outline" : "eye-outline"} size={22} color={colors.muted} />
             </Pressable>
           </View>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
+
           <Pressable disabled={submitting} onPress={() => void handleLogin()} style={styles.primaryButton}>
             {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>دخول</Text>}
           </Pressable>
 
-          <Text style={styles.demoTitle}>حسابات مرحلة التطوير</Text>
+          <Text style={styles.demoTitle}>حسابات التجربة</Text>
           <View style={styles.accounts}>
-            {accounts.map((account) => (
-              <Pressable key={account.identifier} onPress={() => fillAccount(account)} style={styles.accountButton}>
-                <Text style={styles.accountText}>{account.label}</Text>
-              </Pressable>
+            {demoAccounts.map((account) => (
+              <AppButton
+                key={account.identifier}
+                label={account.label}
+                onPress={() => fillAccount(account)}
+                style={styles.accountButton}
+                tone="ghost"
+              />
             ))}
           </View>
+
           <Text style={styles.server}>الخادم: {getApiUrl()}</Text>
         </View>
       </ScrollView>
@@ -105,25 +119,105 @@ export function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: colors.background },
-  content: { flexGrow: 1, justifyContent: "center", padding: spacing.lg, gap: spacing.lg },
-  brand: { alignItems: "center", gap: spacing.sm },
-  brandIcon: { width: 64, height: 64, borderRadius: 20, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
-  brandTitle: { color: colors.text, fontSize: 28, fontWeight: "800", textAlign: "center" },
-  brandSub: { color: colors.muted, textAlign: "center", lineHeight: 21 },
-  form: { backgroundColor: colors.surface, borderRadius: radii.md, padding: spacing.lg, gap: spacing.sm, borderWidth: 1, borderColor: colors.border },
-  title: { color: colors.text, fontSize: 22, fontWeight: "800", textAlign: "right", marginBottom: spacing.xs },
-  label: { color: colors.text, fontWeight: "700", textAlign: "right" },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, padding: spacing.md, color: colors.text, backgroundColor: "#fff" },
-  passwordRow: { flexDirection: "row", borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: "#fff" },
-  passwordInput: { flex: 1, padding: spacing.md, color: colors.text },
-  iconButton: { width: 48, alignItems: "center", justifyContent: "center" },
-  primaryButton: { minHeight: 50, backgroundColor: colors.primary, borderRadius: radii.sm, alignItems: "center", justifyContent: "center", marginTop: spacing.xs },
-  primaryText: { color: "#fff", fontWeight: "800", fontSize: 16 },
-  demoTitle: { color: colors.muted, fontWeight: "700", textAlign: "right", marginTop: spacing.sm },
-  accounts: { flexDirection: "row-reverse", flexWrap: "wrap", gap: spacing.xs },
-  accountButton: { backgroundColor: colors.surfaceMuted, borderRadius: radii.sm, paddingHorizontal: spacing.sm, paddingVertical: 9 },
-  accountText: { color: colors.primary, fontWeight: "700" },
-  server: { color: colors.muted, fontSize: 11, textAlign: "center", marginTop: spacing.xs },
-  error: { color: colors.danger, fontWeight: "700", textAlign: "right" }
+  page: {
+    flex: 1,
+    backgroundColor: colors.background
+  },
+  content: {
+    flexGrow: 1,
+    justifyContent: "center",
+    padding: spacing.lg,
+    gap: spacing.lg
+  },
+  brand: {
+    alignItems: "center",
+    gap: spacing.sm
+  },
+  brandIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  brandTitle: {
+    color: colors.text,
+    fontSize: 28,
+    fontWeight: "900",
+    textAlign: "center"
+  },
+  brandSub: {
+    color: colors.muted,
+    textAlign: "center",
+    lineHeight: 22
+  },
+  form: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border
+  },
+  title: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: "900",
+    textAlign: "right"
+  },
+  passwordField: {
+    position: "relative"
+  },
+  passwordInput: {
+    paddingLeft: 52
+  },
+  passwordIcon: {
+    position: "absolute",
+    left: 4,
+    bottom: 0,
+    width: 48,
+    height: 50,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  primaryButton: {
+    minHeight: 50,
+    backgroundColor: colors.primary,
+    borderRadius: radii.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: spacing.xs
+  },
+  primaryText: {
+    color: "#fff",
+    fontWeight: "900",
+    fontSize: 16
+  },
+  demoTitle: {
+    color: colors.muted,
+    fontWeight: "800",
+    textAlign: "right",
+    marginTop: spacing.sm
+  },
+  accounts: {
+    flexDirection: "row-reverse",
+    flexWrap: "wrap",
+    gap: spacing.xs
+  },
+  accountButton: {
+    minHeight: 40,
+    paddingHorizontal: spacing.sm
+  },
+  server: {
+    color: colors.muted,
+    fontSize: 11,
+    textAlign: "center",
+    marginTop: spacing.xs
+  },
+  error: {
+    color: colors.danger,
+    fontWeight: "800",
+    textAlign: "right"
+  }
 });

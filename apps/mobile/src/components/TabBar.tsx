@@ -1,10 +1,25 @@
-import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { AppIcon, IconName } from "./Icon";
 import { Role } from "../types";
-import { colors, radii, spacing } from "../theme/tokens";
+import { canManagePatients, canUseMessages, canUseVisitWorkflow } from "../services/mediumApi";
+import { colors, radii } from "../theme/tokens";
 
-export type TabKey = "home" | "workflow" | "appointments" | "messages" | "profile";
+export type TabKey =
+  | "home"
+  | "patients"
+  | "workflow"
+  | "appointments"
+  | "record"
+  | "messages"
+  | "services"
+  | "profile";
+
+interface TabItem {
+  key: TabKey;
+  label: string;
+  icon: IconName;
+}
 
 interface TabBarProps {
   activeTab: TabKey;
@@ -12,23 +27,42 @@ interface TabBarProps {
   onChange: (tab: TabKey) => void;
 }
 
-const employeeRoles: Role[] = ["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"];
+export function getTabsForRole(role: Role): TabItem[] {
+  if (role === "PATIENT") {
+    return [
+      { key: "home", label: "الرئيسية", icon: "home-outline" },
+      { key: "appointments", label: "المواعيد", icon: "calendar-outline" },
+      { key: "record", label: "السجل", icon: "folder-open-outline" },
+      { key: "messages", label: "المحادثات", icon: "chatbubble-outline" },
+      { key: "services", label: "الخدمات", icon: "grid-outline" }
+    ];
+  }
+
+  const tabs: TabItem[] = [{ key: "home", label: "الرئيسية", icon: "home-outline" }];
+
+  if (canManagePatients(role)) {
+    tabs.push({ key: "patients", label: "المرضى", icon: "people-outline" });
+  }
+
+  if (canUseVisitWorkflow(role)) {
+    tabs.push({ key: "workflow", label: "الزيارات", icon: "medical-outline" });
+  }
+
+  if (canUseMessages(role)) {
+    tabs.push({ key: "messages", label: "المحادثات", icon: "chatbubble-outline" });
+  }
+
+  tabs.push({ key: "services", label: "الخدمات", icon: "grid-outline" });
+
+  if (tabs.length < 5) {
+    tabs.push({ key: "profile", label: "الحساب", icon: "person-outline" });
+  }
+
+  return tabs.slice(0, 5);
+}
 
 export function TabBar({ activeTab, role, onChange }: TabBarProps) {
-  const tabs = role === "PATIENT"
-    ? [
-        { key: "home" as const, label: "الرئيسية", icon: "home-outline" as const },
-        { key: "appointments" as const, label: "المواعيد", icon: "calendar-outline" as const },
-        { key: "messages" as const, label: "المحادثات", icon: "chatbubble-outline" as const },
-        { key: "profile" as const, label: "الحساب", icon: "person-outline" as const }
-      ]
-    : [
-        { key: "home" as const, label: "الرئيسية", icon: "home-outline" as const },
-        ...(employeeRoles.includes(role)
-          ? [{ key: "workflow" as const, label: "الزيارات", icon: "medical-outline" as const }]
-          : []),
-        { key: "profile" as const, label: "الحساب", icon: "person-outline" as const }
-      ];
+  const tabs = getTabsForRole(role);
 
   return (
     <View style={styles.container}>
@@ -36,8 +70,10 @@ export function TabBar({ activeTab, role, onChange }: TabBarProps) {
         const active = activeTab === tab.key;
         return (
           <Pressable key={tab.key} onPress={() => onChange(tab.key)} style={styles.tab}>
-            <Ionicons name={tab.icon} size={22} color={active ? colors.primary : colors.muted} />
-            <Text style={[styles.label, active && styles.activeLabel]}>{tab.label}</Text>
+            <AppIcon name={tab.icon} size={21} color={active ? colors.primary : colors.muted} />
+            <Text numberOfLines={1} style={[styles.label, active && styles.activeLabel]}>
+              {tab.label}
+            </Text>
           </Pressable>
         );
       })}
@@ -52,19 +88,23 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.border,
-    minHeight: 64
+    minHeight: 64,
+    overflow: "hidden"
   },
   tab: {
     flex: 1,
+    minWidth: 0,
     alignItems: "center",
     justifyContent: "center",
-    gap: 4
+    gap: 4,
+    paddingHorizontal: 2
   },
   label: {
     color: colors.muted,
-    fontWeight: "700",
+    fontWeight: "800",
     fontSize: 11,
-    textAlign: "center"
+    textAlign: "center",
+    writingDirection: "rtl"
   },
   activeLabel: {
     color: colors.primary

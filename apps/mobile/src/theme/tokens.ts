@@ -1,7 +1,7 @@
 export const colors = {
   background: "#eef6f1",
   surface: "#ffffff",
-  surfaceMuted: "#e2f0e7",
+  surfaceMuted: "#e6f0ea",
   primary: "#0d7b66",
   secondary: "#f08f52",
   text: "#16312d",
@@ -12,9 +12,9 @@ export const colors = {
 };
 
 export const radii = {
-  lg: 28,
-  md: 20,
-  sm: 14
+  lg: 8,
+  md: 8,
+  sm: 8
 };
 
 export const spacing = {

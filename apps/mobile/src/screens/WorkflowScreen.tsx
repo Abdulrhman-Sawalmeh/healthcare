@@ -1,24 +1,29 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
-import { apiRequest } from "../api/client";
+import {
+  AppButton,
+  Card,
+  ChipRow,
+  ChoiceChip,
+  EmptyState,
+  HeaderCard,
+  LoadingState,
+  Notice,
+  Screen,
+  SectionTitle,
+  StatusPill,
+  TextField
+} from "../components/ui";
 import { useAuth } from "../context/AuthContext";
+import { combineDateAndTime, priorityLabels, toArabicLabel, tomorrowDateInput } from "../lib/arabic";
+import { mediumApi } from "../services/mediumApi";
 import { Catalogs, IntakeOptions, WorkflowVisit } from "../types";
-import { colors, radii, spacing } from "../theme/tokens";
+import { colors, spacing } from "../theme/tokens";
 
-const statusLabels: Record<string, string> = {
-  WAITING_TRIAGE: "بانتظار التمريض",
-  WAITING_DOCTOR: "بانتظار الطبيب",
-  WAITING_LAB: "بانتظار المختبر",
-  WAITING_PHARMACY: "بانتظار الصيدلية",
-  IN_TREATMENT: "قيد المعالجة",
-  READY_TO_UPLOAD: "جاهز للرفع",
-  UPLOAD_PENDING: "قيد الرفع",
-  COMPLETED: "مكتمل",
-  CANCELLED: "ملغي"
-};
-
-const priorityLabels = { NORMAL: "عادي", URGENT: "عاجل", EMERGENCY: "طارئ" };
+const priorityOptions = ["NORMAL", "URGENT", "EMERGENCY"];
+const visitTypes = ["CONSULTATION", "FOLLOW_UP", "LAB", "EMERGENCY"];
+const filters = ["ALL", "WAITING_TRIAGE", "WAITING_DOCTOR", "WAITING_LAB", "WAITING_PHARMACY", "READY_TO_UPLOAD"];
 
 export function WorkflowScreen() {
   const { user } = useAuth();
@@ -30,37 +35,51 @@ export function WorkflowScreen() {
   const [selectedMedicineId, setSelectedMedicineId] = useState<number>();
   const [selectedLabId, setSelectedLabId] = useState<number>();
   const [activeVisitId, setActiveVisitId] = useState<number>();
-  const [fields, setFields] = useState<Record<string, string>>({});
+  const [filter, setFilter] = useState("ALL");
+  const [date, setDate] = useState(tomorrowDateInput());
+  const [time, setTime] = useState("09:00");
+  const [fields, setFields] = useState<Record<string, string>>({
+    priority: "NORMAL",
+    visitType: "CONSULTATION"
+  });
   const [refreshing, setRefreshing] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
   const canIntake = user?.role === "CENTER_MANAGER" || user?.role === "RECEPTIONIST";
   const canAssess = user?.role === "CENTER_MANAGER" || user?.role === "DOCTOR";
+  const canTriage = user?.role === "CENTER_MANAGER" || user?.role === "NURSE";
+  const canLab = user?.role === "CENTER_MANAGER" || user?.role === "LAB_TECH";
+  const canPharmacy = user?.role === "CENTER_MANAGER" || user?.role === "PHARMACIST";
 
   const loadData = useCallback(async () => {
     setRefreshing(true);
     try {
-      const requests: Promise<unknown>[] = [
-        apiRequest<WorkflowVisit[]>("/center/visit-workflow").then(setVisits)
-      ];
+      const status = filter === "ALL" ? undefined : filter;
+      const tasks: Array<Promise<unknown>> = [mediumApi.workflowVisits(status).then(setVisits)];
+
       if (canIntake || canAssess) {
-        requests.push(apiRequest<IntakeOptions>("/center/visit-workflow/intake-options").then(setOptions));
+        tasks.push(mediumApi.workflowIntakeOptions().then(setOptions));
       }
-      if (canAssess || user?.role === "LAB_TECH" || user?.role === "PHARMACIST") {
-        requests.push(apiRequest<Catalogs>("/center/visit-workflow/catalogs").then(setCatalogs));
+      if (canAssess || canLab || canPharmacy) {
+        tasks.push(mediumApi.workflowCatalogs().then(setCatalogs));
       }
-      await Promise.all(requests);
+
+      await Promise.all(tasks);
       setError("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذر تحميل الزيارات.");
+      setError(cause instanceof Error ? cause.message : "تعذر تحميل زيارات المسار.");
     } finally {
       setRefreshing(false);
+      setLoaded(true);
     }
-  }, [canAssess, canIntake, user?.role]);
+  }, [canAssess, canIntake, canLab, canPharmacy, filter]);
 
-  useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   function setField(name: string, value: string) {
     setFields((current) => ({ ...current, [name]: value }));
@@ -73,8 +92,12 @@ export function WorkflowScreen() {
     try {
       await action();
       setMessage(success);
-      setFields({});
-      setActiveVisitId(undefined);
+      setFields((current) => ({
+        priority: current.priority ?? "NORMAL",
+        visitType: current.visitType ?? "CONSULTATION"
+      }));
+      setSelectedMedicineId(undefined);
+      setSelectedLabId(undefined);
       await loadData();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر تنفيذ العملية.");
@@ -85,234 +108,359 @@ export function WorkflowScreen() {
 
   function createVisit() {
     if (!selectedPatientId) {
-      setError("اختر المريض أولاً.");
+      setError("اختر المريض قبل تسجيل الزيارة.");
       return;
     }
-    void run(() => apiRequest("/center/visit-workflow", {
-      method: "POST",
-      body: JSON.stringify({
-        patientId: selectedPatientId,
-        doctorId: selectedDoctorId,
-        visitDate: new Date().toISOString(),
-        visitType: fields.visitType || "CONSULTATION",
-        priority: fields.priority || "NORMAL",
-        symptoms: fields.symptoms || undefined
-      })
-    }), "تم تسجيل الزيارة.");
+
+    void run(
+      () =>
+        mediumApi.createWorkflowVisit({
+          patientId: selectedPatientId,
+          doctorId: selectedDoctorId,
+          visitDate: combineDateAndTime(date, time),
+          visitTime: time,
+          visitType: fields.visitType || "CONSULTATION",
+          priority: fields.priority || "NORMAL",
+          symptoms: fields.symptoms || undefined,
+          notes: fields.notes || undefined
+        }),
+      "تم تسجيل الزيارة وإدخالها إلى مسار الرعاية."
+    );
   }
 
   function triage(visitId: number) {
-    void run(() => apiRequest(`/center/visit-workflow/${visitId}/triage`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        bloodPressure: fields.bloodPressure || undefined,
-        temperature: fields.temperature ? Number(fields.temperature) : undefined,
-        heartRate: fields.heartRate ? Number(fields.heartRate) : undefined,
-        oxygenSaturation: fields.oxygenSaturation ? Number(fields.oxygenSaturation) : undefined,
-        notes: fields.notes || undefined
-      })
-    }), "تم حفظ التقييم التمريضي.");
+    void run(
+      () =>
+        mediumApi.saveTriage(visitId, {
+          bloodPressure: fields.bloodPressure || undefined,
+          temperature: fields.temperature ? Number(fields.temperature) : undefined,
+          heartRate: fields.heartRate ? Number(fields.heartRate) : undefined,
+          oxygenSaturation: fields.oxygenSaturation ? Number(fields.oxygenSaturation) : undefined,
+          notes: fields.triageNotes || undefined
+        }),
+      "تم حفظ تقييم التمريض."
+    );
   }
 
   function doctorAssessment(visitId: number) {
-    if (!fields.diagnosis || fields.diagnosis.length < 3) {
-      setError("أدخل التشخيص الطبي.");
+    if (!fields.diagnosis || fields.diagnosis.trim().length < 3) {
+      setError("أدخل التشخيص الطبي قبل الحفظ.");
       return;
     }
-    const prescriptions = selectedMedicineId ? [{
-      medicineId: selectedMedicineId,
-      dosage: fields.dosage || "حسب إرشادات الطبيب",
-      duration: fields.duration || "حسب الحاجة",
-      quantity: Number(fields.quantity || 1)
-    }] : [];
-    void run(() => apiRequest(`/center/visit-workflow/${visitId}/doctor`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        diagnosis: fields.diagnosis,
-        symptoms: fields.symptoms || undefined,
-        notes: fields.notes || undefined,
-        prescriptions,
-        labTestIds: selectedLabId ? [selectedLabId] : []
-      })
-    }), "تم حفظ تقييم الطبيب.");
+
+    const medicine = catalogs.medicines.find((item) => item.id === selectedMedicineId);
+    const prescriptions = medicine
+      ? [
+          {
+            medicineId: medicine.id,
+            dosage: fields.dosage || "حسب إرشادات الطبيب",
+            duration: fields.duration || "حسب الحاجة",
+            quantity: Number(fields.quantity || 1)
+          }
+        ]
+      : [];
+
+    void run(
+      () =>
+        mediumApi.saveDoctorAssessment(visitId, {
+          diagnosis: fields.diagnosis,
+          symptoms: fields.symptoms || undefined,
+          notes: fields.doctorNotes || undefined,
+          prescriptions,
+          labTestIds: selectedLabId ? [selectedLabId] : []
+        }),
+      "تم حفظ تقييم الطبيب."
+    );
+  }
+
+  if (!loaded && refreshing) {
+    return <LoadingState text="جار تحميل مسار الزيارات..." />;
   }
 
   return (
-    <ScrollView
-      contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadData()} />}
-      keyboardShouldPersistTaps="handled"
-    >
-      <View>
-        <Text style={styles.title}>دورة الزيارات</Text>
-        <Text style={styles.subtitle}>المهام الطبية والتشغيلية الخاصة بحسابك.</Text>
-      </View>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {message ? <Text style={styles.success}>{message}</Text> : null}
+    <Screen keyboard refreshing={refreshing} onRefresh={() => void loadData()}>
+      <HeaderCard
+        eyebrow="ملفات الزيارة والمتابعة"
+        icon="medical-outline"
+        subtitle="كل دور يرى المهام التي تخصه فقط داخل دورة الرعاية."
+        title="مسار الزيارة"
+      />
+
+      {error ? <Notice text={error} tone="error" /> : null}
+      {message ? <Notice text={message} tone="success" /> : null}
+
+      <Card>
+        <SectionTitle title="تصفية المسار" subtitle="اختر حالة لعرض الزيارات المرتبطة بها." />
+        <ChipRow>
+          {filters.map((item) => (
+            <ChoiceChip
+              key={item}
+              label={item === "ALL" ? "الكل" : toArabicLabel(item)}
+              onPress={() => setFilter(item)}
+              selected={filter === item}
+            />
+          ))}
+        </ChipRow>
+      </Card>
 
       {canIntake ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>تسجيل زيارة جديدة</Text>
+        <Card>
+          <SectionTitle title="تسجيل زيارة جديدة" subtitle="تستخدم للاستقبال قبل انتقال المريض إلى التمريض والطبيب." />
           <Text style={styles.label}>المريض</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.choices}>
+          <ChipRow>
             {options.patients.map((patient) => (
-              <Choice key={patient.id} active={selectedPatientId === patient.id} label={patient.fullName} onPress={() => setSelectedPatientId(patient.id)} />
+              <ChoiceChip
+                key={patient.id}
+                label={`${patient.fullName} - ${patient.phone}`}
+                onPress={() => setSelectedPatientId(patient.id)}
+                selected={selectedPatientId === patient.id}
+              />
             ))}
-          </ScrollView>
+          </ChipRow>
+
           <Text style={styles.label}>الطبيب</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.choices}>
+          <ChipRow>
             {options.doctors.map((doctor) => (
-              <Choice key={doctor.id} active={selectedDoctorId === doctor.id} label={doctor.fullName} onPress={() => setSelectedDoctorId(doctor.id)} />
+              <ChoiceChip
+                key={doctor.id}
+                label={doctor.fullName}
+                onPress={() => setSelectedDoctorId(selectedDoctorId === doctor.id ? undefined : doctor.id)}
+                selected={selectedDoctorId === doctor.id}
+              />
             ))}
-          </ScrollView>
+          </ChipRow>
+
+          <Text style={styles.label}>نوع الزيارة</Text>
+          <ChipRow>
+            {visitTypes.map((type) => (
+              <ChoiceChip key={type} label={toArabicLabel(type)} onPress={() => setField("visitType", type)} selected={(fields.visitType || "CONSULTATION") === type} />
+            ))}
+          </ChipRow>
+
           <Text style={styles.label}>الأولوية</Text>
-          <View style={styles.choices}>
-            {(["NORMAL", "URGENT", "EMERGENCY"] as const).map((priority) => (
-              <Choice key={priority} active={(fields.priority || "NORMAL") === priority} label={priorityLabels[priority]} onPress={() => setField("priority", priority)} />
+          <ChipRow>
+            {priorityOptions.map((priority) => (
+              <ChoiceChip
+                key={priority}
+                label={priorityLabels[priority] ?? priority}
+                onPress={() => setField("priority", priority)}
+                selected={(fields.priority || "NORMAL") === priority}
+              />
             ))}
+          </ChipRow>
+
+          <View style={styles.row}>
+            <TextField label="التاريخ" onChangeText={setDate} value={date} style={styles.flex} />
+            <TextField label="الوقت" onChangeText={setTime} value={time} style={styles.flex} />
           </View>
-          <Input placeholder="الأعراض الأولية" value={fields.symptoms} onChange={(value) => setField("symptoms", value)} />
-          <Action disabled={busy} label="تسجيل الزيارة" onPress={createVisit} />
-        </View>
+          <TextField label="الأعراض الأولية" multiline onChangeText={(value) => setField("symptoms", value)} value={fields.symptoms ?? ""} />
+          <TextField label="ملاحظات الاستقبال" multiline onChangeText={(value) => setField("notes", value)} value={fields.notes ?? ""} />
+          <AppButton disabled={busy} icon="add-circle-outline" label="تسجيل الزيارة" onPress={createVisit} />
+        </Card>
       ) : null}
 
       {visits.map((visit) => {
         const expanded = activeVisitId === visit.id;
+        const openLabRequests = visit.labRequests?.filter((request) => request.status !== "COMPLETED") ?? [];
+        const openPrescriptions = visit.prescriptions?.filter((item) => !item.dispensed) ?? [];
+
         return (
-          <View key={visit.id} style={styles.card}>
-            <Pressable onPress={() => setActiveVisitId(expanded ? undefined : visit.id)}>
-              <View style={styles.cardHeader}>
-                <Text style={[styles.priority, visit.priority === "EMERGENCY" && styles.danger]}>{priorityLabels[visit.priority]}</Text>
-                <View style={styles.headerText}>
-                  <Text style={styles.cardTitle}>{visit.patient.fullName}</Text>
-                  <Text style={styles.meta}>{statusLabels[visit.workflowStatus] ?? visit.workflowStatus}</Text>
-                </View>
+          <Card key={visit.id}>
+            <AppButton
+              icon={expanded ? "chevron-up-outline" : "chevron-down-outline"}
+              label={expanded ? "إخفاء التفاصيل" : "فتح تفاصيل الزيارة"}
+              onPress={() => setActiveVisitId(expanded ? undefined : visit.id)}
+              tone="ghost"
+            />
+            <View style={styles.visitHeader}>
+              <StatusPill label={priorityLabels[visit.priority]} tone={visit.priority === "EMERGENCY" ? "danger" : "primary"} />
+              <View style={styles.visitText}>
+                <Text style={styles.visitTitle}>{visit.patient.fullName}</Text>
+                <Text style={styles.meta}>{toArabicLabel(visit.workflowStatus)}</Text>
               </View>
-              <Text style={styles.meta}>الطبيب: {visit.doctor?.fullName ?? "لم يحدد"}</Text>
-              <Text style={styles.meta}>التشخيص: {visit.diagnosis || "بانتظار التقييم"}</Text>
-              {visit.invoice ? <Text style={styles.invoice}>الفاتورة: {visit.invoice.amount.toFixed(2)} شيكل</Text> : null}
-            </Pressable>
+            </View>
+            <Text style={styles.meta}>الطبيب: {visit.doctor?.fullName ?? "لم يحدد"}</Text>
+            <Text style={styles.meta}>التشخيص: {visit.diagnosis || "بانتظار التقييم"}</Text>
+            {visit.invoice ? <Text style={styles.invoice}>الفاتورة: {visit.invoice.amount.toFixed(2)} شيكل</Text> : null}
 
             {expanded ? (
               <View style={styles.actionPanel}>
-                {(user?.role === "NURSE" || user?.role === "CENTER_MANAGER") && visit.workflowStatus === "WAITING_TRIAGE" ? (
-                  <>
-                    <Input placeholder="ضغط الدم 120/80" value={fields.bloodPressure} onChange={(value) => setField("bloodPressure", value)} />
-                    <View style={styles.inputRow}>
-                      <Input compact placeholder="الحرارة" keyboard="numeric" value={fields.temperature} onChange={(value) => setField("temperature", value)} />
-                      <Input compact placeholder="النبض" keyboard="numeric" value={fields.heartRate} onChange={(value) => setField("heartRate", value)} />
+                {canTriage && visit.workflowStatus === "WAITING_TRIAGE" ? (
+                  <View style={styles.taskBlock}>
+                    <SectionTitle title="تقييم التمريض" />
+                    <TextField label="ضغط الدم" onChangeText={(value) => setField("bloodPressure", value)} placeholder="120/80" value={fields.bloodPressure ?? ""} />
+                    <View style={styles.row}>
+                      <TextField keyboardType="numeric" label="الحرارة" onChangeText={(value) => setField("temperature", value)} value={fields.temperature ?? ""} style={styles.flex} />
+                      <TextField keyboardType="numeric" label="النبض" onChangeText={(value) => setField("heartRate", value)} value={fields.heartRate ?? ""} style={styles.flex} />
                     </View>
-                    <Input placeholder="نسبة الأكسجين" keyboard="numeric" value={fields.oxygenSaturation} onChange={(value) => setField("oxygenSaturation", value)} />
-                    <Input placeholder="ملاحظات التمريض" value={fields.notes} onChange={(value) => setField("notes", value)} />
-                    <Action disabled={busy} label="حفظ تقييم التمريض" onPress={() => triage(visit.id)} />
-                  </>
+                    <TextField keyboardType="numeric" label="الأكسجين" onChangeText={(value) => setField("oxygenSaturation", value)} value={fields.oxygenSaturation ?? ""} />
+                    <TextField label="ملاحظات" multiline onChangeText={(value) => setField("triageNotes", value)} value={fields.triageNotes ?? ""} />
+                    <AppButton disabled={busy} label="حفظ تقييم التمريض" onPress={() => triage(visit.id)} />
+                  </View>
                 ) : null}
 
                 {canAssess && ["WAITING_DOCTOR", "IN_TREATMENT"].includes(visit.workflowStatus) ? (
-                  <>
-                    <Input placeholder="التشخيص" value={fields.diagnosis} onChange={(value) => setField("diagnosis", value)} />
+                  <View style={styles.taskBlock}>
+                    <SectionTitle title="تقييم الطبيب" />
+                    <TextField label="التشخيص" multiline onChangeText={(value) => setField("diagnosis", value)} value={fields.diagnosis ?? ""} />
                     <Text style={styles.label}>تشخيص مقترح</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.choices}>
+                    <ChipRow>
                       {catalogs.diseases.slice(0, 8).map((disease) => (
-                        <Choice key={disease.id} active={fields.diagnosis === disease.name} label={disease.name} onPress={() => setField("diagnosis", disease.name)} />
+                        <ChoiceChip key={disease.id} label={disease.name} onPress={() => setField("diagnosis", disease.name)} selected={fields.diagnosis === disease.name} />
                       ))}
-                    </ScrollView>
+                    </ChipRow>
                     <Text style={styles.label}>دواء اختياري</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.choices}>
-                      {catalogs.medicines.map((medicine) => (
-                        <Choice key={medicine.id} active={selectedMedicineId === medicine.id} label={medicine.medicineName} onPress={() => setSelectedMedicineId(selectedMedicineId === medicine.id ? undefined : medicine.id)} />
+                    <ChipRow>
+                      {catalogs.medicines.slice(0, 10).map((medicine) => (
+                        <ChoiceChip
+                          key={medicine.id}
+                          label={medicine.medicineName}
+                          onPress={() => setSelectedMedicineId(selectedMedicineId === medicine.id ? undefined : medicine.id)}
+                          selected={selectedMedicineId === medicine.id}
+                        />
                       ))}
-                    </ScrollView>
+                    </ChipRow>
                     {selectedMedicineId ? (
-                      <View style={styles.inputRow}>
-                        <Input compact placeholder="الجرعة" value={fields.dosage} onChange={(value) => setField("dosage", value)} />
-                        <Input compact placeholder="المدة" value={fields.duration} onChange={(value) => setField("duration", value)} />
+                      <View style={styles.row}>
+                        <TextField label="الجرعة" onChangeText={(value) => setField("dosage", value)} value={fields.dosage ?? ""} style={styles.flex} />
+                        <TextField label="المدة" onChangeText={(value) => setField("duration", value)} value={fields.duration ?? ""} style={styles.flex} />
                       </View>
                     ) : null}
                     <Text style={styles.label}>فحص اختياري</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.choices}>
-                      {catalogs.labTests.map((test) => (
-                        <Choice key={test.id} active={selectedLabId === test.id} label={test.testName} onPress={() => setSelectedLabId(selectedLabId === test.id ? undefined : test.id)} />
+                    <ChipRow>
+                      {catalogs.labTests.slice(0, 10).map((test) => (
+                        <ChoiceChip
+                          key={test.id}
+                          label={test.testName}
+                          onPress={() => setSelectedLabId(selectedLabId === test.id ? undefined : test.id)}
+                          selected={selectedLabId === test.id}
+                        />
                       ))}
-                    </ScrollView>
-                    <Action disabled={busy} label="حفظ تقييم الطبيب" onPress={() => doctorAssessment(visit.id)} />
-                  </>
+                    </ChipRow>
+                    <TextField label="ملاحظات الطبيب" multiline onChangeText={(value) => setField("doctorNotes", value)} value={fields.doctorNotes ?? ""} />
+                    <AppButton disabled={busy} label="حفظ تقييم الطبيب" onPress={() => doctorAssessment(visit.id)} />
+                  </View>
                 ) : null}
 
-                {(user?.role === "LAB_TECH" || user?.role === "CENTER_MANAGER") ? visit.labRequests?.filter((request) => request.status !== "COMPLETED").map((request) => (
-                  <View key={request.id} style={styles.task}>
-                    <Text style={styles.cardTitle}>{request.test.testName}</Text>
-                    <Input placeholder="نتيجة الفحص" value={fields[`lab-${request.id}`]} onChange={(value) => setField(`lab-${request.id}`, value)} />
-                    <Action disabled={busy} label="اعتماد النتيجة" onPress={() => void run(() => apiRequest(`/center/visit-workflow/lab/${request.id}/result`, {
-                      method: "PATCH", body: JSON.stringify({ resultValue: fields[`lab-${request.id}`] })
-                    }), "تم اعتماد نتيجة الفحص.")} />
+                {canLab && openLabRequests.map((request) => (
+                  <View key={request.id} style={styles.taskBlock}>
+                    <SectionTitle title={`نتيجة المختبر: ${request.test.testName}`} subtitle={request.test.normalRange ?? undefined} />
+                    <TextField label="نتيجة الفحص" multiline onChangeText={(value) => setField(`lab-${request.id}`, value)} value={fields[`lab-${request.id}`] ?? ""} />
+                    <AppButton
+                      disabled={busy || !fields[`lab-${request.id}`]}
+                      label="اعتماد النتيجة"
+                      onPress={() =>
+                        void run(
+                          () => mediumApi.saveLabResult(request.id, { resultValue: fields[`lab-${request.id}`] }),
+                          "تم اعتماد نتيجة الفحص."
+                        )
+                      }
+                    />
                   </View>
-                )) : null}
+                ))}
 
-                {(user?.role === "PHARMACIST" || user?.role === "CENTER_MANAGER") ? visit.prescriptions?.filter((item) => !item.dispensed).map((item) => (
-                  <View key={item.id} style={styles.task}>
-                    <Text style={styles.cardTitle}>{item.medicineName}</Text>
-                    <Text style={styles.meta}>{item.dosage}، الكمية {item.quantity}</Text>
-                    <Action disabled={busy} label="تأكيد تسليم الدواء" onPress={() => void run(() => apiRequest(`/center/visit-workflow/prescriptions/${item.id}/dispense`, { method: "PATCH" }), "تم تسجيل صرف الدواء.")} />
+                {canPharmacy && openPrescriptions.map((prescription) => (
+                  <View key={prescription.id} style={styles.taskBlock}>
+                    <SectionTitle title={prescription.medicineName} subtitle={`${prescription.dosage} | الكمية ${prescription.quantity}`} />
+                    <AppButton
+                      disabled={busy}
+                      label="تأكيد صرف الدواء"
+                      onPress={() =>
+                        void run(
+                          () => mediumApi.dispensePrescription(prescription.id),
+                          "تم تسجيل صرف الدواء."
+                        )
+                      }
+                    />
                   </View>
-                )) : null}
+                ))}
 
                 {canAssess && visit.workflowStatus === "READY_TO_UPLOAD" && visit.uploadStatus === "NOT_READY" ? (
-                  <Action disabled={busy} label="إنشاء الفاتورة وتجهيز الملف" onPress={() => void run(() => apiRequest(`/center/visit-workflow/${visit.id}/complete`, { method: "POST" }), "تم إنشاء الفاتورة.")} />
+                  <AppButton
+                    disabled={busy}
+                    icon="document-text-outline"
+                    label="إنشاء الفاتورة وتجهيز الملف"
+                    onPress={() =>
+                      void run(
+                        () => mediumApi.completeWorkflowVisit(visit.id),
+                        "تم إنشاء الفاتورة وتجهيز الملف."
+                      )
+                    }
+                  />
                 ) : null}
+
                 {canAssess && ["READY", "FAILED"].includes(visit.uploadStatus) ? (
-                  <Action disabled={busy} label={visit.uploadStatus === "FAILED" ? "إعادة محاولة الرفع" : "رفع إلى النظام المركزي"} onPress={() => void run(() => apiRequest(`/center/visit-workflow/${visit.id}/upload`, { method: "POST" }), "تم رفع الزيارة إلى النظام المركزي.")} />
+                  <AppButton
+                    disabled={busy}
+                    icon="cloud-upload-outline"
+                    label={visit.uploadStatus === "FAILED" ? "إعادة محاولة الرفع" : "رفع إلى النظام المركزي"}
+                    onPress={() =>
+                      void run(
+                        () => mediumApi.uploadWorkflowVisit(visit.id),
+                        "تم إرسال الزيارة إلى النظام المركزي."
+                      )
+                    }
+                  />
                 ) : null}
-                {busy ? <ActivityIndicator color={colors.primary} /> : null}
               </View>
             ) : null}
-          </View>
+          </Card>
         );
       })}
-      {visits.length === 0 && !refreshing ? <Text style={styles.empty}>لا توجد زيارات مرتبطة بهذا الحساب.</Text> : null}
-    </ScrollView>
+
+      {visits.length === 0 ? <EmptyState text="لا توجد زيارات مطابقة لهذا الحساب أو الفلتر الحالي." /> : null}
+    </Screen>
   );
 }
 
-function Choice({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  return <Pressable onPress={onPress} style={[styles.choice, active && styles.choiceActive]}><Text style={[styles.choiceText, active && styles.choiceTextActive]}>{label}</Text></Pressable>;
-}
-
-function Input({ placeholder, value, onChange, keyboard, compact }: { placeholder: string; value?: string; onChange: (value: string) => void; keyboard?: "numeric"; compact?: boolean }) {
-  return <TextInput keyboardType={keyboard} placeholder={placeholder} placeholderTextColor={colors.muted} style={[styles.input, compact && styles.compactInput]} textAlign="right" value={value ?? ""} onChangeText={onChange} />;
-}
-
-function Action({ label, onPress, disabled }: { label: string; onPress: () => void; disabled?: boolean }) {
-  return <Pressable disabled={disabled} onPress={onPress} style={[styles.action, disabled && styles.disabled]}><Text style={styles.actionText}>{label}</Text></Pressable>;
-}
-
 const styles = StyleSheet.create({
-  content: { padding: spacing.lg, gap: spacing.md },
-  title: { color: colors.text, fontSize: 28, fontWeight: "800", textAlign: "right" },
-  subtitle: { color: colors.muted, textAlign: "right", marginTop: 4 },
-  card: { backgroundColor: colors.surface, borderRadius: radii.md, borderWidth: 1, borderColor: colors.border, padding: spacing.md, gap: spacing.sm },
-  cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: spacing.sm },
-  headerText: { flex: 1 },
-  cardTitle: { color: colors.text, fontSize: 17, fontWeight: "800", textAlign: "right" },
-  meta: { color: colors.muted, textAlign: "right", lineHeight: 20 },
-  priority: { color: colors.primary, backgroundColor: colors.surfaceMuted, borderRadius: radii.sm, paddingHorizontal: 10, paddingVertical: 5, fontWeight: "800", fontSize: 12 },
-  danger: { color: colors.danger, backgroundColor: "#fbeaea" },
-  invoice: { color: colors.primary, fontWeight: "800", textAlign: "right" },
-  actionPanel: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md, gap: spacing.sm },
-  label: { color: colors.text, fontWeight: "700", textAlign: "right" },
-  choices: { flexDirection: "row-reverse", flexWrap: "wrap", gap: spacing.xs },
-  choice: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, paddingHorizontal: spacing.sm, paddingVertical: 9, backgroundColor: "#fff" },
-  choiceActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  choiceText: { color: colors.text, fontWeight: "700" },
-  choiceTextActive: { color: "#fff" },
-  input: { minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, paddingHorizontal: spacing.md, color: colors.text, backgroundColor: "#fff" },
-  compactInput: { flex: 1 },
-  inputRow: { flexDirection: "row-reverse", gap: spacing.sm },
-  action: { minHeight: 48, borderRadius: radii.sm, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.md },
-  actionText: { color: "#fff", fontWeight: "800", textAlign: "center" },
-  disabled: { opacity: 0.6 },
-  task: { backgroundColor: colors.surfaceMuted, borderRadius: radii.sm, padding: spacing.sm, gap: spacing.sm },
-  error: { color: colors.danger, backgroundColor: "#fbeaea", padding: spacing.sm, borderRadius: radii.sm, textAlign: "right", fontWeight: "700" },
-  success: { color: colors.success, backgroundColor: "#e5f4ec", padding: spacing.sm, borderRadius: radii.sm, textAlign: "right", fontWeight: "700" },
-  empty: { color: colors.muted, textAlign: "center", padding: spacing.xl }
+  label: {
+    color: colors.text,
+    fontWeight: "900",
+    textAlign: "right"
+  },
+  row: {
+    flexDirection: "row-reverse",
+    gap: spacing.sm
+  },
+  flex: {
+    flex: 1
+  },
+  visitHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: spacing.sm
+  },
+  visitText: {
+    flex: 1
+  },
+  visitTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "900",
+    textAlign: "right"
+  },
+  meta: {
+    color: colors.muted,
+    textAlign: "right",
+    lineHeight: 21
+  },
+  invoice: {
+    color: colors.primary,
+    fontWeight: "900",
+    textAlign: "right"
+  },
+  actionPanel: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing.md,
+    gap: spacing.sm
+  },
+  taskBlock: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 8,
+    padding: spacing.sm,
+    gap: spacing.sm
+  }
 });

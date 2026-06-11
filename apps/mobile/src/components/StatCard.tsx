@@ -11,8 +11,12 @@ interface StatCardProps {
 export function StatCard({ label, value, tone = "primary" }: StatCardProps) {
   return (
     <View style={[styles.card, tone === "secondary" ? styles.secondary : styles.primary]}>
-      <Text style={styles.label}>{label}</Text>
-      <Text style={styles.value}>{value}</Text>
+      <Text numberOfLines={2} style={styles.label}>
+        {label}
+      </Text>
+      <Text numberOfLines={1} style={styles.value}>
+        {value}
+      </Text>
     </View>
   );
 }
@@ -21,7 +25,11 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: radii.md,
     padding: spacing.md,
-    minWidth: 148
+    width: 154,
+    minHeight: 108,
+    borderWidth: 1,
+    borderColor: colors.border,
+    justifyContent: "space-between"
   },
   primary: {
     backgroundColor: colors.surface
@@ -32,14 +40,14 @@ const styles = StyleSheet.create({
   label: {
     color: colors.muted,
     fontSize: 13,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 1
+    fontWeight: "800",
+    textAlign: "right",
+    lineHeight: 19
   },
   value: {
     color: colors.text,
     fontSize: 26,
-    fontWeight: "800",
-    marginTop: spacing.sm
+    fontWeight: "900",
+    textAlign: "right"
   }
 });

@@ -1,14 +1,8 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { formatDateTime, toArabicLabel } from "../lib/arabic";
 import { AppointmentItem } from "../types";
 import { colors, radii, spacing } from "../theme/tokens";
-
-const dateFormatter = new Intl.DateTimeFormat("ar", {
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit"
-});
 
 interface AppointmentCardProps {
   appointment: AppointmentItem;
@@ -16,24 +10,20 @@ interface AppointmentCardProps {
   onPressAction?: () => void;
 }
 
-export function AppointmentCard({
-  appointment,
-  actionLabel,
-  onPressAction
-}: AppointmentCardProps) {
+export function AppointmentCard({ appointment, actionLabel, onPressAction }: AppointmentCardProps) {
   return (
     <View style={styles.card}>
       <View style={styles.header}>
-        <View>
-          <Text style={styles.type}>{typeLabels[appointment.type] ?? appointment.type}</Text>
+        <Text style={styles.status}>{toArabicLabel(appointment.status)}</Text>
+        <View style={styles.headerText}>
+          <Text style={styles.type}>{toArabicLabel(appointment.type)}</Text>
           <Text style={styles.title}>{appointment.reason}</Text>
         </View>
-        <Text style={styles.status}>{statusLabels[appointment.status] ?? appointment.status}</Text>
       </View>
 
-      <Text style={styles.meta}>{dateFormatter.format(new Date(appointment.scheduledAt))}</Text>
+      <Text style={styles.meta}>{formatDateTime(appointment.scheduledAt)}</Text>
       <Text style={styles.meta}>
-        {appointment.doctor.fullName} / {appointment.department.name}
+        {appointment.doctor.fullName} | {appointment.department.name}
       </Text>
 
       {actionLabel && onPressAction ? (
@@ -44,22 +34,6 @@ export function AppointmentCard({
     </View>
   );
 }
-
-const typeLabels: Record<string, string> = {
-  CLINIC: "زيارة عيادة",
-  FOLLOW_UP: "متابعة",
-  TELEMEDICINE: "استشارة عن بعد",
-  LAB: "فحص مختبر"
-};
-
-const statusLabels: Record<string, string> = {
-  SCHEDULED: "مجدول",
-  CONFIRMED: "مؤكد",
-  IN_PROGRESS: "قيد التنفيذ",
-  COMPLETED: "مكتمل",
-  CANCELLED: "ملغي",
-  NO_SHOW: "لم يحضر"
-};
 
 const styles = StyleSheet.create({
   card: {
@@ -73,41 +47,52 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
-    gap: spacing.sm
+    gap: spacing.sm,
+    alignItems: "flex-start"
+  },
+  headerText: {
+    flex: 1
   },
   type: {
     color: colors.primary,
     fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1
+    fontWeight: "900",
+    textAlign: "right"
   },
   title: {
     color: colors.text,
     fontSize: 16,
-    fontWeight: "800",
-    marginTop: 4
+    fontWeight: "900",
+    marginTop: 4,
+    textAlign: "right",
+    lineHeight: 22
   },
   status: {
     color: colors.secondary,
     fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase"
+    fontWeight: "900",
+    backgroundColor: "#fff3df",
+    borderRadius: radii.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 6
   },
   meta: {
     color: colors.muted,
-    fontSize: 14
+    fontSize: 14,
+    textAlign: "right",
+    lineHeight: 20
   },
   actionButton: {
-    marginTop: spacing.sm,
-    alignSelf: "flex-start",
+    marginTop: spacing.xs,
+    alignSelf: "stretch",
     backgroundColor: colors.primary,
-    borderRadius: 999,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 10
+    borderRadius: radii.sm,
+    minHeight: 46,
+    alignItems: "center",
+    justifyContent: "center"
   },
   actionText: {
     color: "#fff",
-    fontWeight: "700"
+    fontWeight: "900"
   }
 });
