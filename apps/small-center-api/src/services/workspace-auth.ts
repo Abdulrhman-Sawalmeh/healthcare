@@ -154,15 +154,11 @@ function mapLegacySession(user: LegacyPortalUser): SessionUser {
 }
 
 async function passwordMatches(password: string, storedPassword: string) {
-  if (password === storedPassword) {
-    return true;
-  }
-
   if (/^\$2[aby]\$\d{2}\$/.test(storedPassword)) {
     return bcrypt.compare(password, storedPassword);
   }
 
-  return false;
+  return password === storedPassword;
 }
 
 async function loadLegacyUser(where: Prisma.UserWhereInput) {

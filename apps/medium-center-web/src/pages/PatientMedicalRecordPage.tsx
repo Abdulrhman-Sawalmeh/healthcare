@@ -5,7 +5,7 @@ import { apiRequest } from "../api/client";
 import { PatientContactBar } from "../components/PatientContactBar";
 import { formatDate, formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
 import {
-  PortalAppointmentRecord,
+  PortalClinicalReportRecord,
   PortalMedicalRecord,
   PortalSubscriptionPlanRecord,
   PortalSubscriptionRecord
@@ -38,7 +38,50 @@ function formatAmount(amountInCents: number, currency: string) {
   return `${(amountInCents / 100).toFixed(2)} ${currencyLabel}`;
 }
 
-function openPrintableReport(record: PortalMedicalRecord, report: PortalAppointmentRecord) {
+function renderPrintableReportSections(report: PortalClinicalReportRecord) {
+  const sections = [
+    { title: "ملخص التقرير", value: report.summary ?? report.notes },
+    { title: "النتائج والفحوصات", value: report.findings },
+    { title: "التوصيات", value: report.recommendations },
+    { title: "المتابعة المقترحة", value: report.recommendedFollowUp },
+    { title: "المرفق", value: report.attachment?.fileName }
+  ].filter((section): section is { title: string; value: string } => Boolean(section.value));
+
+  if (sections.length === 0) {
+    return "";
+  }
+
+  return `
+    <section>
+      <h2>محتوى التقرير</h2>
+      <div class="report-sections">
+        ${sections
+          .map(
+            (section) => `
+              <div class="field report-field">
+                <span>${escapeHtml(section.title)}</span>
+                <p>${escapeHtml(section.value)}</p>
+              </div>
+            `
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function downloadReportAttachment(report: PortalClinicalReportRecord) {
+  if (!report.attachment?.contentBase64) {
+    return;
+  }
+
+  const link = document.createElement("a");
+  link.href = `data:${report.attachment.mimeType};base64,${report.attachment.contentBase64}`;
+  link.download = report.attachment.fileName;
+  link.click();
+}
+
+function openPrintableReport(record: PortalMedicalRecord, report: PortalClinicalReportRecord) {
   const reportWindow = window.open("", "_blank", "width=980,height=720");
 
   if (!reportWindow) {
@@ -148,6 +191,15 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalAppointm
             color: #0f7663;
           }
 
+          .report-sections {
+            display: grid;
+            gap: 12px;
+          }
+
+          .report-field p {
+            white-space: pre-wrap;
+          }
+
           @media print {
             body {
               background: white;
@@ -203,6 +255,8 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalAppointm
               </div>
             </div>
           </section>
+
+          ${renderPrintableReportSections(report)}
 
           <section>
             <h2>تفاصيل الزيارة</h2>
@@ -537,6 +591,34 @@ export function PatientMedicalRecordPage() {
               <span>المركز</span>
               <strong>{activeReport.center.name}</strong>
             </div>
+            {[
+              { label: "ملخص التقرير", value: activeReport.summary ?? activeReport.notes },
+              { label: "النتائج والفحوصات", value: activeReport.findings },
+              { label: "التوصيات", value: activeReport.recommendations },
+              { label: "المتابعة المقترحة", value: activeReport.recommendedFollowUp }
+            ]
+              .filter((section): section is { label: string; value: string } => Boolean(section.value))
+              .map((section) => (
+                <div className="detail-field detail-field-wide" key={section.label}>
+                  <span>{section.label}</span>
+                  <p className="preserve-lines">{section.value}</p>
+                </div>
+              ))}
+            {activeReport.attachment ? (
+              <div className="detail-field detail-field-wide">
+                <span>المرفق</span>
+                <strong>{activeReport.attachment.fileName}</strong>
+                {activeReport.attachment.contentBase64 ? (
+                  <button
+                    className="ghost-button"
+                    onClick={() => downloadReportAttachment(activeReport)}
+                    type="button"
+                  >
+                    تنزيل المرفق
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <p className="inline-note">زر الطباعة يفتح نسخة مناسبة للطباعة ويمكن حفظها من المتصفح كملف PDF.</p>
           <div className="chip-row">

@@ -127,27 +127,62 @@ router.get(
   "/patients/search",
   authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE"),
   asyncHandler(async (req, res) => {
-    const phone = String(req.query.phone ?? "");
+    const term = String(req.query.term ?? req.query.phone ?? "").trim();
     const centerId = getCenterId(req);
+    const limit = Math.min(Number(req.query.limit ?? 8), 12);
 
-    const [localPatient, unifiedPatient] = await Promise.all([
-      prisma.localPatient.findFirst({
+    if (!term) {
+      return res.json({
+        found: false,
+        localPatient: null,
+        patient: null,
+        localMatches: [],
+        patientMatches: [],
+        recentVisits: []
+      });
+    }
+
+    const [localPatients, unifiedPatients] = await Promise.all([
+      prisma.localPatient.findMany({
         where: {
           centerId,
-          phone
+          OR: [
+            { fullName: { contains: term, mode: "insensitive" } },
+            { phone: { contains: term } },
+            { unifiedId: { contains: term, mode: "insensitive" } },
+            {
+              unifiedPatient: {
+                is: {
+                  OR: [
+                    { nationalId: { contains: term } },
+                    { fullName: { contains: term, mode: "insensitive" } },
+                    { primaryPhone: { contains: term } }
+                  ]
+                }
+              }
+            }
+          ]
         },
         include: {
+          unifiedPatient: true,
           visits: {
             orderBy: {
               visitDate: "desc"
             },
             take: 3
           }
-        }
+        },
+        orderBy: [{ fullName: "asc" }],
+        take: limit
       }),
-      prisma.unifiedPatient.findFirst({
+      prisma.unifiedPatient.findMany({
         where: {
-          primaryPhone: phone
+          OR: [
+            { fullName: { contains: term, mode: "insensitive" } },
+            { primaryPhone: { contains: term } },
+            { nationalId: { contains: term } },
+            { unifiedId: { contains: term, mode: "insensitive" } }
+          ]
         },
         include: {
           unifiedVisits: {
@@ -159,14 +194,52 @@ router.get(
             },
             take: 5
           }
-        }
+        },
+        orderBy: [{ fullName: "asc" }],
+        take: limit
       })
     ]);
+    const localPatient = localPatients[0] ?? null;
+    const unifiedPatient = unifiedPatients[0] ?? null;
+    const localMatches = localPatients.map((patient) => ({
+      id: patient.id,
+      fullName: patient.fullName,
+      phone: patient.phone,
+      nationalId: patient.unifiedPatient?.nationalId ?? null
+    }));
+    const patientMatches = unifiedPatients.map((patient) => ({
+      id: patient.id,
+      unifiedId: patient.unifiedId,
+      nationalId: patient.nationalId,
+      fullName: patient.fullName,
+      primaryPhone: patient.primaryPhone,
+      address: patient.address,
+      chronicDiseases: patient.chronicDiseases
+    }));
 
     res.json({
-      found: Boolean(localPatient || unifiedPatient),
-      localPatient,
-      patient: unifiedPatient,
+      found: localMatches.length > 0 || patientMatches.length > 0,
+      localPatient: localPatient
+        ? {
+            id: localPatient.id,
+            fullName: localPatient.fullName,
+            phone: localPatient.phone,
+            nationalId: localPatient.unifiedPatient?.nationalId ?? null
+          }
+        : null,
+      patient: unifiedPatient
+        ? {
+            id: unifiedPatient.id,
+            unifiedId: unifiedPatient.unifiedId,
+            nationalId: unifiedPatient.nationalId,
+            fullName: unifiedPatient.fullName,
+            primaryPhone: unifiedPatient.primaryPhone,
+            address: unifiedPatient.address,
+            chronicDiseases: unifiedPatient.chronicDiseases
+          }
+        : null,
+      localMatches,
+      patientMatches,
       recentVisits: unifiedPatient?.unifiedVisits ?? []
     });
   })

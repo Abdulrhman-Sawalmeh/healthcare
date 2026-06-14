@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Linking, StyleSheet, Text, View } from "react-native";
 
 import { PatientContactCard } from "../components/PatientContactCard";
 import {
@@ -18,7 +18,7 @@ import {
 } from "../components/ui";
 import { formatDate, formatDateTime, toArabicLabel } from "../lib/arabic";
 import { mediumApi } from "../services/mediumApi";
-import { PortalMedicalRecord, SubscriptionPlanRecord } from "../types";
+import { PortalClinicalReportRecord, PortalMedicalRecord, SubscriptionPlanRecord } from "../types";
 import { colors, spacing } from "../theme/tokens";
 
 export function MedicalRecordScreen() {
@@ -87,6 +87,21 @@ export function MedicalRecordScreen() {
     }
   }
 
+  async function openReportAttachment(report: PortalClinicalReportRecord) {
+    if (!report.attachment?.contentBase64) {
+      setError("لا يوجد ملف مرفق يمكن فتحه لهذا التقرير.");
+      return;
+    }
+
+    try {
+      await Linking.openURL(
+        `data:${report.attachment.mimeType};base64,${report.attachment.contentBase64}`
+      );
+    } catch {
+      setError("تعذر فتح مرفق التقرير على هذا الجهاز.");
+    }
+  }
+
   if (loading) {
     return <LoadingState text="جار تحميل السجل الصحي..." />;
   }
@@ -139,10 +154,51 @@ export function MedicalRecordScreen() {
                   <StatusPill label={toArabicLabel(report.source)} />
                   <Text style={styles.itemTitle}>{report.reason}</Text>
                 </View>
-                <Text style={styles.meta}>{report.summary || report.findings || "لا يوجد ملخص مرفق."}</Text>
+                {report.summary ? (
+                  <View style={styles.reportBlock}>
+                    <Text style={styles.reportLabel}>الملخص</Text>
+                    <Text style={styles.reportText}>{report.summary}</Text>
+                  </View>
+                ) : null}
+                {report.findings ? (
+                  <View style={styles.reportBlock}>
+                    <Text style={styles.reportLabel}>النتائج والفحوصات</Text>
+                    <Text style={styles.reportText}>{report.findings}</Text>
+                  </View>
+                ) : null}
+                {report.recommendations ? (
+                  <View style={styles.reportBlock}>
+                    <Text style={styles.reportLabel}>التوصيات</Text>
+                    <Text style={styles.reportText}>{report.recommendations}</Text>
+                  </View>
+                ) : null}
+                {report.recommendedFollowUp ? (
+                  <View style={styles.reportBlock}>
+                    <Text style={styles.reportLabel}>المتابعة المقترحة</Text>
+                    <Text style={styles.reportText}>{report.recommendedFollowUp}</Text>
+                  </View>
+                ) : null}
+                {!report.summary && !report.findings ? <Text style={styles.meta}>لا يوجد ملخص مرفق.</Text> : null}
                 <Text style={styles.meta}>
                   {report.doctor.fullName} | {formatDateTime(report.scheduledAt)}
                 </Text>
+                {report.attachment ? (
+                  <View style={styles.attachmentRow}>
+                    <View style={styles.attachmentTextWrap}>
+                      <Text style={styles.reportLabel}>المرفق</Text>
+                      <Text style={styles.meta}>{report.attachment.fileName}</Text>
+                    </View>
+                    {report.attachment.contentBase64 ? (
+                      <AppButton
+                        label="فتح"
+                        icon="attach-outline"
+                        onPress={() => void openReportAttachment(report)}
+                        tone="ghost"
+                        style={styles.smallAction}
+                      />
+                    ) : null}
+                  </View>
+                ) : null}
               </View>
             ))}
             {record.clinicalReports.length === 0 ? <EmptyState text="لا توجد تقارير طبية منشورة حتى الآن." /> : null}
@@ -273,5 +329,40 @@ const styles = StyleSheet.create({
     color: colors.muted,
     textAlign: "right",
     lineHeight: 21
+  },
+  reportBlock: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 8,
+    padding: spacing.sm,
+    gap: 4
+  },
+  reportLabel: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "900",
+    textAlign: "right"
+  },
+  reportText: {
+    color: colors.text,
+    textAlign: "right",
+    lineHeight: 22
+  },
+  attachmentRow: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 8,
+    flexDirection: "row-reverse",
+    gap: spacing.sm,
+    justifyContent: "space-between",
+    padding: spacing.sm
+  },
+  attachmentTextWrap: {
+    flex: 1,
+    gap: 4
+  },
+  smallAction: {
+    alignSelf: "center",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs
   }
 });

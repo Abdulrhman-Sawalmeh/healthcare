@@ -43,11 +43,28 @@ const defaultReportForm = {
 };
 
 const reportCategoryOptions = [
-  { value: "GENERAL", label: "تقرير عام" },
-  { value: "LAB", label: "نتائج مخبرية" },
-  { value: "IMAGING", label: "نتائج تصوير" },
+  { value: "GENERAL", label: "تقرير سريري عام" },
+  { value: "LAB", label: "تحاليل مخبرية" },
+  { value: "IMAGING", label: "تصوير طبي" },
+  { value: "RADIOLOGY", label: "أشعة وتشخيص تصويري" },
+  { value: "PATHOLOGY", label: "أنسجة وخزعات" },
+  { value: "CARDIOLOGY", label: "قلب وتخطيط" },
+  { value: "MICROBIOLOGY", label: "زراعة وميكروبيولوجي" },
+  { value: "PROCEDURE", label: "إجراء طبي" },
   { value: "FOLLOW_UP", label: "خطة متابعة" },
   { value: "DISCHARGE", label: "خلاصة خروج" }
+];
+
+const reportTemplates = [
+  { category: "GENERAL", label: "ملخص زيارة شامل" },
+  { category: "LAB", label: "تحاليل عامة" },
+  { category: "RADIOLOGY", label: "تقرير أشعة" },
+  { category: "IMAGING", label: "صور طبية" },
+  { category: "CARDIOLOGY", label: "تخطيط قلب" },
+  { category: "MICROBIOLOGY", label: "زراعة مخبرية" },
+  { category: "PATHOLOGY", label: "خزعة/أنسجة" },
+  { category: "PROCEDURE", label: "إجراء طبي" },
+  { category: "DISCHARGE", label: "خلاصة خروج" }
 ];
 
 function ensureVisitReports(visit: VisitRecord) {
@@ -56,6 +73,104 @@ function ensureVisitReports(visit: VisitRecord) {
 
 function getReportCategoryLabel(category: string) {
   return reportCategoryOptions.find((option) => option.value === category)?.label ?? toArabicLabel(category);
+}
+
+function buildStructuredReportDraft(visit: VisitRecord, category: string) {
+  const visitMeta = [
+    `المريض: ${visit.patientName}`,
+    `رقم الملف الموحد: ${visit.patientUnifiedId ?? "غير مسجل"}`,
+    `تاريخ الزيارة: ${formatDateTime(visit.visitDate)}`,
+    `الطبيب: ${visit.doctorName}`,
+    `التشخيص/سبب الزيارة: ${visit.diagnosis}`
+  ].join("\n");
+
+  const vitals = [
+    `ضغط الدم: ${visit.bloodPressure ?? "غير موثق"}`,
+    `الحرارة: ${visit.temperature ?? "غير موثقة"}`,
+    `النبض: ${visit.heartRate ?? "غير موثق"}`,
+    `الأعراض: ${visit.symptoms ?? "غير موثقة"}`
+  ].join("\n");
+
+  const commonFollowUp = "مراجعة الطبيب المعالج حسب الخطة أو فوراً عند ظهور ألم شديد، ضيق نفس، نزيف، حمى مستمرة، أو تدهور مفاجئ.";
+
+  const templates: Record<string, { title: string; summary: string; findings: string; recommendations: string; followUp: string }> = {
+    GENERAL: {
+      title: `تقرير سريري شامل - ${visit.patientName}`,
+      summary: `${visitMeta}\n\nملخص الحالة:\nتمت مراجعة المريض وتوثيق الحالة ضمن هذه الزيارة. ${visit.notes ?? "لا توجد ملاحظات إضافية."}`,
+      findings: `العلامات الحيوية:\n${vitals}\n\nالفحص السريري:\n- المظهر العام:\n- القلب والدورة الدموية:\n- الجهاز التنفسي:\n- البطن:\n- الجهاز العصبي/الحركي:\n\nالنتائج المرتبطة:\n- الوصفات المسجلة: ${visit.prescriptions.length}`,
+      recommendations: "الخطة العلاجية:\n- الالتزام بالأدوية والتعليمات الموصوفة.\n- مراقبة الأعراض وتوثيق أي تغير.\n- استكمال أي فحوصات مطلوبة قبل الزيارة القادمة.",
+      followUp: commonFollowUp
+    },
+    LAB: {
+      title: `تقرير تحاليل مخبرية شامل - ${visit.patientName}`,
+      summary: `${visitMeta}\n\nنوع التقرير: تحاليل مخبرية عامة أو متخصصة. يتم تفسير النتائج مع الحالة السريرية وليس كأرقام منفصلة.`,
+      findings: `بيانات العينة:\n- نوع العينة: دم / بول / مسحة / أخرى\n- تاريخ ووقت السحب:\n- حالة العينة: مقبولة / تحتاج إعادة\n\nجدول النتائج:\nالفحص | النتيجة | الوحدة | المجال المرجعي | التفسير\nCBC/WBC |  |  |  | \nHb |  | g/dL |  | \nPlatelets |  | 10^3/uL |  | \nGlucose |  | mg/dL |  | \nCreatinine |  | mg/dL |  | \nALT/AST |  | U/L |  | \nCRP/ESR |  |  |  | \n\nالقيم الحرجة أو غير الطبيعية:\n-\n\nملاحظات المختبر:\n-`,
+      recommendations: "تفسير الطبيب:\n- ربط النتائج بالأعراض والفحص السريري.\n- إعادة الفحص عند وجود عينة غير مناسبة أو نتيجة غير متوقعة.\n- طلب فحوصات إضافية عند الحاجة.",
+      followUp: "مراجعة النتائج خلال 3 إلى 7 أيام، أو فوراً إذا وُجدت قيمة حرجة أو تدهور سريري."
+    },
+    RADIOLOGY: {
+      title: `تقرير أشعة وتشخيص تصويري - ${visit.patientName}`,
+      summary: `${visitMeta}\n\nنوع الدراسة: X-Ray / CT / MRI / Ultrasound. التقرير يشمل سبب الطلب، التقنية، الوصف، والانطباع النهائي.`,
+      findings: `سبب الفحص:\n-\n\nنوع الصورة/الدراسة:\n-\n\nالتقنية:\n- الجهة المصورة:\n- مادة التباين: بدون / مع تباين\n- جودة الصورة: مناسبة / محدودة\n\nالوصف:\n- العظام/الأنسجة:\n- الأعضاء/المناطق المصورة:\n- السوائل/الكتل/الالتهاب:\n- مقارنة بفحص سابق: لا يوجد / يوجد بتاريخ\n\nالانطباع التشخيصي:\n1.\n2.\n\nالمرفقات:\n- أرفق صورة الأشعة أو ملف PDF إن وجد.`,
+      recommendations: "توصية الأشعة:\n- المتابعة السريرية مع الطبيب.\n- إعادة التصوير أو طلب CT/MRI/Ultrasound عند الحاجة.\n- الإحالة العاجلة إذا وُجدت علامة خطورة.",
+      followUp: commonFollowUp
+    },
+    IMAGING: {
+      title: `تقرير صور طبية ومرفقات - ${visit.patientName}`,
+      summary: `${visitMeta}\n\nهذا التقرير مخصص للصور الطبية أو الملفات المرئية المرفقة مثل صور الجروح، الجلدية، المنظار، أو صور المتابعة.`,
+      findings: `نوع الصورة:\n- صورة جلدية / جرح / منظار / موجات فوق صوتية / أخرى\n\nجودة الصورة:\n- واضحة / محدودة\n\nالوصف:\n- الموقع التشريحي:\n- الحجم/القياس التقريبي:\n- اللون/الحدود/الإفرازات/التغيرات:\n- مقارنة بصورة سابقة:\n\nالانطباع:\n-\n\nالمرفقات:\n- أرفق الصور الأصلية أو تقرير PDF.`,
+      recommendations: "توصيات:\n- متابعة التغير بالصور عند الحاجة.\n- مراجعة تخصصية إذا زادت الأعراض أو ظهرت علامات التهاب/نزف.",
+      followUp: commonFollowUp
+    },
+    CARDIOLOGY: {
+      title: `تقرير قلب وتخطيط ECG - ${visit.patientName}`,
+      summary: `${visitMeta}\n\nيشمل التقرير قراءة تخطيط القلب أو فحوصات القلب المرتبطة بالزيارة.`,
+      findings: `بيانات الفحص:\n- نوع الفحص: ECG / Echo / Troponin / Holter\n- سرعة القلب:\n- النظم: منتظم / غير منتظم\n- المحور:\n- PR/QRS/QT:\n- تغيرات ST-T:\n- علامات تضخم/نقص تروية:\n\nالنتيجة/الانطباع:\n-\n\nمقارنة بفحص سابق:\n-`,
+      recommendations: "توصيات قلبية:\n- ربط النتيجة بالأعراض والعلامات الحيوية.\n- مراجعة طوارئ عند ألم صدري شديد، ضيق نفس، إغماء، أو خفقان مستمر.\n- طلب إنزيمات قلب/إيكو/تحويل اختصاصي عند الحاجة.",
+      followUp: "متابعة قلبية حسب شدة النتيجة، وفوراً عند أعراض إنذارية."
+    },
+    MICROBIOLOGY: {
+      title: `تقرير زراعة وميكروبيولوجي - ${visit.patientName}`,
+      summary: `${visitMeta}\n\nيشمل الزراعة، الحساسية للمضادات، ونتائج العدوى المحتملة.`,
+      findings: `نوع العينة:\n- بول / دم / بلغم / مسحة / جرح / أخرى\n\nالفحص المطلوب:\n- Culture / Gram stain / PCR / Antigen\n\nالنتيجة:\n- النمو الجرثومي:\n- عدد المستعمرات/الحمل:\n- الحساسية للمضادات:\nمضاد | حساس/متوسط/مقاوم | ملاحظات\n\nالتلوث المحتمل/جودة العينة:\n-`,
+      recommendations: "توصيات علاجية:\n- اختيار المضاد حسب الحساسية والحالة السريرية.\n- تعديل العلاج إذا ظهرت مقاومة.\n- إعادة العينة عند الاشتباه بتلوث أو عدم توافق النتيجة مع الحالة.",
+      followUp: "مراجعة خلال 48 إلى 72 ساعة أو عند ظهور حرارة مستمرة/تدهور."
+    },
+    PATHOLOGY: {
+      title: `تقرير أنسجة وخزعة - ${visit.patientName}`,
+      summary: `${visitMeta}\n\nيشمل وصف العينة النسيجية، التشخيص، والهوامش/الدرجات عند توفرها.`,
+      findings: `بيانات العينة:\n- الموقع التشريحي:\n- طريقة السحب: خزعة / استئصال / مسحة\n- حجم العينة:\n\nالوصف العياني:\n-\n\nالوصف المجهري:\n-\n\nالتشخيص النسيجي:\n-\n\nالهوامش/الدرجة/المرحلة إن وجدت:\n-\n\nفحوصات إضافية:\n- IHC / Molecular / Special stains`,
+      recommendations: "توصيات:\n- ربط النتيجة بالخطة الجراحية/الاختصاصية.\n- عرض النتيجة على الاختصاص المناسب عند الاشتباه بورم أو تغير عالي الخطورة.",
+      followUp: "متابعة اختصاصية حسب نتيجة الخزعة وخطة العلاج."
+    },
+    PROCEDURE: {
+      title: `تقرير إجراء طبي - ${visit.patientName}`,
+      summary: `${visitMeta}\n\nيوثق التقرير الإجراء الذي تم، الاستطباب، الخطوات، والنتيجة الفورية.`,
+      findings: `اسم الإجراء:\n-\n\nالاستطباب:\n-\n\nالموافقة والتحضير:\n-\n\nالخطوات:\n1.\n2.\n3.\n\nالنتيجة الفورية:\n-\n\nالمضاعفات:\n- لا يوجد / يوجد\n\nالمرفقات أو الصور:\n-`,
+      recommendations: "تعليمات ما بعد الإجراء:\n- العناية بالمنطقة/الجرح.\n- الأدوية والتعليمات.\n- علامات الخطر التي تستدعي مراجعة فورية.",
+      followUp: "موعد متابعة حسب نوع الإجراء أو خلال 7 إلى 14 يومًا."
+    },
+    DISCHARGE: {
+      title: `خلاصة خروج/انتهاء زيارة - ${visit.patientName}`,
+      summary: `${visitMeta}\n\nخلاصة الحالة عند انتهاء الزيارة أو الخروج، تشمل التشخيص النهائي والخطة.`,
+      findings: `التشخيص النهائي:\n${visit.diagnosis}\n\nمسار الحالة أثناء الزيارة:\n-\n\nالفحوصات المنجزة:\n-\n\nالأدوية عند الخروج:\n${visit.prescriptions.map((item) => `- ${item.medicineName}: ${item.dosage} لمدة ${item.duration}`).join("\n") || "- لا توجد أدوية مسجلة"}\n\nحالة المريض عند الخروج:\n- مستقر / يحتاج متابعة / يحتاج تحويل`,
+      recommendations: "تعليمات الخروج:\n- الالتزام بالأدوية.\n- الراحة والسوائل/النظام الغذائي حسب الحالة.\n- مراجعة الطوارئ عند علامات الخطر.",
+      followUp: commonFollowUp
+    }
+  };
+
+  const template = templates[category] ?? templates.GENERAL;
+
+  return {
+    title: template.title,
+    category,
+    summary: template.summary,
+    findings: template.findings,
+    recommendations: template.recommendations,
+    recommendedFollowUp: template.followUp,
+    shareWithPatient: true,
+    attachment: null as LocalVisitReportAttachment | null
+  };
 }
 
 function buildSmartReportDraft(visit: VisitRecord) {
@@ -416,7 +531,7 @@ export function VisitsPage() {
                 mimeType: reportForm.attachment.mimeType,
                 contentBase64: reportForm.attachment.contentBase64
               }
-            : undefined
+            : null
         })
       });
 
@@ -425,9 +540,9 @@ export function VisitsPage() {
       setSelectedVisitId(selectedVisit.id);
       setError("");
       setSuccessMessage(
-        editingReportId
-          ? "تم تحديث تقرير النتائج وإشعار المريض إذا كان التقرير مشاركًا معه."
-          : "تم إنشاء تقرير النتائج بنجاح."
+        reportForm.shareWithPatient
+          ? "تم حفظ التقرير وإرساله إلى سجل المريض الصحي."
+          : "تم حفظ التقرير كداخلي فقط ولن يظهر للمريض."
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر حفظ تقرير النتائج.");
@@ -471,6 +586,22 @@ export function VisitsPage() {
 
     setReportForm(buildSmartReportDraft(selectedVisit));
     setEditingReportId(null);
+  }
+
+  function applyReportTemplate(category: string) {
+    if (!selectedVisit) {
+      setError("اختر زيارة أولاً قبل اختيار قالب التقرير.");
+      return;
+    }
+
+    const draft = buildStructuredReportDraft(selectedVisit, category);
+    setReportForm((current) => ({
+      ...draft,
+      attachment: current.attachment
+    }));
+    setEditingReportId(null);
+    setSuccessMessage("");
+    setError("");
   }
 
   return (
@@ -728,6 +859,21 @@ export function VisitsPage() {
 
               {canAuthorReports ? (
                 <form className="form-grid" onSubmit={handleReportSubmit}>
+                  <div className="field field-span-2">
+                    <span>قوالب التقارير الشاملة</span>
+                    <div className="chip-row">
+                      {reportTemplates.map((template) => (
+                        <button
+                          className="ghost-button"
+                          key={template.category}
+                          onClick={() => applyReportTemplate(template.category)}
+                          type="button"
+                        >
+                          {template.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <label className="field field-span-2">
                     <span>عنوان التقرير</span>
                     <input

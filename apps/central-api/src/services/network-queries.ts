@@ -515,7 +515,16 @@ export async function getCenterPatients(centerId: number, search?: string) {
             OR: [
               { fullName: { contains: search, mode: "insensitive" } },
               { phone: { contains: search } },
-              { unifiedId: { contains: search, mode: "insensitive" } }
+              { unifiedId: { contains: search, mode: "insensitive" } },
+              {
+                unifiedPatient: {
+                  is: {
+                    nationalId: {
+                      contains: search
+                    }
+                  }
+                }
+              }
             ]
           }
         : {})
@@ -532,6 +541,11 @@ export async function getCenterPatients(centerId: number, search?: string) {
           invoiceDate: "desc"
         },
         take: 2
+      },
+      unifiedPatient: {
+        select: {
+          nationalId: true
+        }
       }
     },
     orderBy: {
@@ -542,6 +556,7 @@ export async function getCenterPatients(centerId: number, search?: string) {
   return patients.map((patient) => ({
     id: patient.id,
     unifiedId: patient.unifiedId,
+    nationalId: patient.unifiedPatient?.nationalId ?? null,
     fullName: patient.fullName,
     phone: patient.phone,
     gender: patient.gender,

@@ -32,10 +32,13 @@ export function Screen({
   return (
     <ScrollView
       contentContainerStyle={[styles.screenContent, style]}
+      keyboardDismissMode={keyboard ? "on-drag" : "none"}
       keyboardShouldPersistTaps={keyboard ? "handled" : "never"}
+      removeClippedSubviews
       refreshControl={
         onRefresh ? <RefreshControl refreshing={Boolean(refreshing)} onRefresh={onRefresh} /> : undefined
       }
+      scrollEventThrottle={16}
       showsVerticalScrollIndicator={false}
     >
       {children}

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import {
   AppButton,
@@ -46,19 +46,23 @@ export function PatientsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [networkLoading, setNetworkLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const didRunInitialPatientFilter = useRef(false);
 
   const canCreate = canCreatePatients(user?.role);
+  const networkPatientMatches = networkResult?.patientMatches ?? (networkResult?.patient ? [networkResult.patient] : []);
+  const networkLocalMatches = networkResult?.localMatches ?? (networkResult?.localPatient ? [networkResult.localPatient] : []);
 
   const loadPatients = useCallback(async (search?: string) => {
     setRefreshing(true);
     try {
       const payload = await mediumApi.centerPatients(search);
       setPatients(payload);
-      if (!selectedPatientId && payload[0]) {
-        setSelectedPatientId(payload[0].id);
-      }
+      setSelectedPatientId((currentId) =>
+        currentId && payload.some((patient) => patient.id === currentId) ? currentId : payload[0]?.id
+      );
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر تحميل المرضى.");
@@ -73,6 +77,33 @@ export function PatientsScreen() {
   }, [loadPatients]);
 
   useEffect(() => {
+    if (!didRunInitialPatientFilter.current) {
+      didRunInitialPatientFilter.current = true;
+      return;
+    }
+
+    let active = true;
+    const timeout = setTimeout(() => {
+      loadPatients(query.trim())
+        .then(() => {
+          if (active) {
+            setError("");
+          }
+        })
+        .catch((cause) => {
+          if (active) {
+            setError(cause instanceof Error ? cause.message : "تعذر تحميل المرضى.");
+          }
+        });
+    }, 220);
+
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [query]);
+
+  useEffect(() => {
     if (!selectedPatientId) {
       setTimeline(null);
       return;
@@ -84,23 +115,62 @@ export function PatientsScreen() {
         setError("");
       })
       .catch((cause) => setError(cause instanceof Error ? cause.message : "تعذر تحميل ملف المريض."));
-  }, [selectedPatientId]);
+  }, []);
+
+  useEffect(() => {
+    const term = networkTerm.trim();
+
+    if (!term) {
+      setNetworkResult(null);
+      setNetworkLoading(false);
+      return;
+    }
+
+    let active = true;
+    setNetworkLoading(true);
+
+    const timeout = setTimeout(() => {
+      mediumApi.searchCenterPatient(term, 8)
+        .then((payload) => {
+          if (active) {
+            setNetworkResult(payload);
+            setError("");
+          }
+        })
+        .catch((cause) => {
+          if (active) {
+            setError(cause instanceof Error ? cause.message : "تعذر تنفيذ البحث.");
+          }
+        })
+        .finally(() => {
+          if (active) {
+            setNetworkLoading(false);
+          }
+        });
+    }, 220);
+
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [networkTerm]);
 
   async function runSearch() {
     if (!networkTerm.trim()) {
       setError("أدخل رقم الهوية أو الهاتف قبل البحث.");
+      setNetworkResult(null);
       return;
     }
-    setBusy(true);
+    setNetworkLoading(true);
     setError("");
     setMessage("");
 
     try {
-      setNetworkResult(await mediumApi.searchCenterPatient(networkTerm.trim()));
+      setNetworkResult(await mediumApi.searchCenterPatient(networkTerm.trim(), 8));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر تنفيذ البحث.");
     } finally {
-      setBusy(false);
+      setNetworkLoading(false);
     }
   }
 
@@ -178,19 +248,36 @@ export function PatientsScreen() {
 
       <Card>
         <SectionTitle title="بحث الاستقبال في السجل الموحد" subtitle="يفيد قبل إنشاء مريض جديد لتجنب التكرار." />
-        <TextField onChangeText={setNetworkTerm} placeholder="رقم الهوية أو الهاتف" value={networkTerm} />
-        <AppButton disabled={busy} icon="scan-outline" label="بحث موحد" onPress={() => void runSearch()} />
-        {networkResult ? (
+        <TextField onChangeText={setNetworkTerm} placeholder="الاسم، رقم الهوية أو الهاتف" value={networkTerm} />
+        <AppButton disabled={busy || networkLoading} icon="scan-outline" label={networkLoading ? "جاري البحث" : "بحث موحد"} onPress={() => void runSearch()} />
+        {networkTerm.trim() ? (
           <View style={styles.resultBox}>
-            <StatusPill label={networkResult.found ? "تم العثور" : "غير موجود"} tone={networkResult.found ? "primary" : "warning"} />
-            {networkResult.patient ? (
-              <Text style={styles.primaryText}>
-                {networkResult.patient.fullName} | {networkResult.patient.primaryPhone}
-              </Text>
-            ) : null}
-            {networkResult.localPatient ? (
-              <Text style={styles.meta}>محلي: {networkResult.localPatient.fullName}</Text>
-            ) : null}
+            <StatusPill
+              label={networkLoading && !networkResult ? "جاري البحث" : networkResult?.found ? "تم العثور" : "غير موجود"}
+              tone={networkResult?.found ? "primary" : "warning"}
+            />
+            {networkPatientMatches.map((patient) => (
+              <View key={`central-${patient.id}`} style={styles.suggestionItem}>
+                <Text style={styles.primaryText}>{patient.fullName}</Text>
+                <Text style={styles.meta}>{joinMeta([patient.unifiedId, patient.nationalId ?? "بدون هوية", patient.primaryPhone])}</Text>
+              </View>
+            ))}
+            {networkLocalMatches.map((patient) => (
+              <Pressable
+                key={`local-${patient.id}`}
+                onPress={() => {
+                  setSelectedPatientId(patient.id);
+                  setQuery(patient.phone);
+                  setMessage("تم اختيار المريض وعرض بياناته.");
+                }}
+                style={({ pressed }) => [styles.suggestionItem, styles.suggestionButton, pressed && styles.suggestionPressed]}
+              >
+                <Text style={styles.primaryText}>{patient.fullName}</Text>
+                <Text style={styles.meta}>{joinMeta([patient.nationalId ?? "بدون هوية", patient.phone])}</Text>
+                <Text style={styles.suggestionHint}>فتح بيانات المريض</Text>
+              </Pressable>
+            ))}
+            {networkResult && !networkResult.found ? <EmptyState text="لا توجد نتائج مطابقة." /> : null}
           </View>
         ) : null}
       </Card>
@@ -298,6 +385,24 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceMuted,
     borderRadius: 8,
     padding: spacing.sm
+  },
+  suggestionItem: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: 2,
+    paddingTop: spacing.xs
+  },
+  suggestionButton: {
+    borderRadius: 8,
+    padding: spacing.xs
+  },
+  suggestionPressed: {
+    backgroundColor: colors.surface
+  },
+  suggestionHint: {
+    color: colors.primary,
+    fontWeight: "900",
+    textAlign: "right"
   },
   primaryText: {
     color: colors.text,

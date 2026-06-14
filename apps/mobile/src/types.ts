@@ -144,6 +144,21 @@ export interface NetworkPatientSearchResult {
     phone: string;
     nationalId?: string | null;
   } | null;
+  patientMatches?: Array<{
+    id: number;
+    unifiedId: string;
+    nationalId?: string | null;
+    fullName: string;
+    primaryPhone: string;
+    address: string;
+    chronicDiseases: string[];
+  }>;
+  localMatches?: Array<{
+    id: number;
+    fullName: string;
+    phone: string;
+    nationalId?: string | null;
+  }>;
   recentVisits?: Array<{
     id: number;
     centerName?: string;
@@ -158,7 +173,7 @@ export interface CreatePatientResponse {
   patient: LocalPatientRecord;
   portalAccount?: {
     loginIdentifier: string;
-    deliveryMethod: "WEBHOOK" | "OUTBOX";
+    deliveryMethod: "TWILIO" | "WEBHOOK" | "OUTBOX";
     accountStatus: "CREATED" | "RESET";
   };
 }

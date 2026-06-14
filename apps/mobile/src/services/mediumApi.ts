@@ -113,8 +113,10 @@ export const mediumApi = {
 
   centerPatients: (search?: string) =>
     apiRequest<LocalPatientRecord[]>(`/center/patients${search ? `?search=${encodeURIComponent(search)}` : ""}`),
-  searchCenterPatient: (term: string) =>
-    apiRequest<NetworkPatientSearchResult>(`/center/patients/search?term=${encodeURIComponent(term)}`),
+  searchCenterPatient: (term: string, limit = 8) =>
+    apiRequest<NetworkPatientSearchResult>(
+      `/center/patients/search?term=${encodeURIComponent(term)}&limit=${encodeURIComponent(String(limit))}`
+    ),
   createCenterPatient: (payload: {
     fullName: string;
     nationalId: string;

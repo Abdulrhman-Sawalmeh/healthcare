@@ -591,6 +591,21 @@ export interface NetworkPatientSearchResult {
     phone: string;
     nationalId?: string | null;
   };
+  patientMatches?: Array<{
+    id: number;
+    unifiedId: string;
+    nationalId?: string | null;
+    fullName: string;
+    primaryPhone: string;
+    address: string;
+    chronicDiseases: string[];
+  }>;
+  localMatches?: Array<{
+    id: number;
+    fullName: string;
+    phone: string;
+    nationalId?: string | null;
+  }>;
   recentVisits?: Array<{
     id: number;
     centerName?: string;

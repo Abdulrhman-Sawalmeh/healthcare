@@ -6,15 +6,11 @@ import { AppError } from "../middleware/error";
 import { AuthWorkspace, hasCenterModules, SessionUser } from "../types/auth";
 
 async function passwordMatches(password: string, storedPassword: string) {
-  if (password === storedPassword) {
-    return true;
-  }
-
   if (/^\$2[aby]\$\d{2}\$/.test(storedPassword)) {
     return bcrypt.compare(password, storedPassword);
   }
 
-  return false;
+  return password === storedPassword;
 }
 
 function mapCentralSession(user: {

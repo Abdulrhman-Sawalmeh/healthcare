@@ -206,6 +206,7 @@ export interface UnifiedPatientRecord {
 export interface LocalPatientRecord {
   id: number;
   unifiedId?: string | null;
+  nationalId?: string | null;
   fullName: string;
   phone: string;
   gender: string;
@@ -482,6 +483,7 @@ export interface NetworkPatientSearchResult {
   patient?: {
     id: number;
     unifiedId: string;
+    nationalId?: string | null;
     fullName: string;
     primaryPhone: string;
     address: string;
@@ -491,7 +493,23 @@ export interface NetworkPatientSearchResult {
     id: number;
     fullName: string;
     phone: string;
+    nationalId?: string | null;
   };
+  patientMatches?: Array<{
+    id: number;
+    unifiedId: string;
+    nationalId?: string | null;
+    fullName: string;
+    primaryPhone: string;
+    address: string;
+    chronicDiseases: string[];
+  }>;
+  localMatches?: Array<{
+    id: number;
+    fullName: string;
+    phone: string;
+    nationalId?: string | null;
+  }>;
   recentVisits?: Array<{
     id: number;
     centerName?: string;

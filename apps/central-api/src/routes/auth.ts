@@ -10,6 +10,7 @@ import { asyncHandler } from "../utils/async-handler";
 
 const router = Router();
 const CENTRAL_ADMIN_ALIAS = "central-admin";
+const DEMO_PASSWORD = "Password123!";
 
 const loginSchema = z.object({
   identifier: z.string().min(3).optional(),
@@ -38,7 +39,6 @@ router.get(
       where: { isActive: true },
       orderBy: { id: "asc" },
       select: {
-        passwordHash: true,
         fullName: true
       }
     });
@@ -50,7 +50,7 @@ router.get(
               group: "central",
               roleLabel: "CENTRAL_ADMIN",
               identifier: CENTRAL_ADMIN_ALIAS,
-              password: user.passwordHash,
+              password: DEMO_PASSWORD,
               fullName: user.fullName
             }
           ]

@@ -1,13 +1,13 @@
 export const colors = {
-  background: "#eef6f1",
+  background: "#f4f7f1",
   surface: "#ffffff",
-  surfaceMuted: "#e6f0ea",
-  primary: "#0d7b66",
+  surfaceMuted: "#f0f5f0",
+  primary: "#0f7663",
   secondary: "#f08f52",
-  text: "#16312d",
-  muted: "#617972",
-  border: "#d7e4dc",
-  danger: "#bf5252",
+  text: "#17322d",
+  muted: "#5e7a72",
+  border: "rgba(15, 61, 54, 0.1)",
+  danger: "#c84f4f",
   success: "#2f8f64"
 };
 

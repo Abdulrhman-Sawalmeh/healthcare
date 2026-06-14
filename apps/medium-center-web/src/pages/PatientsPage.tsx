@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
@@ -15,7 +15,7 @@ type CreatePatientResponse = {
   patient: LocalPatientRecord;
   portalAccount: {
     loginIdentifier: string;
-    deliveryMethod: "WEBHOOK" | "OUTBOX";
+    deliveryMethod: "TWILIO" | "WEBHOOK" | "OUTBOX";
     accountStatus: "CREATED" | "RESET";
   };
 };
@@ -53,10 +53,12 @@ export function PatientsPage() {
   const [localPatients, setLocalPatients] = useState<LocalPatientRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResult, setSearchResult] = useState<NetworkPatientSearchResult | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const didRunInitialFilter = useRef(false);
   const [form, setForm] = useState({
     fullName: "",
     nationalId: "",
@@ -98,18 +100,96 @@ export function PatientsPage() {
     loadPatients().catch((cause: Error) => setError(cause.message));
   }, [user]);
 
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    if (!didRunInitialFilter.current) {
+      didRunInitialFilter.current = true;
+      return;
+    }
+
+    let active = true;
+    const timeout = window.setTimeout(() => {
+      loadPatients(query.trim())
+        .then(() => {
+          if (active) {
+            setError("");
+          }
+        })
+        .catch((cause: Error) => {
+          if (active) {
+            setError(cause.message);
+          }
+        });
+    }, 180);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
+  }, [query, user?.workspace]);
+
+  useEffect(() => {
+    const term = searchTerm.trim();
+
+    if (user?.workspace === "central") {
+      return;
+    }
+
+    if (!term) {
+      setSearchResult(null);
+      setSearchLoading(false);
+      return;
+    }
+
+    let active = true;
+    setSearchLoading(true);
+
+    const timeout = window.setTimeout(() => {
+      apiRequest<NetworkPatientSearchResult>(`/center/patients/search?term=${encodeURIComponent(term)}&limit=8`)
+        .then((payload) => {
+          if (!active) {
+            return;
+          }
+
+          setSearchResult(payload);
+          setSuccessMessage("");
+        })
+        .catch((cause) => {
+          if (active) {
+            setError(cause instanceof Error ? cause.message : "تعذر تنفيذ البحث.");
+          }
+        })
+        .finally(() => {
+          if (active) {
+            setSearchLoading(false);
+          }
+        });
+    }, 180);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
+  }, [searchTerm, user?.workspace]);
+
   async function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     try {
+      setSearchLoading(true);
       const payload = await apiRequest<NetworkPatientSearchResult>(
-        `/center/patients/search?term=${encodeURIComponent(searchTerm)}`
+        `/center/patients/search?term=${encodeURIComponent(searchTerm)}&limit=8`
       );
       setSearchResult(payload);
       setSuccessMessage("");
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر تنفيذ البحث.");
+    } finally {
+      setSearchLoading(false);
     }
   }
 
@@ -147,7 +227,7 @@ export function PatientsPage() {
       });
 
       setSuccessMessage(
-        payload.portalAccount.deliveryMethod === "WEBHOOK"
+        payload.portalAccount.deliveryMethod !== "OUTBOX"
           ? `تم تجهيز حساب المريض، ويمكنه الدخول برقم الهوية ${payload.portalAccount.loginIdentifier}. أُرسلت كلمة المرور إلى هاتفه.`
           : `تم تجهيز حساب المريض، ويمكنه الدخول برقم الهوية ${payload.portalAccount.loginIdentifier}. تم حفظ رسالة كلمة المرور في سجل الرسائل النصية المحلي.`
       );
@@ -240,6 +320,8 @@ export function PatientsPage() {
   }
 
   const canCreateAccounts = user?.role === "RECEPTIONIST";
+  const patientMatches = searchResult?.patientMatches ?? (searchResult?.patient ? [searchResult.patient] : []);
+  const localMatches = searchResult?.localMatches ?? (searchResult?.localPatient ? [searchResult.localPatient] : []);
 
   return (
     <div className="page-stack">
@@ -259,44 +341,36 @@ export function PatientsPage() {
             value={searchTerm}
             onChange={setSearchTerm}
             onSubmit={handleSearchSubmit}
-            placeholder="أدخل رقم الهوية أو الهاتف"
+            placeholder="أدخل الاسم أو رقم الهوية أو الهاتف"
           />
 
-          {searchResult ? (
+          {searchTerm.trim() ? (
             <div className="stack-list">
               <div className="info-row">
-                <span>نتيجة البحث</span>
-                <StatusBadge status={searchResult.found ? "found" : "not_found"} />
+                <span>{searchLoading ? "جاري البحث..." : "نتيجة البحث"}</span>
+                {searchResult ? <StatusBadge status={searchResult.found ? "found" : "not_found"} /> : null}
               </div>
 
-              {searchResult.patient ? (
-                <article className="stack-item">
-                  <strong>{getPatientDisplayName(searchResult.patient.fullName)}</strong>
-                  <p className="muted">
-                    {joinMeta([
-                      searchResult.patient.unifiedId,
-                      searchResult.patient.nationalId ?? "بدون هوية",
-                      searchResult.patient.primaryPhone
-                    ])}
-                  </p>
+              {patientMatches.map((patient) => (
+                <article className="stack-item" key={`central-${patient.id}`}>
+                  <strong>{getPatientDisplayName(patient.fullName)}</strong>
+                  <p className="muted">{joinMeta([patient.unifiedId, patient.nationalId ?? "بدون هوية", patient.primaryPhone])}</p>
                 </article>
-              ) : (
+              ))}
+
+              {localMatches.map((patient) => (
+                <Link className="stack-item interactive-card" key={`local-${patient.id}`} to={`/patients/${patient.id}`}>
+                  <strong>{getPatientDisplayName(patient.fullName)}</strong>
+                  <p className="muted">{joinMeta([patient.nationalId ?? "بدون هوية", patient.phone])}</p>
+                  <span className="action-hint">فتح بيانات المريض</span>
+                </Link>
+              ))}
+
+              {searchResult && !searchResult.found ? (
                 <EmptyState
                   title="لم يتم العثور على مريض"
                   description="يمكن إنشاء ملف وحساب جديد من نموذج الاستقبال عند الحاجة."
                 />
-              )}
-
-              {searchResult.localPatient ? (
-                <article className="stack-item">
-                  <strong>{getPatientDisplayName(searchResult.localPatient.fullName)}</strong>
-                  <p className="muted">
-                    {joinMeta([
-                      searchResult.localPatient.nationalId ?? "بدون هوية",
-                      searchResult.localPatient.phone
-                    ])}
-                  </p>
-                </article>
               ) : null}
             </div>
           ) : null}

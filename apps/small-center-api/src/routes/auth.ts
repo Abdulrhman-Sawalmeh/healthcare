@@ -12,6 +12,7 @@ import { asyncHandler } from "../utils/async-handler";
 
 const router = Router();
 const demoPrefix = "small";
+const demoPassword = "Password123!";
 const demoRoleAliases: Partial<Record<CenterUserRole, string>> = {
   CENTER_MANAGER: `${demoPrefix}-manager`,
   DOCTOR: `${demoPrefix}-doctor`,
@@ -44,25 +45,38 @@ async function findCenterUserByRole(role: CenterUserRole) {
 }
 
 async function findDemoPatient() {
-  return prisma.user.findFirst({
-    where: {
-      isActive: true,
-      role: "PATIENT",
-      patientProfile: systemConfig.allowedCenterCode
-        ? {
-            center: {
-              code: systemConfig.allowedCenterCode
-            }
+  const where = {
+    isActive: true,
+    role: "PATIENT" as const,
+    patientProfile: systemConfig.allowedCenterCode
+      ? {
+          center: {
+            code: systemConfig.allowedCenterCode
           }
-        : undefined
-    },
-    include: {
-      patientProfile: {
-        include: { center: true }
-      }
-    },
-    orderBy: { fullName: "asc" }
-  });
+        }
+      : undefined
+  };
+  const include = {
+    patientProfile: {
+      include: { center: true }
+    }
+  };
+
+  return (
+    (await prisma.user.findFirst({
+      where: {
+        ...where,
+        passwordHash: demoPassword
+      },
+      include,
+      orderBy: { fullName: "asc" }
+    })) ??
+    prisma.user.findFirst({
+      where,
+      include,
+      orderBy: { fullName: "asc" }
+    })
+  );
 }
 
 async function resolveDemoIdentifier(identifier: string) {
@@ -100,7 +114,7 @@ router.get(
           group: entry.user!.center.centerName,
           roleLabel: entry.role,
           identifier: entry.alias,
-          password: entry.user!.passwordHash,
+          password: demoPassword,
           fullName: entry.user!.fullName
         })),
       ...(patient
@@ -109,7 +123,7 @@ router.get(
               group: patient.patientProfile?.center.name ?? "patient-portal",
               roleLabel: "PATIENT",
               identifier: demoPatientAlias,
-              password: patient.passwordHash,
+              password: demoPassword,
               fullName: patient.fullName
             }
           ]

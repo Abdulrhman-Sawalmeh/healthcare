@@ -1,13 +1,16 @@
 import { Gender, UserRole } from "@prisma/client";
+import bcrypt from "bcryptjs";
 import { randomInt } from "node:crypto";
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
-import { buildCenterEmailAddress, buildPersonUsername } from "../utils/account-identifiers";
+import { buildCenterEmailAddress } from "../utils/account-identifiers";
 
-const passwordAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+const passwordLetters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const passwordDigits = "23456789";
+const passwordAlphabet = `${passwordLetters}${passwordDigits}`;
 
 export interface EnsurePatientPortalAccountInput {
   centerId: number;
@@ -22,7 +25,7 @@ export interface EnsurePatientPortalAccountInput {
 
 export interface EnsurePatientPortalAccountResult {
   loginIdentifier: string;
-  deliveryMethod: "WEBHOOK" | "OUTBOX";
+  deliveryMethod: "TWILIO" | "WEBHOOK" | "OUTBOX";
   accountStatus: "CREATED" | "RESET";
 }
 
@@ -46,12 +49,47 @@ function buildMedicalRecordNumber(centerCode: string) {
   return `MRN-${centerCode}-${new Date().getFullYear()}-${suffix}`;
 }
 
-function generateTemporaryPassword(length = 10) {
-  return Array.from({ length }, () => passwordAlphabet[randomInt(passwordAlphabet.length)]).join("");
+function pickRandom(value: string) {
+  return value[randomInt(value.length)];
+}
+
+function shuffleCharacters(value: string[]) {
+  for (let index = value.length - 1; index > 0; index -= 1) {
+    const targetIndex = randomInt(index + 1);
+    [value[index], value[targetIndex]] = [value[targetIndex], value[index]];
+  }
+
+  return value;
+}
+
+function generateTemporaryPassword(length = 8) {
+  const safeLength = Math.min(Math.max(length, 2), 8);
+  const characters = [
+    pickRandom(passwordLetters),
+    pickRandom(passwordDigits),
+    ...Array.from({ length: safeLength - 2 }, () => pickRandom(passwordAlphabet))
+  ];
+
+  return shuffleCharacters(characters).join("");
 }
 
 function formatChronicConditions(chronicDiseases: string[]) {
   return chronicDiseases.length > 0 ? chronicDiseases.join("، ") : null;
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit) {
+  const timeoutMs = Number(process.env.SMS_TIMEOUT_MS ?? 10000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function appendSmsToOutbox(payload: {
@@ -61,7 +99,7 @@ async function appendSmsToOutbox(payload: {
   centerName: string;
   message: string;
 }) {
-  const outboxDir = path.resolve(process.cwd(), "runtime-logs");
+  const outboxDir = path.resolve(__dirname, "../../../..", "runtime-logs");
   const outboxFile = path.join(outboxDir, "sms-outbox.log");
 
   await mkdir(outboxDir, { recursive: true });
@@ -86,14 +124,52 @@ async function sendPatientPasswordSms(input: {
   nationalId: string;
   temporaryPassword: string;
 }) {
+  const smsProvider = process.env.SMS_PROVIDER?.trim().toLowerCase();
   const webhookUrl = process.env.SMS_WEBHOOK_URL?.trim();
   const apiKey = process.env.SMS_API_KEY?.trim();
   const senderName = process.env.SMS_SENDER_NAME?.trim() || "Healthcare";
-  const message = `مرحباً ${input.patientName}، تم إنشاء حسابك في ${input.centerName}. اسم الدخول: ${input.nationalId}. كلمة المرور المؤقتة: ${input.temporaryPassword}`;
+  const message = `مرحبا ${input.patientName}، تم إنشاء حسابك في ${input.centerName}. رقم الهوية: ${input.nationalId}. كلمة المرور: ${input.temporaryPassword}`;
+  const useTwilio = smsProvider === "twilio" || (!smsProvider && Boolean(process.env.TWILIO_ACCOUNT_SID));
+
+  if (useTwilio) {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID?.trim();
+    const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
+    const fromNumber = process.env.TWILIO_FROM_NUMBER?.trim();
+
+    if (accountSid && authToken && fromNumber) {
+      try {
+        const response = await fetchWithTimeout(
+          `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
+          {
+            method: "POST",
+            headers: {
+              authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+              "content-type": "application/x-www-form-urlencoded"
+            },
+            body: new URLSearchParams({
+              To: input.phone,
+              From: fromNumber,
+              Body: message
+            })
+          }
+        );
+
+        if (response.ok) {
+          return "TWILIO" as const;
+        }
+
+        console.error("Twilio SMS failed", await response.text());
+      } catch (error) {
+        console.error("Twilio SMS request failed", error);
+      }
+    } else {
+      console.error("Twilio SMS is selected, but TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_FROM_NUMBER is missing.");
+    }
+  }
 
   if (webhookUrl) {
     try {
-      const response = await fetch(webhookUrl, {
+      const response = await fetchWithTimeout(webhookUrl, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -109,8 +185,10 @@ async function sendPatientPasswordSms(input: {
       if (response.ok) {
         return "WEBHOOK" as const;
       }
-    } catch {
-      // Fall back to the local outbox below so account creation still completes.
+
+      console.error("SMS webhook failed", await response.text());
+    } catch (error) {
+      console.error("SMS webhook request failed", error);
     }
   }
 
@@ -129,7 +207,7 @@ export async function ensurePatientPortalAccount(
 ): Promise<EnsurePatientPortalAccountResult> {
   const normalizedNationalId = normalizeNationalId(input.nationalId);
   const temporaryPassword = generateTemporaryPassword();
-  const passwordHash = temporaryPassword;
+  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
 
   const center = await prisma.centralCenter.findUnique({
     where: { id: input.centerId },
@@ -154,13 +232,7 @@ export async function ensurePatientPortalAccount(
     throw new AppError("تعذر العثور على بوابة المرضى الخاصة بهذا المركز.", 404);
   }
 
-  const patientSerial =
-    (await prisma.patientProfile.count({
-      where: {
-        centerId: legacyCenter.id
-      }
-    })) + 1;
-  const loginIdentifier = buildPersonUsername(input.fullName, patientSerial);
+  const loginIdentifier = normalizedNationalId;
   const patientEmail = buildCenterEmailAddress(loginIdentifier, center.centerName);
 
   const existingUser = await prisma.user.findFirst({
@@ -228,7 +300,7 @@ export async function ensurePatientPortalAccount(
       phone: input.primaryPhone,
       patientName: input.fullName,
       centerName: center.centerName,
-      nationalId: loginIdentifier,
+      nationalId: normalizedNationalId,
       temporaryPassword
     });
 
@@ -266,7 +338,7 @@ export async function ensurePatientPortalAccount(
     phone: input.primaryPhone,
     patientName: input.fullName,
     centerName: center.centerName,
-    nationalId: loginIdentifier,
+    nationalId: normalizedNationalId,
     temporaryPassword
   });
 
@@ -339,7 +411,7 @@ export async function syncPatientPortalProfile(input: SyncPatientPortalProfileIn
     where: { id: existingUser.id },
     data: {
       email: normalizedNationalId
-        ? buildCenterEmailAddress(buildPersonUsername(input.fullName, normalizedNationalId.slice(-6)), center.centerName)
+        ? buildCenterEmailAddress(normalizedNationalId, center.centerName)
         : existingUser.email,
       fullName: input.fullName,
       phone: input.primaryPhone

@@ -19,6 +19,7 @@ export function LoginPage() {
   const { t } = useLanguage();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [demoAccounts, setDemoAccounts] = useState<DemoAccount[]>(systemConfig.demoAccounts);
@@ -88,15 +89,25 @@ export function LoginPage() {
           />
         </label>
 
-        <label className="field">
+        <label className="field password-field">
           <span>كلمة المرور</span>
-          <input
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete="new-password"
-            placeholder="كلمة المرور"
-            type="password"
-          />
+          <div className="password-input-wrap">
+            <input
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="new-password"
+              placeholder="كلمة المرور"
+              type={showPassword ? "text" : "password"}
+            />
+            <button
+              aria-label={showPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"}
+              className={`password-toggle ${showPassword ? "is-visible" : ""}`}
+              onClick={() => setShowPassword((current) => !current)}
+              type="button"
+            >
+              <span aria-hidden="true" className="password-eye" />
+            </button>
+          </div>
         </label>
 
         <div className="demo-login-panel">

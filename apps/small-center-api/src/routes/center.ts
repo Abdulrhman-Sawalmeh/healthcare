@@ -78,6 +78,36 @@ const visitSchema = z.object({
     .default([])
 });
 
+const reportAttachmentSchema = z.object({
+  fileName: z.string().min(1),
+  mimeType: z.string().min(3),
+  contentBase64: z.string().min(1)
+});
+
+const reportSchema = z.object({
+  title: z.string().min(2),
+  category: z
+    .enum([
+      "GENERAL",
+      "LAB",
+      "IMAGING",
+      "RADIOLOGY",
+      "PATHOLOGY",
+      "CARDIOLOGY",
+      "MICROBIOLOGY",
+      "PROCEDURE",
+      "FOLLOW_UP",
+      "DISCHARGE"
+    ])
+    .default("GENERAL"),
+  summary: z.string().min(2),
+  findings: z.string().optional(),
+  recommendations: z.string().optional(),
+  recommendedFollowUp: z.string().optional(),
+  shareWithPatient: z.boolean().default(true),
+  attachment: reportAttachmentSchema.nullish()
+});
+
 const referralSchema = z.object({
   localPatientId: z.coerce.number().optional(),
   patientUnifiedId: z.string().optional(),
@@ -338,27 +368,35 @@ router.get(
   asyncHandler(async (req, res) => {
     const term = String(req.query.term ?? req.query.phone ?? "").trim();
     const centerId = getCenterId(req);
+    const limit = Math.min(Number(req.query.limit ?? 8), 12);
 
     if (!term) {
       return res.json({
         found: false,
         localPatient: null,
         patient: null,
+        localMatches: [],
+        patientMatches: [],
         recentVisits: []
       });
     }
 
-    const [localPatient, unifiedPatient] = await Promise.all([
-      prisma.localPatient.findFirst({
+    const [localPatients, unifiedPatients] = await Promise.all([
+      prisma.localPatient.findMany({
         where: {
           centerId,
           OR: [
-            { phone: term },
-            { unifiedId: term },
+            { fullName: { contains: term, mode: "insensitive" } },
+            { phone: { contains: term } },
+            { unifiedId: { contains: term, mode: "insensitive" } },
             {
               unifiedPatient: {
                 is: {
-                  nationalId: term
+                  OR: [
+                    { nationalId: { contains: term } },
+                    { fullName: { contains: term, mode: "insensitive" } },
+                    { primaryPhone: { contains: term } }
+                  ]
                 }
               }
             }
@@ -372,11 +410,18 @@ router.get(
             },
             take: 3
           }
-        }
+        },
+        orderBy: [{ fullName: "asc" }],
+        take: limit
       }),
-      prisma.unifiedPatient.findFirst({
+      prisma.unifiedPatient.findMany({
         where: {
-          OR: [{ primaryPhone: term }, { nationalId: term }, { unifiedId: term }]
+          OR: [
+            { fullName: { contains: term, mode: "insensitive" } },
+            { primaryPhone: { contains: term } },
+            { nationalId: { contains: term } },
+            { unifiedId: { contains: term, mode: "insensitive" } }
+          ]
         },
         include: {
           unifiedVisits: {
@@ -388,12 +433,31 @@ router.get(
             },
             take: 5
           }
-        }
+        },
+        orderBy: [{ fullName: "asc" }],
+        take: limit
       })
     ]);
+    const localPatient = localPatients[0] ?? null;
+    const unifiedPatient = unifiedPatients[0] ?? null;
+    const localMatches = localPatients.map((patient) => ({
+      id: patient.id,
+      fullName: patient.fullName,
+      phone: patient.phone,
+      nationalId: patient.unifiedPatient?.nationalId ?? null
+    }));
+    const patientMatches = unifiedPatients.map((patient) => ({
+      id: patient.id,
+      unifiedId: patient.unifiedId,
+      nationalId: patient.nationalId,
+      fullName: patient.fullName,
+      primaryPhone: patient.primaryPhone,
+      address: patient.address,
+      chronicDiseases: patient.chronicDiseases
+    }));
 
     res.json({
-      found: Boolean(localPatient || unifiedPatient),
+      found: localMatches.length > 0 || patientMatches.length > 0,
       localPatient: localPatient
         ? {
             id: localPatient.id,
@@ -413,6 +477,8 @@ router.get(
             chronicDiseases: unifiedPatient.chronicDiseases
           }
         : null,
+      localMatches,
+      patientMatches,
       recentVisits: unifiedPatient?.unifiedVisits ?? []
     });
   })
@@ -615,6 +681,167 @@ router.post(
     });
 
     res.status(201).json(visit);
+  })
+);
+
+router.post(
+  "/visits/:visitId/reports",
+  authorize("CENTER_MANAGER", "DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const visitId = Number(req.params.visitId);
+    const payload = reportSchema.parse(req.body);
+
+    const visit = await prisma.localVisit.findFirst({
+      where: {
+        id: visitId,
+        centerId
+      },
+      select: {
+        id: true,
+        patientId: true
+      }
+    });
+
+    if (!visit) {
+      return res.status(404).json({ message: "تعذر العثور على الزيارة المطلوبة داخل هذا المركز." });
+    }
+
+    const report = await prisma.localResultReport.create({
+      data: {
+        centerId,
+        patientId: visit.patientId,
+        visitId: visit.id,
+        authorId: Number(req.auth?.sub),
+        title: payload.title,
+        category: payload.category,
+        summary: payload.summary,
+        findings: payload.findings,
+        recommendations: payload.recommendations,
+        recommendedFollowUp: payload.recommendedFollowUp,
+        shareWithPatient: payload.shareWithPatient,
+        attachmentFileName: payload.attachment ? payload.attachment.fileName : null,
+        attachmentMimeType: payload.attachment ? payload.attachment.mimeType : null,
+        attachmentBase64: payload.attachment ? payload.attachment.contentBase64 : null
+      }
+    });
+
+    await recordAuditLog(req, {
+      action: "CREATE_RESULT_REPORT",
+      entityType: "LocalResultReport",
+      entityId: report.id,
+      centerId,
+      newValue: {
+        visitId: visit.id,
+        patientId: visit.patientId,
+        category: report.category,
+        shareWithPatient: report.shareWithPatient
+      }
+    });
+
+    res.status(201).json(report);
+  })
+);
+
+router.put(
+  "/visits/:visitId/reports/:reportId",
+  authorize("CENTER_MANAGER", "DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const visitId = Number(req.params.visitId);
+    const reportId = Number(req.params.reportId);
+    const payload = reportSchema.parse(req.body);
+
+    const existingReport = await prisma.localResultReport.findFirst({
+      where: {
+        id: reportId,
+        visitId,
+        centerId
+      }
+    });
+
+    if (!existingReport) {
+      return res.status(404).json({ message: "تعذر العثور على تقرير النتائج المطلوب." });
+    }
+
+    const report = await prisma.localResultReport.update({
+      where: {
+        id: reportId
+      },
+      data: {
+        title: payload.title,
+        category: payload.category,
+        summary: payload.summary,
+        findings: payload.findings,
+        recommendations: payload.recommendations,
+        recommendedFollowUp: payload.recommendedFollowUp,
+        shareWithPatient: payload.shareWithPatient,
+        attachmentFileName: payload.attachment ? payload.attachment.fileName : null,
+        attachmentMimeType: payload.attachment ? payload.attachment.mimeType : null,
+        attachmentBase64: payload.attachment ? payload.attachment.contentBase64 : null
+      }
+    });
+
+    await recordAuditLog(req, {
+      action: "UPDATE_RESULT_REPORT",
+      entityType: "LocalResultReport",
+      entityId: report.id,
+      centerId,
+      oldValue: {
+        title: existingReport.title,
+        category: existingReport.category,
+        shareWithPatient: existingReport.shareWithPatient
+      },
+      newValue: {
+        title: report.title,
+        category: report.category,
+        shareWithPatient: report.shareWithPatient
+      }
+    });
+
+    res.json(report);
+  })
+);
+
+router.delete(
+  "/visits/:visitId/reports/:reportId",
+  authorize("CENTER_MANAGER", "DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const visitId = Number(req.params.visitId);
+    const reportId = Number(req.params.reportId);
+
+    const existingReport = await prisma.localResultReport.findFirst({
+      where: {
+        id: reportId,
+        visitId,
+        centerId
+      }
+    });
+
+    if (!existingReport) {
+      return res.status(404).json({ message: "تعذر العثور على تقرير النتائج المطلوب." });
+    }
+
+    await prisma.localResultReport.delete({
+      where: {
+        id: reportId
+      }
+    });
+
+    await recordAuditLog(req, {
+      action: "DELETE_RESULT_REPORT",
+      entityType: "LocalResultReport",
+      entityId: reportId,
+      centerId,
+      oldValue: {
+        title: existingReport.title,
+        category: existingReport.category,
+        shareWithPatient: existingReport.shareWithPatient
+      }
+    });
+
+    res.status(204).send();
   })
 );
 
