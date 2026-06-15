@@ -805,6 +805,7 @@ model LocalPatient {
   allergies        String[]
   chronicDiseases  String[]
   createdLocally   Boolean        @default(false)
+  qrToken          String         @unique @default(uuid())
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
   center           CentralCenter  @relation(fields: [centerId], references: [id], onDelete: Cascade)

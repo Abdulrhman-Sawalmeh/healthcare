@@ -1,10 +1,11 @@
-import { CenterUserRole, Prisma, VisitPriority, VisitWorkflowStatus } from "@prisma/client";
+import { CenterUserRole, Prisma, VisitTaskType, VisitWorkflowStatus } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
 
 import { prisma } from "../lib/prisma";
 import { authorize } from "../middleware/auth";
 import { recordAuditLog } from "../services/audit-log";
+import { notifyRole } from "../services/internal-notifications";
 import { syncCenterVisitsNow } from "../services/notification-processor";
 import {
   createPrescriptionVerificationCode,
@@ -101,6 +102,20 @@ const diseaseSchema = z.object({
   isActive: z.boolean().default(true)
 });
 
+const taskTypeSchema = z.enum([
+  "RECEPTION_REGISTRATION",
+  "NURSING_TRIAGE",
+  "DOCTOR_ASSESSMENT",
+  "LAB_TEST",
+  "PHARMACY_DISPENSING",
+  "CENTRAL_UPLOAD",
+  "FOLLOW_UP"
+]);
+
+const startStageSchema = z.object({
+  taskType: taskTypeSchema.optional()
+});
+
 function centerIdFromRequest(req: Parameters<typeof asyncHandler>[0] extends never ? never : any) {
   return Number(req.auth?.centerId);
 }
@@ -162,6 +177,20 @@ async function refreshVisitStatus(tx: Prisma.TransactionClient, visitId: number)
       uploadStatus: "NOT_READY"
     }
   });
+}
+
+function taskTypeForRole(role: CenterUserRole, workflowStatus?: VisitWorkflowStatus): VisitTaskType {
+  if (role === "RECEPTIONIST") return "RECEPTION_REGISTRATION";
+  if (role === "NURSE") return "NURSING_TRIAGE";
+  if (role === "DOCTOR") return "DOCTOR_ASSESSMENT";
+  if (role === "LAB_TECH") return "LAB_TEST";
+  if (role === "PHARMACIST") return "PHARMACY_DISPENSING";
+
+  if (workflowStatus === "WAITING_TRIAGE") return "NURSING_TRIAGE";
+  if (workflowStatus === "WAITING_DOCTOR" || workflowStatus === "IN_TREATMENT") return "DOCTOR_ASSESSMENT";
+  if (workflowStatus === "WAITING_LAB") return "LAB_TEST";
+  if (workflowStatus === "WAITING_PHARMACY") return "PHARMACY_DISPENSING";
+  return "RECEPTION_REGISTRATION";
 }
 
 router.get(
@@ -289,6 +318,142 @@ router.get(
     });
 
     res.json(visits);
+  })
+);
+
+router.patch(
+  "/:visitId/start-stage",
+  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE", "LAB_TECH", "PHARMACIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = centerIdFromRequest(req);
+    const visitId = Number(req.params.visitId);
+    const payload = startStageSchema.parse(req.body ?? {});
+    const visit = await requireVisit(centerId, visitId);
+
+    if (["COMPLETED", "CANCELLED", "UPLOADED"].includes(visit.workflowStatus)) {
+      return res.status(409).json({ message: "لا يمكن بدء مرحلة لزيارة مكتملة أو ملغاة." });
+    }
+
+    const role = req.auth!.role as CenterUserRole;
+    const requestedTaskType = (payload.taskType ?? taskTypeForRole(role, visit.workflowStatus)) as VisitTaskType;
+    const expectedTaskType = taskTypeForRole(role, visit.workflowStatus);
+
+    if (role !== "CENTER_MANAGER" && requestedTaskType !== expectedTaskType) {
+      return res.status(403).json({ message: "لا تملك صلاحية بدء هذه المرحلة من مسار الزيارة." });
+    }
+
+    const task = await prisma.visitWorkflowTask.findFirst({
+      where: {
+        visitId,
+        taskType: requestedTaskType,
+        status: { in: ["PENDING", "IN_PROGRESS"] }
+      },
+      orderBy: { createdAt: "asc" }
+    });
+
+    if (!task) {
+      return res.status(409).json({ message: "لا توجد مهمة مفتوحة لهذه المرحلة." });
+    }
+
+    if (role === "DOCTOR" && task.assignedToId && task.assignedToId !== Number(req.auth!.sub)) {
+      return res.status(403).json({ message: "هذه الزيارة معينة لطبيب آخر." });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const updatedTask = await tx.visitWorkflowTask.update({
+        where: { id: task.id },
+        data: {
+          status: "IN_PROGRESS",
+          startedAt: task.startedAt ?? new Date(),
+          assignedToId:
+            task.assignedToId ??
+            (role === "CENTER_MANAGER" ? undefined : Number(req.auth!.sub))
+        }
+      });
+
+      if (requestedTaskType === "DOCTOR_ASSESSMENT") {
+        await tx.localVisit.update({
+          where: { id: visitId },
+          data: { workflowStatus: "IN_TREATMENT" }
+        });
+      }
+
+      return updatedTask;
+    });
+
+    await recordAuditLog(req, {
+      action: "START_VISIT_STAGE",
+      entityType: "VisitWorkflowTask",
+      entityId: result.id,
+      centerId,
+      newValue: {
+        visitId,
+        taskType: result.taskType,
+        status: result.status
+      }
+    });
+
+    res.json(result);
+  })
+);
+
+router.patch(
+  "/:visitId/cancel",
+  authorize("CENTER_MANAGER", "RECEPTIONIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = centerIdFromRequest(req);
+    const visitId = Number(req.params.visitId);
+    const visit = await requireVisit(centerId, visitId);
+
+    if (["COMPLETED", "UPLOADED"].includes(visit.workflowStatus) || visit.uploadStatus === "UPLOADED") {
+      return res.status(409).json({ message: "لا يمكن إلغاء زيارة مكتملة أو مرفوعة للنظام المركزي." });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.visitWorkflowTask.updateMany({
+        where: {
+          visitId,
+          status: { in: ["PENDING", "IN_PROGRESS"] }
+        },
+        data: {
+          status: "CANCELLED",
+          completedAt: new Date()
+        }
+      });
+
+      return tx.localVisit.update({
+        where: { id: visitId },
+        data: {
+          workflowStatus: "CANCELLED",
+          uploadStatus: "NOT_READY",
+          completedAt: new Date()
+        },
+        include: {
+          patient: true,
+          doctor: { select: { id: true, fullName: true, role: true } },
+          workflowTasks: { orderBy: { createdAt: "asc" } },
+          nursingAssessments: { orderBy: { assessedAt: "desc" } },
+          prescriptions: true,
+          labRequests: { include: { test: true }, orderBy: { requestDate: "asc" } },
+          invoice: true
+        }
+      });
+    });
+
+    await recordAuditLog(req, {
+      action: "CANCEL_VISIT",
+      entityType: "LocalVisit",
+      entityId: visitId,
+      centerId,
+      oldValue: {
+        workflowStatus: visit.workflowStatus
+      },
+      newValue: {
+        workflowStatus: result.workflowStatus
+      }
+    });
+
+    res.json(result);
   })
 );
 
@@ -618,6 +783,15 @@ router.post(
       }
     });
 
+    await notifyRole({
+      centerId,
+      role: "NURSE",
+      type: "QUEUE_STAGE_ASSIGNED",
+      title: "مريض بانتظار التقييم التمريضي",
+      message: `زيارة رقم ${visit.id} جاهزة لمرحلة التمريض.`,
+      severity: payload.priority === "EMERGENCY" ? "WARNING" : "INFO"
+    });
+
     res.status(201).json(visit);
   })
 );
@@ -652,6 +826,15 @@ router.patch(
       });
 
       return assessment;
+    });
+
+    await notifyRole({
+      centerId,
+      role: "DOCTOR",
+      type: "QUEUE_STAGE_ASSIGNED",
+      title: "مريض بانتظار الطبيب",
+      message: `زيارة رقم ${visitId} اكتمل تقييمها التمريضي.`,
+      severity: "INFO"
     });
 
     res.json(result);
@@ -776,6 +959,28 @@ router.patch(
       }
     });
 
+    if (payload.labTestIds.length > 0) {
+      await notifyRole({
+        centerId,
+        role: "LAB_TECH",
+        type: "LAB_REQUEST_READY",
+        title: "طلب مختبر جديد",
+        message: `زيارة رقم ${visitId} لديها فحوصات مخبرية بانتظار التنفيذ.`,
+        severity: "INFO"
+      });
+    }
+
+    if (payload.prescriptions.length > 0) {
+      await notifyRole({
+        centerId,
+        role: "PHARMACIST",
+        type: "PRESCRIPTION_WAITING",
+        title: "وصفة بانتظار الصرف",
+        message: `زيارة رقم ${visitId} لديها وصفة دوائية بانتظار الصيدلية.`,
+        severity: "INFO"
+      });
+    }
+
     res.json(result);
   })
 );
@@ -834,6 +1039,17 @@ router.patch(
         resultNotes: result.resultNotes
       }
     });
+
+    if (requestRecord.visitId) {
+      await notifyRole({
+        centerId,
+        role: "DOCTOR",
+        type: "LAB_RESULT_READY",
+        title: "نتيجة مختبر جاهزة",
+        message: `نتيجة مختبر لزيارة رقم ${requestRecord.visitId} أصبحت جاهزة للمراجعة.`,
+        severity: "INFO"
+      });
+    }
 
     res.json(result);
   })

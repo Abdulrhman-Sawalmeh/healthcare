@@ -29,6 +29,12 @@ import {
   createPrescriptionVerificationCode,
   hashPrescriptionVerificationCode
 } from "../services/prescription-verification";
+import {
+  buildPatientQrImageUrl,
+  buildPatientQrValue,
+  createPatientQrToken,
+  parsePatientQrToken
+} from "../services/patient-qr";
 import { asyncHandler } from "../utils/async-handler";
 import { visitWorkflowRouter } from "./visit-workflow";
 
@@ -36,9 +42,64 @@ const router = Router();
 
 router.use(authenticate, authorizeWorkspace("center"));
 router.use("/visit-workflow", visitWorkflowRouter);
+router.use("/queue", visitWorkflowRouter);
 
 function getCenterId(req: Parameters<typeof asyncHandler>[0] extends never ? never : any) {
   return Number(req.auth?.centerId);
+}
+
+type PatientCardRecord = Awaited<ReturnType<typeof getPatientCardRecord>>;
+
+async function getPatientCardRecord(centerId: number, patientId: number) {
+  return prisma.localPatient.findFirst({
+    where: {
+      id: patientId,
+      centerId
+    },
+    include: {
+      center: {
+        select: {
+          id: true,
+          centerName: true,
+          centerCode: true,
+          phone: true
+        }
+      },
+      unifiedPatient: {
+        select: {
+          nationalId: true
+        }
+      }
+    }
+  });
+}
+
+function mapPatientQrCard(patient: NonNullable<PatientCardRecord>) {
+  const qrValue = buildPatientQrValue(patient.centerId, patient.qrToken);
+
+  return {
+    patient: {
+      id: patient.id,
+      internalId: patient.id,
+      unifiedId: patient.unifiedId,
+      fullName: patient.fullName,
+      nationalId: patient.unifiedPatient?.nationalId ?? null,
+      phone: patient.phone,
+      dateOfBirth: patient.dateOfBirth,
+      gender: patient.gender,
+      bloodType: patient.bloodType,
+      center: {
+        id: patient.center.id,
+        name: patient.center.centerName,
+        code: patient.center.centerCode,
+        phone: patient.center.phone
+      }
+    },
+    qrToken: patient.qrToken,
+    qrValue,
+    qrImageUrl: buildPatientQrImageUrl(qrValue),
+    verificationPath: `/patients/qr/${patient.qrToken}`
+  };
 }
 
 const patientSchema = z.object({
@@ -481,6 +542,130 @@ router.get(
       patientMatches,
       recentVisits: unifiedPatient?.unifiedVisits ?? []
     });
+  })
+);
+
+router.get(
+  "/patients/:patientId/card",
+  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE", "LAB_TECH", "PHARMACIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const patientId = Number(req.params.patientId);
+    const patient = await getPatientCardRecord(centerId, patientId);
+
+    if (!patient) {
+      return res.status(404).json({ message: "تعذر العثور على بطاقة المريض داخل هذا المركز." });
+    }
+
+    await recordAuditLog(req, {
+      action: "VIEW_PATIENT_QR_CARD",
+      entityType: "LocalPatient",
+      entityId: patient.id,
+      centerId,
+      newValue: {
+        qrToken: patient.qrToken,
+        patientId: patient.id
+      }
+    });
+
+    res.json(mapPatientQrCard(patient));
+  })
+);
+
+router.get(
+  "/patients/qr/:qrToken",
+  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE", "LAB_TECH", "PHARMACIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const qrToken = parsePatientQrToken(String(req.params.qrToken ?? ""));
+    const patient = await prisma.localPatient.findFirst({
+      where: {
+        centerId,
+        qrToken
+      },
+      include: {
+        center: {
+          select: {
+            id: true,
+            centerName: true,
+            centerCode: true,
+            phone: true
+          }
+        },
+        unifiedPatient: {
+          select: {
+            nationalId: true
+          }
+        }
+      }
+    });
+
+    await recordAuditLog(req, {
+      action: "VERIFY_PATIENT_QR_CARD",
+      entityType: "LocalPatient",
+      entityId: patient?.id,
+      centerId,
+      newValue: {
+        matched: Boolean(patient)
+      }
+    });
+
+    if (!patient) {
+      return res.status(404).json({ message: "رمز بطاقة المريض غير صالح أو لا يتبع لهذا المركز." });
+    }
+
+    res.json(mapPatientQrCard(patient));
+  })
+);
+
+router.post(
+  "/patients/:patientId/regenerate-qr",
+  authorize("CENTER_MANAGER"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const patientId = Number(req.params.patientId);
+    const existingPatient = await getPatientCardRecord(centerId, patientId);
+
+    if (!existingPatient) {
+      return res.status(404).json({ message: "تعذر العثور على بطاقة المريض داخل هذا المركز." });
+    }
+
+    const patient = await prisma.localPatient.update({
+      where: { id: existingPatient.id },
+      data: {
+        qrToken: createPatientQrToken()
+      },
+      include: {
+        center: {
+          select: {
+            id: true,
+            centerName: true,
+            centerCode: true,
+            phone: true
+          }
+        },
+        unifiedPatient: {
+          select: {
+            nationalId: true
+          }
+        }
+      }
+    });
+
+    await recordAuditLog(req, {
+      action: "REGENERATE_PATIENT_QR_CARD",
+      entityType: "LocalPatient",
+      entityId: patient.id,
+      centerId,
+      oldValue: {
+        qrToken: existingPatient.qrToken
+      },
+      newValue: {
+        qrToken: patient.qrToken
+      }
+    });
+
+    res.json(mapPatientQrCard(patient));
   })
 );
 
@@ -1060,9 +1245,92 @@ router.get(
 
 router.get(
   "/notifications",
-  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"),
+  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"),
   asyncHandler(async (req, res) => {
     res.json(await getCenterNotifications(getCenterId(req)));
+  })
+);
+
+router.get(
+  "/notifications/unread-count",
+  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"),
+  asyncHandler(async (req, res) => {
+    const count = await prisma.centerSystemAlert.count({
+      where: {
+        centerId: getCenterId(req),
+        isResolved: false
+      }
+    });
+
+    res.json({ count });
+  })
+);
+
+router.patch(
+  "/notifications/read-all",
+  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"),
+  asyncHandler(async (req, res) => {
+    const result = await prisma.centerSystemAlert.updateMany({
+      where: {
+        centerId: getCenterId(req),
+        isResolved: false
+      },
+      data: {
+        isResolved: true
+      }
+    });
+
+    res.json({ success: true, count: result.count });
+  })
+);
+
+router.patch(
+  "/notifications/:notificationId/read",
+  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"),
+  asyncHandler(async (req, res) => {
+    const notificationId = Number(req.params.notificationId);
+    const alert = await prisma.centerSystemAlert.findFirst({
+      where: {
+        id: notificationId,
+        centerId: getCenterId(req)
+      }
+    });
+
+    if (!alert) {
+      return res.status(404).json({ message: "الإشعار غير موجود داخل هذا المركز." });
+    }
+
+    const updated = await prisma.centerSystemAlert.update({
+      where: { id: alert.id },
+      data: { isResolved: true }
+    });
+
+    res.json(updated);
+  })
+);
+
+router.patch(
+  "/notifications/:notificationId/archive",
+  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"),
+  asyncHandler(async (req, res) => {
+    const notificationId = Number(req.params.notificationId);
+    const alert = await prisma.centerSystemAlert.findFirst({
+      where: {
+        id: notificationId,
+        centerId: getCenterId(req)
+      }
+    });
+
+    if (!alert) {
+      return res.status(404).json({ message: "الإشعار غير موجود داخل هذا المركز." });
+    }
+
+    const updated = await prisma.centerSystemAlert.update({
+      where: { id: alert.id },
+      data: { isResolved: true }
+    });
+
+    res.json(updated);
   })
 );
 

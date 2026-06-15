@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { authorize } from "../middleware/auth";
 import { recordAuditLog } from "../services/audit-log";
+import { notifyRole } from "../services/internal-notifications";
 import { syncCenterVisitsNow } from "../services/notification-processor";
 import {
   createPrescriptionVerificationCode,
@@ -227,6 +228,15 @@ router.post(
       }
     });
 
+    await notifyRole({
+      centerId,
+      role: "DOCTOR",
+      type: "QUEUE_STAGE_ASSIGNED",
+      title: "مريض بانتظار الطبيب",
+      message: `زيارة رقم ${visit.id} جاهزة للتقييم الطبي.`,
+      severity: payload.priority === "EMERGENCY" ? "WARNING" : "INFO"
+    });
+
     res.status(201).json(visit);
   })
 );
@@ -308,6 +318,17 @@ router.patch(
       }
     });
 
+    if (updated.prescriptions.length > 0) {
+      await notifyRole({
+        centerId,
+        role: "PHARMACIST",
+        type: "PRESCRIPTION_WAITING",
+        title: "وصفة بانتظار الصرف",
+        message: `زيارة رقم ${visitId} لديها وصفة دوائية بانتظار الصيدلية.`,
+        severity: "INFO"
+      });
+    }
+
     res.json(updated);
   })
 );
@@ -354,6 +375,50 @@ router.post(
       newValue: {
         invoiceId: result.invoice.id,
         amount: result.invoice.amount
+      }
+    });
+
+    res.json(result);
+  })
+);
+
+router.patch(
+  "/:visitId/cancel",
+  authorize("CENTER_MANAGER", "RECEPTIONIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = centerIdFromRequest(req);
+    const visitId = Number(req.params.visitId);
+    const visit = await requireVisit(centerId, visitId);
+
+    if (["COMPLETED", "UPLOADED"].includes(visit.workflowStatus) || visit.uploadStatus === "UPLOADED") {
+      return res.status(409).json({ message: "لا يمكن إلغاء زيارة مكتملة أو مرفوعة للنظام المركزي." });
+    }
+
+    const result = await prisma.localVisit.update({
+      where: { id: visitId },
+      data: {
+        workflowStatus: "CANCELLED",
+        uploadStatus: "NOT_READY",
+        completedAt: new Date()
+      },
+      include: {
+        patient: true,
+        doctor: { select: { id: true, fullName: true, role: true } },
+        prescriptions: true,
+        invoice: true
+      }
+    });
+
+    await recordAuditLog(req, {
+      action: "CANCEL_VISIT",
+      entityType: "LocalVisit",
+      entityId: visitId,
+      centerId,
+      oldValue: {
+        workflowStatus: visit.workflowStatus
+      },
+      newValue: {
+        workflowStatus: result.workflowStatus
       }
     });
 

@@ -2720,3 +2720,127 @@ textarea:focus-visible {
     justify-content: center;
   }
 }
+
+.button-row,
+.profile-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.danger-button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.9rem 1.2rem;
+  background: rgba(200, 79, 79, 0.12);
+  color: var(--danger);
+  font: inherit;
+  font-weight: 800;
+}
+
+.patient-qr-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 1.25rem;
+  align-items: stretch;
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(242, 249, 247, 0.92)),
+    var(--surface-strong);
+  box-shadow: var(--shadow);
+}
+
+.qr-card-main {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.qr-card-main h1 {
+  font-size: clamp(1.7rem, 4vw, 2.55rem);
+}
+
+.qr-detail-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.qr-card-code {
+  display: grid;
+  gap: 0.8rem;
+  place-items: center;
+  align-content: center;
+  padding: 1rem;
+  border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+}
+
+.qr-card-code img {
+  width: min(100%, 240px);
+  aspect-ratio: 1;
+  object-fit: contain;
+  border-radius: 12px;
+}
+
+.qr-token {
+  max-width: 100%;
+  direction: ltr;
+  overflow-wrap: anywhere;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.qr-card-code small {
+  color: var(--muted);
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .patient-qr-card {
+    grid-template-columns: 1fr;
+  }
+
+  .qr-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  body {
+    background: #ffffff;
+  }
+
+  .no-print,
+  .sidebar,
+  .topbar,
+  .notification-panel {
+    display: none !important;
+  }
+
+  .app-shell,
+  .content-grid {
+    display: block;
+  }
+
+  .content-area,
+  .page-panel {
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+    background: #ffffff;
+  }
+
+  .patient-qr-card {
+    box-shadow: none;
+    break-inside: avoid;
+  }
+}

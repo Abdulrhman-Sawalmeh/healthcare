@@ -253,6 +253,11 @@ export function PatientProfilePage() {
           <Link className="primary-button" to={`/patients/${bundle.patient.id}/timeline`}>
             فتح السجل الزمني
           </Link>
+          {user?.workspace === "center" ? (
+            <Link className="ghost-button" to={`/patients/${bundle.patient.id}/card`}>
+              بطاقة QR
+            </Link>
+          ) : null}
         </div>
       </div>
 

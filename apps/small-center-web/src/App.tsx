@@ -18,6 +18,7 @@ import { PatientMedicalRecordPage } from "./pages/PatientMedicalRecordPage";
 import { PatientMessagesPage } from "./pages/PatientMessagesPage";
 import { PatientNotificationsPage } from "./pages/PatientNotificationsPage";
 import { PatientProfilePage } from "./pages/PatientProfilePage";
+import { PatientQrCardPage } from "./pages/PatientQrCardPage";
 import { PatientTimelinePage } from "./pages/PatientTimelinePage";
 import { PatientsPage } from "./pages/PatientsPage";
 import { PrescriptionVerificationPage } from "./pages/PrescriptionVerificationPage";
@@ -166,6 +167,26 @@ export function App() {
               element={
                 <ProtectedRoute roles={["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]}>
                   <PatientProfilePage />
+                </ProtectedRoute>
+              }
+            />
+          ) : null}
+          {isRouteEnabled("/patients") ? (
+            <Route
+              path="/patients/:patientId/card"
+              element={
+                <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE", "LAB_TECH", "PHARMACIST"]}>
+                  <PatientQrCardPage />
+                </ProtectedRoute>
+              }
+            />
+          ) : null}
+          {isRouteEnabled("/patients") ? (
+            <Route
+              path="/patients/qr/:qrToken"
+              element={
+                <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE", "LAB_TECH", "PHARMACIST"]}>
+                  <PatientQrCardPage />
                 </ProtectedRoute>
               }
             />
