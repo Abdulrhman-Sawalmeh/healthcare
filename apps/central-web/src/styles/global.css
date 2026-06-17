@@ -2010,6 +2010,333 @@ a.ghost-button {
   gap: 0.45rem;
 }
 
+.analytics-page {
+  min-width: 0;
+}
+
+.analytics-filters {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.analytics-filters label {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.analytics-filters select,
+.analytics-filters input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  color: var(--text);
+  font: inherit;
+  font-weight: 800;
+  padding: 0.65rem 0.75rem;
+}
+
+.analytics-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.analytics-card {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+  min-height: 132px;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 14px 28px rgba(0, 78, 37, 0.08);
+}
+
+.analytics-card strong {
+  color: var(--text);
+  font-size: clamp(1.55rem, 2vw, 2.15rem);
+  line-height: 1;
+}
+
+.analytics-card span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.analytics-card.success {
+  border-color: rgba(15, 118, 110, 0.28);
+}
+
+.analytics-card.warning {
+  border-color: rgba(245, 158, 11, 0.34);
+}
+
+.analytics-card.danger {
+  border-color: rgba(220, 38, 38, 0.32);
+}
+
+.analytics-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.analytics-chart-card {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  padding: clamp(1rem, 2vw, 1.2rem);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 16px 34px rgba(0, 78, 37, 0.08);
+}
+
+.analytics-chart-card > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.analytics-chart-card h2,
+.health-events h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.05rem;
+}
+
+.analytics-chart-body,
+.analytics-chart-footer {
+  min-width: 0;
+}
+
+.analytics-chart-height {
+  width: 100%;
+  height: 280px;
+  min-width: 0;
+}
+
+.center-comparison {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(300px, 0.95fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.comparison-list,
+.health-center-list,
+.health-events,
+.limitations-list,
+.analytics-unavailable-list {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.comparison-row,
+.health-center-card {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(247, 251, 250, 0.74);
+}
+
+.comparison-row > div:first-child,
+.health-center-card .info-row {
+  min-width: 0;
+}
+
+.comparison-row strong,
+.health-center-card strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.comparison-row span,
+.health-center-card span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.comparison-meter {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(0, 99, 50, 0.1);
+}
+
+.comparison-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #0f766e);
+}
+
+.comparison-row dl,
+.health-center-card dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.health-center-card dl {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.comparison-row dt,
+.health-center-card dt {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.comparison-row dd,
+.health-center-card dd {
+  margin: 0;
+  color: var(--text);
+  font-weight: 900;
+}
+
+.analytics-mini-summary {
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+  gap: 0.5rem;
+  text-align: center;
+}
+
+.analytics-mini-summary strong {
+  color: var(--accent);
+  font-size: clamp(2.2rem, 6vw, 4rem);
+  line-height: 1;
+}
+
+.analytics-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.analytics-inline-metric {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.85rem;
+  border-block-start: 3px solid var(--accent);
+  background: rgba(247, 251, 250, 0.74);
+}
+
+.analytics-inline-metric.warning {
+  border-block-start-color: var(--warning);
+}
+
+.analytics-inline-metric.success {
+  border-block-start-color: var(--success);
+}
+
+.analytics-inline-metric strong {
+  color: var(--text);
+  font-size: 1.4rem;
+}
+
+.analytics-inline-metric span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.analytics-state,
+.analytics-empty-state {
+  display: grid;
+  gap: 0.45rem;
+  place-items: center;
+  min-height: 140px;
+  padding: 1.1rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(247, 251, 250, 0.86);
+  color: var(--muted);
+  text-align: center;
+}
+
+.analytics-state.error {
+  border-color: rgba(220, 38, 38, 0.28);
+  background: rgba(255, 246, 246, 0.9);
+}
+
+.analytics-state strong,
+.analytics-empty-state strong {
+  color: var(--text);
+}
+
+.system-health-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);
+  gap: 1rem;
+}
+
+.health-events section {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.analytics-table td,
+.analytics-table th {
+  white-space: normal;
+}
+
+@media (max-width: 1180px) {
+  .analytics-kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .analytics-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .center-comparison,
+  .system-health-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .analytics-section-grid,
+  .analytics-kpi-grid,
+  .analytics-filters,
+  .analytics-mini-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-chart-height {
+    height: 240px;
+  }
+
+  .comparison-row dl,
+  .health-center-card dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 640px) {
   .search-box.content-tools,
   .content-tools.search-box {

@@ -18,5 +18,8 @@
     "build": "npm run build --workspaces --if-present",
     "db:migrate": "npm --workspace @healthcare/central-api run db:migrate",
     "db:seed": "npm --workspace @healthcare/central-api run db:seed"
+  },
+  "dependencies": {
+    "react-is": "^18.3.1"
   }
 }

@@ -150,7 +150,7 @@ export function AppShell() {
               to={item.to}
               replace
               end={item.to === "/"}
-              className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+              className={({ isActive }: { isActive: boolean }) => (isActive ? "nav-link active" : "nav-link")}
             >
               {item.label}
             </NavLink>

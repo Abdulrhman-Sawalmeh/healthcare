@@ -46,6 +46,8 @@ const labelMap: Record<string, string> = {
   sent: "تم الإرسال",
   acknowledged: "تم الاستلام",
   completed: "مكتمل",
+  COMPLETED_OR_SYNCED: "مكتملة أو متزامنة",
+  INCOMPLETE_OR_PENDING_SYNC: "غير مكتملة أو بانتظار المزامنة",
   failed: "فشل",
   permanent_failure: "فشل نهائي",
   accepted: "مقبول",

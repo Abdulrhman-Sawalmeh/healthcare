@@ -5,6 +5,7 @@ import { isRouteEnabled } from "./config/system";
 import { useAuth } from "./context/AuthContext";
 import { AppShell } from "./layouts/AppShell";
 import { AuditLogsPage } from "./pages/AuditLogsPage";
+import { CentralAnalyticsDashboardPage } from "./pages/CentralAnalyticsDashboardPage";
 import { CentersPage } from "./pages/CentersPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LabPage } from "./pages/LabPage";
@@ -155,6 +156,16 @@ export function App() {
               element={
                 <ProtectedRoute roles={["CENTRAL_ADMIN"]}>
                   <MasterDataPage />
+                </ProtectedRoute>
+              }
+            />
+          ) : null}
+          {isRouteEnabled("/analytics") ? (
+            <Route
+              path="/analytics"
+              element={
+                <ProtectedRoute roles={["CENTRAL_ADMIN"]}>
+                  <CentralAnalyticsDashboardPage />
                 </ProtectedRoute>
               }
             />

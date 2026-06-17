@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { authorize, authorizeWorkspace, authenticate } from "../middleware/auth";
 import { recordAuditLog } from "../services/audit-log";
+import { getCentralAnalyticsDashboard } from "../services/central-analytics";
 import {
   enqueueCentralNotification,
   processAllQueues,
@@ -27,6 +28,14 @@ import { asyncHandler } from "../utils/async-handler";
 const router = Router();
 
 router.use(authenticate, authorizeWorkspace("central"), authorize("CENTRAL_ADMIN"));
+
+const analyticsQuerySchema = z.object({
+  startDate: z.coerce.date().optional(),
+  endDate: z.coerce.date().optional(),
+  centerId: z.coerce.number().int().positive().optional(),
+  departmentId: z.string().min(1).optional(),
+  doctorId: z.string().min(1).optional()
+});
 
 router.get(
   "/audit-logs",
@@ -198,6 +207,14 @@ router.get(
   "/dashboard",
   asyncHandler(async (_req, res) => {
     res.json(await getCentralDashboardData());
+  })
+);
+
+router.get(
+  "/analytics/dashboard",
+  asyncHandler(async (req, res) => {
+    const filters = analyticsQuerySchema.parse(req.query);
+    res.json(await getCentralAnalyticsDashboard(filters));
   })
 );
 

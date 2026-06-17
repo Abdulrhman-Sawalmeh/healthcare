@@ -370,6 +370,197 @@ export interface ReportSummary {
   }>;
 }
 
+export interface AnalyticsCountItem {
+  key: string;
+  count: number;
+}
+
+export interface AnalyticsDatePoint {
+  date: string;
+  count: number;
+}
+
+export interface AnalyticsMonthPoint {
+  month: string;
+  count: number;
+}
+
+export interface CentralAnalyticsDashboardData {
+  generatedAt: string;
+  filters: {
+    startDate: string;
+    endDate: string;
+    centerId?: number | null;
+    departmentId?: string | null;
+    doctorId?: string | null;
+    centers: Array<{
+      id: number;
+      code: string;
+      name: string;
+      type: string;
+    }>;
+    departments: Array<{
+      id: string;
+      name: string;
+      centerCode: string;
+      centerName: string;
+    }>;
+    doctors: Array<{
+      id: string;
+      name: string;
+      centerId?: number;
+      centerCode?: string;
+      source: string;
+    }>;
+  };
+  overview: {
+    totalPatients: number;
+    totalLocalPatientRecords: number;
+    totalVisits: number;
+    todaysVisits: number;
+    activeCenters: number;
+    pendingReferrals: number;
+    completedReferrals: number;
+    failedSyncOperations: number;
+    averageWaitingTime?: number | null;
+    patientsCurrentlyInQueue: number;
+    appointmentsToday: number;
+  };
+  centerComparison: Array<{
+    centerId: number;
+    code: string;
+    name: string;
+    type: string;
+    isConnected: boolean;
+    lastSyncAt?: string | null;
+    patientCount: number;
+    visitCount: number;
+    referralsSent: number;
+    referralsReceived: number;
+    averageWaitingTime?: number | null;
+    queueLoad?: number | null;
+    completedVisits: number;
+    incompleteOrPendingVisits: number;
+    cancelledVisits?: number | null;
+    labRequests: number;
+  }>;
+  visits: {
+    perDayLast7: AnalyticsDatePoint[];
+    perMonth: AnalyticsMonthPoint[];
+    byType: AnalyticsCountItem[];
+    completedVsIncomplete: AnalyticsCountItem[];
+    mostCommonReasons: AnalyticsCountItem[];
+    syncedVisits: number;
+    localVsReferred: AnalyticsUnavailableMetric;
+    averageVisitDuration: AnalyticsUnavailableMetric;
+    cancelledVisits: AnalyticsUnavailableMetric;
+  };
+  referrals: {
+    total: number;
+    pending: number;
+    accepted: number;
+    rejected: number;
+    completed: number;
+    inProgress: number;
+    cancelled: number;
+    acceptanceRate?: number | null;
+    statusBreakdown: AnalyticsCountItem[];
+    priorityBreakdown: AnalyticsCountItem[];
+    mostCommonReasons: AnalyticsCountItem[];
+    smallToMedium?: number | null;
+    byDoctor: AnalyticsUnavailableMetric;
+  };
+  appointments: {
+    total: number;
+    scheduled: number;
+    confirmed: number;
+    completed: number;
+    cancelled: number;
+    noShow: number;
+    statusBreakdown: AnalyticsCountItem[];
+    byDate: AnalyticsDatePoint[];
+    byDoctor: AnalyticsCountItem[];
+  };
+  queue: {
+    currentWaiting: number;
+    averageWaitingTime?: number | null;
+    longestWaitingPatient: AnalyticsUnavailableMetric;
+    bottleneckStage: AnalyticsUnavailableMetric;
+    patientsByStage: AnalyticsUnavailableMetric;
+    completedVisitsToday: number;
+    averageTimeByStage: AnalyticsUnavailableMetric;
+  };
+  lab: {
+    total: number;
+    pending: number;
+    inProgress: number;
+    completed: number;
+    cancelled: number;
+    mostRequestedTests: AnalyticsCountItem[];
+    averageCompletionMinutes?: number | null;
+    workloadByDay: AnalyticsDatePoint[];
+  };
+  pharmacy: {
+    totalPrescriptions: number;
+    pendingPrescriptions: number;
+    dispensedPrescriptions: number;
+    mostPrescribedMedicines: AnalyticsCountItem[];
+    workloadByDay: AnalyticsDatePoint[];
+    prescriptionsByDoctor: AnalyticsCountItem[];
+  };
+  staffWorkload: Array<{
+    doctorId: number;
+    doctorName: string;
+    centerId: number;
+    visits: number;
+    completedVisits: number;
+    labRequests: number;
+    prescriptions: number;
+    appointments?: number | null;
+    referrals?: number | null;
+  }>;
+  systemHealth: {
+    centers: Array<{
+      centerId: number;
+      code: string;
+      name: string;
+      isConnected: boolean;
+      lastSyncAt?: string | null;
+      failedSyncCount: number;
+      pendingSyncCount: number;
+      queueLoad?: number | null;
+      averageWaitingTime?: number | null;
+      legacyCenterId?: string | null;
+    }>;
+    failedSyncCount: number;
+    pendingSyncCount: number;
+    recentErrors: Array<{
+      id: string;
+      centerName: string;
+      centerCode: string;
+      message: string;
+      createdAt: string;
+      severity: string;
+    }>;
+    recentAlerts: Array<{
+      id: number;
+      centerName: string;
+      centerCode: string;
+      title: string;
+      message: string;
+      severity: string;
+      isResolved: boolean;
+      createdAt: string;
+    }>;
+  };
+  limitations: string[];
+}
+
+export interface AnalyticsUnavailableMetric {
+  available: false;
+  message: string;
+}
+
 export interface LabBundle {
   catalog: Array<{
     id: number;

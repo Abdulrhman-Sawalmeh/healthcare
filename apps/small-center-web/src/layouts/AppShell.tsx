@@ -360,7 +360,7 @@ export function AppShell() {
               to={item.to}
               replace
               end={item.to === "/"}
-              className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+              className={({ isActive }: { isActive: boolean }) => (isActive ? "nav-link active" : "nav-link")}
             >
               <span>{item.label}</span>
               {item.to === "/messages" && unreadMessageCount > 0 ? (
