@@ -32,6 +32,21 @@ type WorkflowVisit = {
     instructions?: string | null;
     dispensed?: boolean;
   }>;
+  resultReports?: Array<{
+    id: number;
+    title: string;
+    category: string;
+    summary: string;
+    reportUrl?: string | null;
+    shareWithPatient: boolean;
+    createdAt: string;
+    author: {
+      fullName: string;
+      doctorProfile?: {
+        specialization: string;
+      } | null;
+    };
+  }>;
 };
 
 type IntakeOptions = {
@@ -75,6 +90,23 @@ const visitTypeLabels: Record<string, string> = {
   LAB: "فحص"
 };
 
+const reportCategoryOptions = [
+  { value: "LAB", label: "نتائج المختبر" },
+  { value: "RADIOLOGY", label: "نتائج الأشعة" },
+  { value: "IMAGING", label: "صور طبية" },
+  { value: "GENERAL", label: "تقرير طبي" },
+  { value: "CARDIOLOGY", label: "قلب وتخطيط" },
+  { value: "MICROBIOLOGY", label: "زراعة ومختبر" },
+  { value: "PATHOLOGY", label: "أنسجة وخزعات" },
+  { value: "PROCEDURE", label: "إجراء طبي" }
+];
+
+const defaultReportLinkForm = {
+  title: "",
+  category: "LAB",
+  reportUrl: ""
+};
+
 function optionalNumber(value: FormDataEntryValue | null) {
   return value ? Number(value) : undefined;
 }
@@ -106,6 +138,18 @@ function statusClass(status: string) {
   return "neutral";
 }
 
+function reportCategoryLabel(category: string) {
+  return reportCategoryOptions.find((option) => option.value === category)?.label ?? category;
+}
+
+function patientNumber(visit: WorkflowVisit) {
+  return visit.patient.unifiedId || visit.patient.phone || `زيارة ${visit.id}`;
+}
+
+function reportDepartment(report: NonNullable<WorkflowVisit["resultReports"]>[number]) {
+  return report.author.doctorProfile?.specialization ?? reportCategoryLabel(report.category);
+}
+
 export function VisitWorkflowPage() {
   const { user } = useAuth();
   const role = user?.role;
@@ -117,6 +161,7 @@ export function VisitWorkflowPage() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [reportLinkForm, setReportLinkForm] = useState(defaultReportLinkForm);
 
   const canIntake = hasRole(role, ["CENTER_MANAGER", "RECEPTIONIST"]);
   const canAssess = hasRole(role, ["CENTER_MANAGER", "DOCTOR"]);
@@ -124,6 +169,9 @@ export function VisitWorkflowPage() {
     () => visits.find((visit) => visit.id === selectedVisitId) ?? null,
     [selectedVisitId, visits]
   );
+
+  const canAddReportLink =
+    Boolean(selectedVisit?.diagnosis) && selectedVisit?.diagnosis !== "بانتظار تقييم الطبيب";
 
   const loadVisits = useCallback(async () => {
     const query = status ? `?status=${encodeURIComponent(status)}` : "";
@@ -245,6 +293,42 @@ export function VisitWorkflowPage() {
         }),
       "تم حفظ تقييم الطبيب."
     );
+  }
+
+  function submitReportLink(event: FormEvent<HTMLFormElement>, visitId: number) {
+    event.preventDefault();
+
+    if (!reportLinkForm.title.trim() || !reportLinkForm.reportUrl.trim()) {
+      setError("أدخل عنوان التقرير ورابط التقرير قبل الحفظ.");
+      return;
+    }
+
+    try {
+      const reportUrl = new URL(reportLinkForm.reportUrl.trim());
+      if (!["http:", "https:"].includes(reportUrl.protocol)) {
+        throw new Error("Invalid protocol");
+      }
+    } catch {
+      setError("أدخل رابط تقرير صالح يبدأ بـ http أو https.");
+      return;
+    }
+
+    void runAction(
+      visitId,
+      () =>
+        apiRequest(`/center/visit-workflow/${visitId}/report-link`, {
+          method: "POST",
+          body: JSON.stringify({
+            title: reportLinkForm.title.trim(),
+            category: reportLinkForm.category,
+            reportUrl: reportLinkForm.reportUrl.trim(),
+            shareWithPatient: true
+          })
+        }),
+      "تم إرسال التقرير للمريض."
+    ).then(() => {
+      setReportLinkForm(defaultReportLinkForm);
+    });
   }
 
   return (
@@ -469,6 +553,111 @@ export function VisitWorkflowPage() {
                   </button>
                 </form>
               ) : null}
+            </article>
+
+            <article className="visit-file-section">
+              <header className="section-header">
+                <div>
+                  <h3>روابط التقارير الطبية</h3>
+                  <p className="muted">بعد حفظ تقييم الطبيب، أضف رابط التقرير الخارجي ليظهر للمريض ويفتح في صفحة جديدة.</p>
+                </div>
+              </header>
+              {!canAddReportLink && canAssess ? (
+                <div className="inline-note">احفظ تقييم الطبيب أولاً، ثم أضف رابط التقرير الخارجي للمريض.</div>
+              ) : null}
+              <form onSubmit={(event) => submitReportLink(event, selectedVisit.id)}>
+                <div className="table-shell">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>رقم المريض</th>
+                        <th>اسم المريض</th>
+                        <th>اسم الطبيب</th>
+                        <th>اسم القسم</th>
+                        <th>تاريخ الطلب</th>
+                        <th>نوع التقرير</th>
+                        <th>رابط التقرير</th>
+                        <th>الإجراء</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {canAssess && canAddReportLink ? (
+                        <tr>
+                          <td>{patientNumber(selectedVisit)}</td>
+                          <td>{selectedVisit.patient.fullName}</td>
+                          <td>{selectedVisit.doctor?.fullName ?? user?.fullName ?? "الطبيب الحالي"}</td>
+                          <td>{reportCategoryLabel(reportLinkForm.category)}</td>
+                          <td>{formatDate(selectedVisit.visitDate)}</td>
+                          <td>
+                            <select
+                              value={reportLinkForm.category}
+                              onChange={(event) =>
+                                setReportLinkForm((current) => ({ ...current, category: event.target.value }))
+                              }
+                            >
+                              {reportCategoryOptions.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              value={reportLinkForm.title}
+                              onChange={(event) =>
+                                setReportLinkForm((current) => ({ ...current, title: event.target.value }))
+                              }
+                              placeholder="عنوان التقرير"
+                              required
+                            />
+                          </td>
+                          <td>
+                            <input
+                              dir="ltr"
+                              type="url"
+                              value={reportLinkForm.reportUrl}
+                              onChange={(event) =>
+                                setReportLinkForm((current) => ({ ...current, reportUrl: event.target.value }))
+                              }
+                              placeholder="https://example.com/report.pdf"
+                              required
+                            />
+                          </td>
+                          <td>
+                            <button className="primary-button" disabled={busyId === selectedVisit.id} type="submit">
+                              حفظ الرابط
+                            </button>
+                          </td>
+                        </tr>
+                      ) : null}
+                      {selectedVisit.resultReports?.map((report) => (
+                        <tr key={report.id}>
+                          <td>{patientNumber(selectedVisit)}</td>
+                          <td>{selectedVisit.patient.fullName}</td>
+                          <td>{report.author.fullName}</td>
+                          <td>{reportDepartment(report)}</td>
+                          <td>{formatDate(report.createdAt)}</td>
+                          <td>{report.title}</td>
+                          <td>
+                            {report.reportUrl ? (
+                              <a href={report.reportUrl} rel="noreferrer" target="_blank">
+                                فتح التقرير
+                              </a>
+                            ) : (
+                              "لا يوجد رابط"
+                            )}
+                          </td>
+                          <td>{report.shareWithPatient ? "ظاهر للمريض" : "داخلي"}</td>
+                        </tr>
+                      ))}
+                      {(selectedVisit.resultReports?.length ?? 0) === 0 && (!canAssess || !canAddReportLink) ? (
+                        <tr>
+                          <td colSpan={8}>لا توجد روابط تقارير محفوظة لهذا الملف.</td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </form>
             </article>
 
             <article className="visit-file-section">

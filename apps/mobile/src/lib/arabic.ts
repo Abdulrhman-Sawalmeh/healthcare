@@ -57,6 +57,14 @@ export const statusLabels: Record<string, string> = {
   UPDATE_PATIENT: "تحديث مريض",
   VERIFY_PRESCRIPTION: "تحقق من وصفة",
   CREATE_REFERRAL: "إنشاء إحالة"
+  ,REQUESTED: "طلب جديد",
+  DOCTOR_APPROVED: "وافق الطبيب",
+  PHARMACY_PREPARING: "قيد التجهيز",
+  READY_FOR_PICKUP: "جاهز للاستلام",
+  COLLECTED: "تم الاستلام",
+  REJECTED: "مرفوض",
+  DONE: "منجز",
+  MISSED: "فائت"
 };
 
 export const appointmentTypeLabels: Record<string, string> = {

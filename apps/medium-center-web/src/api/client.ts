@@ -8,7 +8,8 @@ let accessToken = localStorage.getItem(STORAGE_KEY);
 export class ApiError extends Error {
   constructor(
     message: string,
-    public status: number
+    public status: number,
+    public payload?: unknown
   ) {
     super(message);
   }
@@ -42,15 +43,44 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   if (!response.ok) {
     let message = "تعذر تنفيذ الطلب.";
 
+    let payload: unknown;
+
     try {
-      const payload = (await response.json()) as { message?: string };
-      message = payload.message ?? message;
+      payload = await response.json();
+      message = (payload as { message?: string }).message ?? message;
     } catch {
       message = response.statusText || message;
     }
 
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, payload);
   }
 
   return response.json() as Promise<T>;
+}
+
+export async function apiDownload(path: string, options: RequestInit = {}) {
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    credentials: "omit",
+    headers: {
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      ...(options.headers ?? {})
+    }
+  });
+
+  if (!response.ok) {
+    let message = "Unable to download the requested file.";
+    let payload: unknown;
+
+    try {
+      payload = await response.json();
+      message = (payload as { message?: string }).message ?? message;
+    } catch {
+      message = response.statusText || message;
+    }
+
+    throw new ApiError(message, response.status, payload);
+  }
+
+  return response.blob();
 }

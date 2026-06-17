@@ -184,6 +184,8 @@ export type PatientTimelineEventType =
   | "prescription"
   | "lab_result"
   | "referral"
+  | "refill_request"
+  | "follow_up"
   | "note";
 
 export interface PatientTimelineEvent {
@@ -194,6 +196,108 @@ export interface PatientTimelineEvent {
   date: string;
   createdBy: string;
   sourceTable: string;
+  status?: string;
+  source?: string;
+}
+
+export type MedicationRefillStatus =
+  | "REQUESTED"
+  | "DOCTOR_APPROVED"
+  | "PHARMACY_PREPARING"
+  | "READY_FOR_PICKUP"
+  | "COLLECTED"
+  | "REJECTED";
+
+export interface MedicationRefillRequestRecord {
+  id: number;
+  centerId: number;
+  patientId: number;
+  patientName: string;
+  patientUnifiedId?: string | null;
+  prescriptionId: number;
+  medicineName: string;
+  dosage: string;
+  duration: string;
+  instructions?: string | null;
+  visitId: number;
+  visitDate: string;
+  doctorId?: number | null;
+  doctorName?: string | null;
+  pharmacyUserId?: number | null;
+  pharmacyUserName?: string | null;
+  requestedAt: string;
+  status: MedicationRefillStatus;
+  rejectionReason?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EligiblePrescriptionRecord {
+  id: number;
+  visitId: number;
+  medicineName: string;
+  dosage: string;
+  duration: string;
+  instructions?: string | null;
+  issuedAt: string;
+  dispensed: boolean;
+  doctorId?: number | null;
+  doctorName?: string | null;
+  visitDate: string;
+  latestRefillStatus?: MedicationRefillStatus | null;
+}
+
+export type FollowUpReminderStatus = "PENDING" | "DONE" | "CANCELLED" | "MISSED";
+
+export type PatientConsentTargetType = "DOCTOR" | "CENTER";
+export type PatientConsentScope = "BASIC_INFO" | "VISITS" | "LAB_RESULTS" | "PRESCRIPTIONS" | "FULL_SUMMARY";
+export type PatientConsentStatus = "ACTIVE" | "REVOKED" | "EXPIRED";
+
+export interface ConsentTargetOption {
+  id: string;
+  label: string;
+  subtitle?: string | null;
+}
+
+export interface ConsentTargetsBundle {
+  centers: ConsentTargetOption[];
+  doctors: ConsentTargetOption[];
+}
+
+export interface PatientConsentRecord {
+  id: number;
+  patientId: number;
+  targetType: PatientConsentTargetType;
+  targetId: string;
+  targetLabel?: string | null;
+  scope: PatientConsentScope;
+  status: PatientConsentStatus;
+  expiresAt: string;
+  revokedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FollowUpReminderRecord {
+  id: number;
+  centerId: number;
+  patientId: number;
+  patientName: string;
+  patientUnifiedId?: string | null;
+  doctorId: number;
+  doctorName: string;
+  visitId?: number | null;
+  visitSummary?: string | null;
+  visitDate?: string | null;
+  dueDate: string;
+  reason: string;
+  status: FollowUpReminderStatus;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+  cancelledAt?: string | null;
 }
 
 export interface PatientTimelineBundle {
@@ -218,10 +322,14 @@ export interface PatientTimelineBundle {
     visitCount: number;
     labResultsCount: number;
     referralCount: number;
+    refillRequestCount?: number;
+    followUpReminderCount?: number;
     timelineCount: number;
     lastEventAt?: string | null;
   };
   events: PatientTimelineEvent[];
+  refillRequests?: MedicationRefillRequestRecord[];
+  followUpReminders?: FollowUpReminderRecord[];
 }
 
 export interface CenterDoctorAccountRecord {
@@ -350,6 +458,7 @@ export interface PortalClinicalReportRecord {
   notes?: string | null;
   source: "APPOINTMENT" | "RESULT_REPORT";
   summary?: string | null;
+  reportUrl?: string | null;
   findings?: string | null;
   recommendations?: string | null;
   recommendedFollowUp?: string | null;
@@ -537,6 +646,9 @@ export interface PortalMedicalRecord {
   upcomingAppointments: AppointmentItem[];
   referrals: PortalReferralRecord[];
   subscriptions: SubscriptionRecord[];
+  medicationRefills?: MedicationRefillRequestRecord[];
+  eligiblePrescriptions?: EligiblePrescriptionRecord[];
+  followUpReminders?: FollowUpReminderRecord[];
 }
 
 export interface VisitRecord {
@@ -574,6 +686,7 @@ export interface LocalVisitReportRecord {
   title: string;
   category: string;
   summary: string;
+  reportUrl?: string | null;
   findings?: string | null;
   recommendations?: string | null;
   recommendedFollowUp?: string | null;

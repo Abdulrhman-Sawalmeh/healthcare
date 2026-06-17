@@ -1,8 +1,10 @@
+import { Prisma } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
 
 import { prisma } from "../lib/prisma";
 import { authorize, authorizeWorkspace, authenticate } from "../middleware/auth";
+import { AppError } from "../middleware/error";
 import { recordAuditLog } from "../services/audit-log";
 import {
   createCenterDoctor,
@@ -15,6 +17,14 @@ import {
   processOutgoingNotifications,
   syncCenterVisitsNow
 } from "../services/notification-processor";
+import { notifyRole } from "../services/internal-notifications";
+import {
+  activeRefillStatuses,
+  followUpReminderInclude,
+  mapFollowUpReminder,
+  mapMedicationRefillRequest,
+  refillRequestInclude
+} from "../services/patient-care-workflow";
 import {
   getCenterLabData,
   getCenterNotifications,
@@ -29,6 +39,12 @@ import {
   createPrescriptionVerificationCode,
   hashPrescriptionVerificationCode
 } from "../services/prescription-verification";
+import {
+  checkPrescriptionSafety,
+  savePrescriptionWarnings,
+  validatePrescriptionSafetyOverride
+} from "../services/prescription-safety";
+import { notifyLocalPatient, notifyPatientAboutResultReport } from "../services/result-report-notifications";
 import {
   buildPatientQrImageUrl,
   buildPatientQrValue,
@@ -46,6 +62,26 @@ router.use("/queue", visitWorkflowRouter);
 
 function getCenterId(req: Parameters<typeof asyncHandler>[0] extends never ? never : any) {
   return Number(req.auth?.centerId);
+}
+
+function getActorCenterUserId(req: Parameters<typeof asyncHandler>[0] extends never ? never : any) {
+  const actorId = Number(req.auth?.sub);
+
+  if (!Number.isInteger(actorId) || actorId <= 0) {
+    throw new AppError("Center user session is invalid.", 401);
+  }
+
+  return actorId;
+}
+
+function parsePositiveParam(value: string | string[] | undefined, label: string) {
+  const parsed = Number(Array.isArray(value) ? value[0] : value);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new AppError(`${label} must be a positive integer.`, 400);
+  }
+
+  return parsed;
 }
 
 type PatientCardRecord = Awaited<ReturnType<typeof getPatientCardRecord>>;
@@ -136,7 +172,9 @@ const visitSchema = z.object({
         instructions: z.string().optional()
       })
     )
-    .default([])
+    .default([]),
+  overridePrescriptionWarnings: z.boolean().optional(),
+  overrideReason: z.string().trim().optional()
 });
 
 const reportAttachmentSchema = z.object({
@@ -144,6 +182,14 @@ const reportAttachmentSchema = z.object({
   mimeType: z.string().min(3),
   contentBase64: z.string().min(1)
 });
+
+const reportUrlSchema = z
+  .string()
+  .trim()
+  .url("أدخل رابط تقرير صالح يبدأ بـ http أو https.")
+  .refine((value) => ["http:", "https:"].includes(new URL(value).protocol), {
+    message: "أدخل رابط تقرير صالح يبدأ بـ http أو https."
+  });
 
 const reportSchema = z.object({
   title: z.string().min(2),
@@ -161,7 +207,8 @@ const reportSchema = z.object({
       "DISCHARGE"
     ])
     .default("GENERAL"),
-  summary: z.string().min(2),
+  reportUrl: reportUrlSchema,
+  summary: z.string().trim().optional(),
   findings: z.string().optional(),
   recommendations: z.string().optional(),
   recommendedFollowUp: z.string().optional(),
@@ -193,6 +240,54 @@ const labResultSchema = z.object({
   status: z.enum(["PENDING", "IN_PROGRESS", "COMPLETED", "CANCELLED"]),
   resultValue: z.string().optional()
 });
+
+const medicationRefillStatusValues = [
+  "REQUESTED",
+  "DOCTOR_APPROVED",
+  "PHARMACY_PREPARING",
+  "READY_FOR_PICKUP",
+  "COLLECTED",
+  "REJECTED"
+] as const;
+
+const followUpReminderStatusValues = ["PENDING", "DONE", "CANCELLED", "MISSED"] as const;
+
+const refillDecisionSchema = z.discriminatedUnion("decision", [
+  z.object({
+    decision: z.literal("APPROVE"),
+    notes: z.string().trim().max(500).optional()
+  }),
+  z.object({
+    decision: z.literal("REJECT"),
+    rejectionReason: z.string().trim().min(3).max(500),
+    notes: z.string().trim().max(500).optional()
+  })
+]);
+
+const refillPharmacyStatusSchema = z.object({
+  status: z.enum(["PHARMACY_PREPARING", "READY_FOR_PICKUP", "COLLECTED"]),
+  notes: z.string().trim().max(500).optional()
+});
+
+const followUpReminderSchema = z.object({
+  patientId: z.coerce.number().int().positive(),
+  doctorId: z.coerce.number().int().positive().optional(),
+  visitId: z.coerce.number().int().positive().optional(),
+  dueDate: z.coerce.date(),
+  reason: z.string().trim().min(3).max(500),
+  notes: z.string().trim().max(1000).optional()
+});
+
+const followUpReminderUpdateSchema = z
+  .object({
+    status: z.enum(["PENDING", "DONE", "CANCELLED", "MISSED"]).optional(),
+    dueDate: z.coerce.date().optional(),
+    reason: z.string().trim().min(3).max(500).optional(),
+    notes: z.string().trim().max(1000).optional()
+  })
+  .refine((payload) => Object.keys(payload).length > 0, {
+    message: "At least one reminder field must be provided."
+  });
 
 const doctorAccountSchema = z.object({
   username: z.string().optional(),
@@ -813,44 +908,67 @@ router.post(
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const payload = visitSchema.parse(req.body);
-
-    const visit = await prisma.localVisit.create({
-      data: {
-        centerId,
-        patientId: payload.patientId,
-        doctorId:
-          payload.doctorId ??
-          (req.auth?.role === "DOCTOR" ? Number(req.auth.sub) : undefined),
-        visitDate: payload.visitDate,
-        visitTime: payload.visitTime,
-        visitType: payload.visitType,
-        symptoms: payload.symptoms,
-        bloodPressure: payload.bloodPressure,
-        temperature: payload.temperature,
-        heartRate: payload.heartRate,
-        diagnosis: payload.diagnosis,
-        notes: payload.notes,
-        syncState: "PENDING"
-      }
+    const safetyWarnings = await checkPrescriptionSafety({
+      centerId,
+      patientId: payload.patientId,
+      prescriptions: payload.prescriptions.map((prescription) => ({
+        medicineName: prescription.medicineName
+      }))
     });
 
-    if (payload.prescriptions.length > 0) {
-      await prisma.localPrescription.createMany({
-        data: payload.prescriptions.map((prescription, index) => {
-          const verificationCode = createPrescriptionVerificationCode(centerId, visit.id, index);
+    validatePrescriptionSafetyOverride({
+      warnings: safetyWarnings,
+      overrideWarnings: payload.overridePrescriptionWarnings,
+      overrideReason: payload.overrideReason
+    });
 
-          return {
-            visitId: visit.id,
+    const visit = await prisma.$transaction(async (tx) => {
+      const createdVisit = await tx.localVisit.create({
+        data: {
+          centerId,
+          patientId: payload.patientId,
+          doctorId:
+            payload.doctorId ??
+            (req.auth?.role === "DOCTOR" ? Number(req.auth.sub) : undefined),
+          visitDate: payload.visitDate,
+          visitTime: payload.visitTime,
+          visitType: payload.visitType,
+          symptoms: payload.symptoms,
+          bloodPressure: payload.bloodPressure,
+          temperature: payload.temperature,
+          heartRate: payload.heartRate,
+          diagnosis: payload.diagnosis,
+          notes: payload.notes,
+          syncState: "PENDING"
+        }
+      });
+
+      for (const [index, prescription] of payload.prescriptions.entries()) {
+        const verificationCode = createPrescriptionVerificationCode(centerId, createdVisit.id, index);
+        const createdPrescription = await tx.localPrescription.create({
+          data: {
+            visitId: createdVisit.id,
             medicineName: prescription.medicineName,
             dosage: prescription.dosage,
             duration: prescription.duration,
             instructions: prescription.instructions,
             verificationCode,
             verificationHash: hashPrescriptionVerificationCode(verificationCode)
-          };
-        })
-      });
-    }
+          }
+        });
+
+        await savePrescriptionWarnings(tx, {
+          patientId: payload.patientId,
+          prescriptionId: createdPrescription.id,
+          prescriptionIndex: index,
+          warnings: safetyWarnings,
+          overridden: Boolean(payload.overridePrescriptionWarnings),
+          overrideReason: payload.overrideReason
+        });
+      }
+
+      return createdVisit;
+    });
 
     await recordAuditLog(req, {
       action: "CREATE_VISIT",
@@ -892,6 +1010,8 @@ router.post(
       return res.status(404).json({ message: "تعذر العثور على الزيارة المطلوبة داخل هذا المركز." });
     }
 
+    const reportSummary = payload.summary?.trim() || "رابط التقرير متاح للمريض.";
+
     const report = await prisma.localResultReport.create({
       data: {
         centerId,
@@ -900,7 +1020,8 @@ router.post(
         authorId: Number(req.auth?.sub),
         title: payload.title,
         category: payload.category,
-        summary: payload.summary,
+        summary: reportSummary,
+        reportUrl: payload.reportUrl,
         findings: payload.findings,
         recommendations: payload.recommendations,
         recommendedFollowUp: payload.recommendedFollowUp,
@@ -920,8 +1041,17 @@ router.post(
         visitId: visit.id,
         patientId: visit.patientId,
         category: report.category,
+        reportUrl: report.reportUrl,
         shareWithPatient: report.shareWithPatient
       }
+    });
+
+    await notifyPatientAboutResultReport({
+      centerId,
+      patientId: visit.patientId,
+      reportTitle: report.title,
+      reportUrl: report.reportUrl,
+      shareWithPatient: report.shareWithPatient
     });
 
     res.status(201).json(report);
@@ -949,6 +1079,8 @@ router.put(
       return res.status(404).json({ message: "تعذر العثور على تقرير النتائج المطلوب." });
     }
 
+    const reportSummary = payload.summary?.trim() || "رابط التقرير متاح للمريض.";
+
     const report = await prisma.localResultReport.update({
       where: {
         id: reportId
@@ -956,7 +1088,8 @@ router.put(
       data: {
         title: payload.title,
         category: payload.category,
-        summary: payload.summary,
+        summary: reportSummary,
+        reportUrl: payload.reportUrl,
         findings: payload.findings,
         recommendations: payload.recommendations,
         recommendedFollowUp: payload.recommendedFollowUp,
@@ -975,14 +1108,30 @@ router.put(
       oldValue: {
         title: existingReport.title,
         category: existingReport.category,
+        reportUrl: existingReport.reportUrl,
         shareWithPatient: existingReport.shareWithPatient
       },
       newValue: {
         title: report.title,
         category: report.category,
+        reportUrl: report.reportUrl,
         shareWithPatient: report.shareWithPatient
       }
     });
+
+    if (
+      report.shareWithPatient &&
+      report.reportUrl &&
+      (!existingReport.shareWithPatient || existingReport.reportUrl !== report.reportUrl)
+    ) {
+      await notifyPatientAboutResultReport({
+        centerId,
+        patientId: existingReport.patientId,
+        reportTitle: report.title,
+        reportUrl: report.reportUrl,
+        shareWithPatient: report.shareWithPatient
+      });
+    }
 
     res.json(report);
   })
@@ -1023,6 +1172,486 @@ router.delete(
         title: existingReport.title,
         category: existingReport.category,
         shareWithPatient: existingReport.shareWithPatient
+      }
+    });
+
+    res.status(204).send();
+  })
+);
+
+router.get(
+  "/refill-requests",
+  authorize("CENTER_MANAGER", "DOCTOR", "PHARMACIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const patientId = typeof req.query.patientId === "string" ? Number(req.query.patientId) : undefined;
+    const requestedStatus = typeof req.query.status === "string" ? req.query.status : undefined;
+    const where: Prisma.MedicationRefillRequestWhereInput = {
+      centerId
+    };
+
+    if (patientId) {
+      where.patientId = patientId;
+    }
+
+    if (requestedStatus) {
+      if (!medicationRefillStatusValues.includes(requestedStatus as (typeof medicationRefillStatusValues)[number])) {
+        throw new AppError("Medication refill status is not supported.", 400);
+      }
+
+      where.status = requestedStatus as (typeof medicationRefillStatusValues)[number];
+    }
+
+    if (req.auth?.role === "DOCTOR") {
+      const actorId = getActorCenterUserId(req);
+      where.OR = [
+        {
+          doctorId: actorId
+        },
+        {
+          prescription: {
+            visit: {
+              doctorId: actorId
+            }
+          }
+        }
+      ];
+    }
+
+    const requests = await prisma.medicationRefillRequest.findMany({
+      where,
+      include: refillRequestInclude,
+      orderBy: {
+        requestedAt: "desc"
+      }
+    });
+
+    res.json(requests.map(mapMedicationRefillRequest));
+  })
+);
+
+router.patch(
+  "/refill-requests/:requestId/doctor",
+  authorize("CENTER_MANAGER", "DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const requestId = parsePositiveParam(req.params.requestId, "Refill request ID");
+    const payload = refillDecisionSchema.parse(req.body);
+    const request = await prisma.medicationRefillRequest.findFirst({
+      where: {
+        id: requestId,
+        centerId
+      },
+      include: refillRequestInclude
+    });
+
+    if (!request) {
+      throw new AppError("Medication refill request was not found in this center.", 404);
+    }
+
+    if (request.status !== "REQUESTED") {
+      throw new AppError("Only requested refills can be approved or rejected by the doctor.", 409);
+    }
+
+    if (
+      req.auth?.role === "DOCTOR" &&
+      request.prescription.visit.doctorId &&
+      request.prescription.visit.doctorId !== actorId
+    ) {
+      throw new AppError("You can only manage refill requests for your own patients.", 403);
+    }
+
+    const updated = await prisma.medicationRefillRequest.update({
+      where: {
+        id: request.id
+      },
+      data:
+        payload.decision === "APPROVE"
+          ? {
+              status: "DOCTOR_APPROVED",
+              doctorId: actorId,
+              notes: payload.notes
+            }
+          : {
+              status: "REJECTED",
+              doctorId: actorId,
+              rejectionReason: payload.rejectionReason,
+              notes: payload.notes
+            },
+      include: refillRequestInclude
+    });
+
+    await notifyLocalPatient({
+      centerId,
+      patientId: request.patientId,
+      title: payload.decision === "APPROVE" ? "تمت الموافقة على تجديد الدواء" : "تم رفض طلب تجديد الدواء",
+      body:
+        payload.decision === "APPROVE"
+          ? `وافق الطبيب على تجديد وصفة ${request.prescription.medicineName}. سيتم تجهيزها في الصيدلية.`
+          : `تم رفض تجديد وصفة ${request.prescription.medicineName}. ${payload.rejectionReason}`,
+      type: "SYSTEM"
+    });
+
+    if (payload.decision === "APPROVE") {
+      await notifyRole({
+        centerId,
+        role: "PHARMACIST",
+        type: "MEDICATION_REFILL_APPROVED",
+        title: "تجديد دواء جاهز للصيدلية",
+        message: `${request.patient.fullName} لديه وصفة ${request.prescription.medicineName} معتمدة للتجهيز.`
+      });
+    }
+
+    await recordAuditLog(req, {
+      action: payload.decision === "APPROVE" ? "APPROVE_REFILL_REQUEST" : "REJECT_REFILL_REQUEST",
+      entityType: "MedicationRefillRequest",
+      entityId: request.id,
+      centerId,
+      oldValue: {
+        status: request.status
+      },
+      newValue: {
+        status: updated.status,
+        prescriptionId: updated.prescriptionId
+      }
+    });
+
+    res.json(mapMedicationRefillRequest(updated));
+  })
+);
+
+router.patch(
+  "/refill-requests/:requestId/status",
+  authorize("CENTER_MANAGER", "PHARMACIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const requestId = parsePositiveParam(req.params.requestId, "Refill request ID");
+    const payload = refillPharmacyStatusSchema.parse(req.body);
+    const request = await prisma.medicationRefillRequest.findFirst({
+      where: {
+        id: requestId,
+        centerId
+      },
+      include: refillRequestInclude
+    });
+
+    if (!request) {
+      throw new AppError("Medication refill request was not found in this center.", 404);
+    }
+
+    const allowedNextStatuses: Record<string, string[]> = {
+      DOCTOR_APPROVED: ["PHARMACY_PREPARING"],
+      PHARMACY_PREPARING: ["READY_FOR_PICKUP"],
+      READY_FOR_PICKUP: ["COLLECTED"]
+    };
+    const allowed = allowedNextStatuses[request.status] ?? [];
+
+    if (request.status !== payload.status && !allowed.includes(payload.status)) {
+      throw new AppError("Medication refill status transition is not allowed.", 409);
+    }
+
+    const updated = await prisma.medicationRefillRequest.update({
+      where: {
+        id: request.id
+      },
+      data: {
+        status: payload.status,
+        pharmacyUserId: actorId,
+        notes: payload.notes ?? request.notes
+      },
+      include: refillRequestInclude
+    });
+
+    if (payload.status === "READY_FOR_PICKUP" || payload.status === "COLLECTED") {
+      await notifyLocalPatient({
+        centerId,
+        patientId: request.patientId,
+        title: payload.status === "READY_FOR_PICKUP" ? "الدواء جاهز للاستلام" : "تم استلام الدواء",
+        body:
+          payload.status === "READY_FOR_PICKUP"
+            ? `وصفة ${request.prescription.medicineName} جاهزة للاستلام من الصيدلية.`
+            : `تم تحديث وصفة ${request.prescription.medicineName} كدواء مستلم.`,
+        type: "SYSTEM"
+      });
+    }
+
+    await recordAuditLog(req, {
+      action: "UPDATE_REFILL_STATUS",
+      entityType: "MedicationRefillRequest",
+      entityId: request.id,
+      centerId,
+      oldValue: {
+        status: request.status
+      },
+      newValue: {
+        status: updated.status,
+        pharmacyUserId: actorId
+      }
+    });
+
+    res.json(mapMedicationRefillRequest(updated));
+  })
+);
+
+router.get(
+  "/follow-up-reminders",
+  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const patientId = typeof req.query.patientId === "string" ? Number(req.query.patientId) : undefined;
+    const requestedStatus = typeof req.query.status === "string" ? req.query.status : undefined;
+    const where: Prisma.FollowUpReminderWhereInput = {
+      centerId
+    };
+
+    if (patientId) {
+      where.patientId = patientId;
+    }
+
+    if (requestedStatus) {
+      if (!followUpReminderStatusValues.includes(requestedStatus as (typeof followUpReminderStatusValues)[number])) {
+        throw new AppError("Follow-up reminder status is not supported.", 400);
+      }
+
+      where.status = requestedStatus as (typeof followUpReminderStatusValues)[number];
+    }
+
+    if (req.auth?.role === "DOCTOR") {
+      where.doctorId = getActorCenterUserId(req);
+    }
+
+    const reminders = await prisma.followUpReminder.findMany({
+      where,
+      include: followUpReminderInclude,
+      orderBy: [
+        {
+          dueDate: "asc"
+        },
+        {
+          createdAt: "desc"
+        }
+      ]
+    });
+
+    res.json(reminders.map(mapFollowUpReminder));
+  })
+);
+
+router.post(
+  "/follow-up-reminders",
+  authorize("CENTER_MANAGER", "DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const payload = followUpReminderSchema.parse(req.body);
+    const patient = await prisma.localPatient.findFirst({
+      where: {
+        id: payload.patientId,
+        centerId
+      }
+    });
+
+    if (!patient) {
+      throw new AppError("Patient was not found in this center.", 404);
+    }
+
+    const doctorId = req.auth?.role === "DOCTOR" ? actorId : payload.doctorId ?? actorId;
+    const doctor = await prisma.centerUserAccount.findFirst({
+      where: {
+        id: doctorId,
+        centerId,
+        role: "DOCTOR",
+        isActive: true
+      }
+    });
+
+    if (!doctor) {
+      throw new AppError("A valid doctor account is required for follow-up reminders.", 400);
+    }
+
+    const visit = payload.visitId
+      ? await prisma.localVisit.findFirst({
+          where: {
+            id: payload.visitId,
+            centerId,
+            patientId: payload.patientId
+          }
+        })
+      : null;
+
+    if (payload.visitId && !visit) {
+      throw new AppError("Visit was not found for this patient in this center.", 404);
+    }
+
+    if (req.auth?.role === "DOCTOR") {
+      const hasDoctorVisit = visit
+        ? visit.doctorId === actorId
+        : await prisma.localVisit.findFirst({
+            where: {
+              centerId,
+              patientId: patient.id,
+              doctorId: actorId
+            },
+            select: {
+              id: true
+            }
+          });
+
+      if (!hasDoctorVisit) {
+        throw new AppError("You can only create follow-up reminders for your own patients.", 403);
+      }
+    }
+
+    const reminder = await prisma.followUpReminder.create({
+      data: {
+        centerId,
+        patientId: patient.id,
+        doctorId,
+        visitId: visit?.id,
+        dueDate: payload.dueDate,
+        reason: payload.reason,
+        notes: payload.notes
+      },
+      include: followUpReminderInclude
+    });
+
+    await notifyLocalPatient({
+      centerId,
+      patientId: patient.id,
+      title: "تذكير متابعة جديد",
+      body: `تمت إضافة تذكير متابعة بتاريخ ${payload.dueDate.toISOString().slice(0, 10)}: ${payload.reason}`,
+      type: "SYSTEM"
+    });
+
+    await recordAuditLog(req, {
+      action: "CREATE_FOLLOW_UP_REMINDER",
+      entityType: "FollowUpReminder",
+      entityId: reminder.id,
+      centerId,
+      newValue: {
+        patientId: patient.id,
+        doctorId,
+        dueDate: reminder.dueDate,
+        status: reminder.status
+      }
+    });
+
+    res.status(201).json(mapFollowUpReminder(reminder));
+  })
+);
+
+router.patch(
+  "/follow-up-reminders/:reminderId",
+  authorize("CENTER_MANAGER", "DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const reminderId = parsePositiveParam(req.params.reminderId, "Follow-up reminder ID");
+    const payload = followUpReminderUpdateSchema.parse(req.body);
+    const existing = await prisma.followUpReminder.findFirst({
+      where: {
+        id: reminderId,
+        centerId
+      },
+      include: followUpReminderInclude
+    });
+
+    if (!existing) {
+      throw new AppError("Follow-up reminder was not found in this center.", 404);
+    }
+
+    if (req.auth?.role === "DOCTOR" && existing.doctorId !== actorId) {
+      throw new AppError("You can only update your own follow-up reminders.", 403);
+    }
+
+    const updateData: Prisma.FollowUpReminderUpdateInput = {
+      ...(payload.dueDate ? { dueDate: payload.dueDate } : {}),
+      ...(payload.reason ? { reason: payload.reason } : {}),
+      ...(payload.notes !== undefined ? { notes: payload.notes } : {})
+    };
+
+    if (payload.status) {
+      updateData.status = payload.status;
+      updateData.completedAt = payload.status === "DONE" ? new Date() : payload.status === "PENDING" ? null : existing.completedAt;
+      updateData.cancelledAt =
+        payload.status === "CANCELLED" ? new Date() : payload.status === "PENDING" ? null : existing.cancelledAt;
+    }
+
+    const reminder = await prisma.followUpReminder.update({
+      where: {
+        id: existing.id
+      },
+      data: updateData,
+      include: followUpReminderInclude
+    });
+
+    if (payload.status === "DONE" || payload.status === "CANCELLED") {
+      await notifyLocalPatient({
+        centerId,
+        patientId: existing.patientId,
+        title: payload.status === "DONE" ? "تم إكمال تذكير المتابعة" : "تم إلغاء تذكير المتابعة",
+        body: `${existing.reason} - الحالة الجديدة: ${payload.status}`,
+        type: "SYSTEM"
+      });
+    }
+
+    await recordAuditLog(req, {
+      action: "UPDATE_FOLLOW_UP_REMINDER",
+      entityType: "FollowUpReminder",
+      entityId: existing.id,
+      centerId,
+      oldValue: {
+        status: existing.status,
+        dueDate: existing.dueDate
+      },
+      newValue: {
+        status: reminder.status,
+        dueDate: reminder.dueDate
+      }
+    });
+
+    res.json(mapFollowUpReminder(reminder));
+  })
+);
+
+router.delete(
+  "/follow-up-reminders/:reminderId",
+  authorize("CENTER_MANAGER", "DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const reminderId = parsePositiveParam(req.params.reminderId, "Follow-up reminder ID");
+    const existing = await prisma.followUpReminder.findFirst({
+      where: {
+        id: reminderId,
+        centerId
+      }
+    });
+
+    if (!existing) {
+      throw new AppError("Follow-up reminder was not found in this center.", 404);
+    }
+
+    if (req.auth?.role === "DOCTOR" && existing.doctorId !== actorId) {
+      throw new AppError("You can only delete your own follow-up reminders.", 403);
+    }
+
+    await prisma.followUpReminder.delete({
+      where: {
+        id: existing.id
+      }
+    });
+
+    await recordAuditLog(req, {
+      action: "DELETE_FOLLOW_UP_REMINDER",
+      entityType: "FollowUpReminder",
+      entityId: existing.id,
+      centerId,
+      oldValue: {
+        status: existing.status,
+        dueDate: existing.dueDate
       }
     });
 

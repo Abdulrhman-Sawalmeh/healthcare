@@ -18,7 +18,15 @@ import { canUseCenterNotifications, mediumApi } from "../services/mediumApi";
 import { CenterNotificationsBundle, NotificationRecord } from "../types";
 import { colors, spacing } from "../theme/tokens";
 
-export function NotificationsScreen() {
+function isMedicalRecordNotification(notification: NotificationRecord) {
+  const haystack = `${notification.type} ${notification.title} ${notification.body}`.toLowerCase();
+
+  return ["report", "result", "refill", "follow", "تقرير", "نتيجة", "تجديد", "متابعة"].some((term) =>
+    haystack.includes(term.toLowerCase())
+  );
+}
+
+export function NotificationsScreen({ onOpenMedicalRecord }: { onOpenMedicalRecord?: () => void }) {
   const { user } = useAuth();
   const [portalNotifications, setPortalNotifications] = useState<NotificationRecord[]>([]);
   const [centerBundle, setCenterBundle] = useState<CenterNotificationsBundle | null>(null);
@@ -65,6 +73,14 @@ export function NotificationsScreen() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function openMedicalRecord(notification: NotificationRecord) {
+    if (!notification.isRead) {
+      await markRead(notification.id);
+    }
+
+    onOpenMedicalRecord?.();
   }
 
   async function processQueue() {
@@ -133,6 +149,9 @@ export function NotificationsScreen() {
               </View>
               <Text style={styles.meta}>{notification.body}</Text>
               <Text style={styles.dateText}>{formatDateTime(notification.createdAt)}</Text>
+              {isMedicalRecordNotification(notification) && onOpenMedicalRecord ? (
+                <AppButton disabled={busy} label="فتح السجل الطبي" onPress={() => void openMedicalRecord(notification)} tone="ghost" />
+              ) : null}
               {!notification.isRead ? (
                 <AppButton disabled={busy} label="تعليم كمقروء" onPress={() => void markRead(notification.id)} tone="ghost" />
               ) : null}

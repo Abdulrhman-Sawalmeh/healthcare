@@ -23,7 +23,17 @@ type SidebarAlert = {
   status: string;
   createdAt: string;
   to: string;
+  isRead?: boolean;
 };
+
+function BellIcon() {
+  return (
+    <svg aria-hidden="true" className="bell-icon" focusable="false" viewBox="0 0 24 24">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </svg>
+  );
+}
 
 function summarizeUnreadMessages(threads: PortalThreadRecord[], currentRole: string) {
   let unreadMessages = 0;
@@ -66,11 +76,15 @@ export function AppShell() {
   const location = useLocation();
   const [alerts, setAlerts] = useState<SidebarAlert[]>([]);
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
+  const [notificationBadgeCount, setNotificationBadgeCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const [contentZoom, setContentZoom] = useState(0.9);
 
   useEffect(() => {
     if (!user) {
+      setAlerts([]);
+      setUnreadMessageCount(0);
+      setNotificationBadgeCount(0);
       return;
     }
 
@@ -99,6 +113,7 @@ export function AppShell() {
           const summary = summarizeUnreadMessages(threads, currentUser.role);
 
           setUnreadMessageCount(summary.unreadMessages);
+          setNotificationBadgeCount(notifications.filter((item) => !item.isRead).length);
           setAlerts(
             notifications.slice(0, 5).map((item) => ({
               id: item.id,
@@ -106,6 +121,7 @@ export function AppShell() {
               helper: item.body,
               status: item.type,
               createdAt: item.createdAt,
+              isRead: item.isRead,
               to: resolveNotificationPath({
                 role: currentUser.role,
                 workspace: currentUser.workspace,
@@ -170,6 +186,7 @@ export function AppShell() {
           ];
 
           setUnreadMessageCount(summary.unreadMessages);
+          setNotificationBadgeCount(centerAlerts.length + (summary.unreadMessages > 0 ? 1 : 0));
           setAlerts(
             [
               ...(summary.unreadMessages > 0
@@ -202,6 +219,7 @@ export function AppShell() {
 
         if (currentUser.workspace === "central") {
           const centralPayload = payload as CentralNotificationsBundle;
+          setNotificationBadgeCount(centralPayload.outgoing.length);
           setAlerts(
             centralPayload.outgoing.slice(0, 5).map((item) => ({
               id: `out-${item.id}`,
@@ -222,6 +240,7 @@ export function AppShell() {
         }
 
         const centerPayload = payload as CenterNotificationsBundle;
+        setNotificationBadgeCount(centerPayload.alerts.length + centerPayload.outgoing.length);
         setAlerts(
           [
             ...centerPayload.alerts.map((alert) => ({
@@ -260,6 +279,7 @@ export function AppShell() {
         }
 
         setUnreadMessageCount(0);
+        setNotificationBadgeCount(0);
         setAlerts([]);
       }
     }
@@ -329,6 +349,26 @@ export function AppShell() {
       .sort((a, b) => b.to.length - a.to.length)[0] ?? visibleNavigation[0];
   const isNestedPage = Boolean(currentNavigationItem && location.pathname !== currentNavigationItem.to);
   const isPatientPortal = user.role === "PATIENT" || user.workspace === "legacy";
+
+  async function openSidebarAlert(alert: SidebarAlert) {
+    if (isPatientPortal && !alert.isRead) {
+      try {
+        await apiRequest(`/portal/notifications/${alert.id}/read`, {
+          method: "PATCH"
+        });
+        setAlerts((current) =>
+          current.map((item) => (item.id === alert.id ? { ...item, isRead: true } : item))
+        );
+        setNotificationBadgeCount((current) => Math.max(0, current - 1));
+      } catch {
+        // Navigation should still work even if marking the notification as read fails.
+      }
+    }
+
+    setShowNotifications(false);
+    navigate(alert.to, { replace: true });
+  }
+
   return (
     <div className="app-shell">
       <div className="background-veil background-veil-a" />
@@ -400,8 +440,8 @@ export function AppShell() {
             title={t("��� ���������", "Notification log")}
             onClick={() => setShowNotifications((current) => !current)}
           >
-            <span className="sidebar-icon-mark">!</span>
-            {alerts.length > 0 ? <span className="topbar-badge">{alerts.length}</span> : null}
+            <BellIcon />
+            {notificationBadgeCount > 0 ? <span className="topbar-badge">{notificationBadgeCount}</span> : null}
           </button>
           <div>
             <p className="eyebrow">
@@ -458,7 +498,7 @@ export function AppShell() {
                   key={alert.id}
                   className="notification-card notification-card-button interactive-card"
                   type="button"
-                  onClick={() => navigate(alert.to, { replace: true })}
+                  onClick={() => void openSidebarAlert(alert)}
                 >
                   <div className="notification-pill">{toArabicLabel(alert.status)}</div>
                   <h4>{alert.title}</h4>

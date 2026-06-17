@@ -1,8 +1,9 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-import { apiRequest } from "../api/client";
+import { ApiError, apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
 import { useAuth } from "../context/AuthContext";
+import { PrescriptionSafetyWarningRecord } from "../types";
 
 type WorkflowVisit = {
   id: number;
@@ -63,6 +64,21 @@ type WorkflowVisit = {
     resultDate?: string | null;
     test: { testName: string; category?: string | null };
   }>;
+  resultReports?: Array<{
+    id: number;
+    title: string;
+    category: string;
+    summary: string;
+    reportUrl?: string | null;
+    shareWithPatient: boolean;
+    createdAt: string;
+    author: {
+      fullName: string;
+      doctorProfile?: {
+        specialization: string;
+      } | null;
+    };
+  }>;
 };
 
 type IntakeOptions = {
@@ -111,6 +127,23 @@ const visitTypeLabels: Record<string, string> = {
   LAB: "مختبر"
 };
 
+const reportCategoryOptions = [
+  { value: "LAB", label: "نتائج المختبر" },
+  { value: "RADIOLOGY", label: "نتائج الأشعة" },
+  { value: "IMAGING", label: "صور طبية" },
+  { value: "GENERAL", label: "تقرير طبي" },
+  { value: "CARDIOLOGY", label: "قلب وتخطيط" },
+  { value: "MICROBIOLOGY", label: "زراعة ومختبر" },
+  { value: "PATHOLOGY", label: "أنسجة وخزعات" },
+  { value: "PROCEDURE", label: "إجراء طبي" }
+];
+
+const defaultReportLinkForm = {
+  title: "",
+  category: "LAB",
+  reportUrl: ""
+};
+
 const taskLabels: Record<string, string> = {
   RECEPTION_REGISTRATION: "تسجيل الاستقبال",
   NURSING_TRIAGE: "تقييم التمريض",
@@ -156,6 +189,31 @@ function statusClass(status: string) {
   return "neutral";
 }
 
+function reportCategoryLabel(category: string) {
+  return reportCategoryOptions.find((option) => option.value === category)?.label ?? category;
+}
+
+function patientNumber(visit: WorkflowVisit) {
+  return visit.patient.unifiedId || visit.patient.phone || `زيارة ${visit.id}`;
+}
+
+function reportDepartment(report: NonNullable<WorkflowVisit["resultReports"]>[number]) {
+  return report.author.doctorProfile?.specialization ?? reportCategoryLabel(report.category);
+}
+
+function extractPrescriptionWarnings(cause: unknown) {
+  if (!(cause instanceof ApiError)) {
+    return [];
+  }
+
+  const payload = cause.payload as { warnings?: PrescriptionSafetyWarningRecord[] } | undefined;
+  return Array.isArray(payload?.warnings) ? payload.warnings : [];
+}
+
+function hasHighSeverityWarning(warnings: PrescriptionSafetyWarningRecord[]) {
+  return warnings.some((warning) => warning.severity === "HIGH");
+}
+
 export function VisitWorkflowPage() {
   const { user } = useAuth();
   const role = user?.role;
@@ -167,6 +225,13 @@ export function VisitWorkflowPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [reportLinkForm, setReportLinkForm] = useState(defaultReportLinkForm);
+  const [prescriptionWarnings, setPrescriptionWarnings] = useState<PrescriptionSafetyWarningRecord[]>([]);
+  const [overrideReason, setOverrideReason] = useState("");
+  const [pendingDoctorSubmission, setPendingDoctorSubmission] = useState<{
+    visitId: number;
+    payload: Record<string, unknown>;
+  } | null>(null);
 
   const canIntake = hasRole(role, ["CENTER_MANAGER", "RECEPTIONIST"]);
   const canAssess = hasRole(role, ["CENTER_MANAGER", "DOCTOR"]);
@@ -183,6 +248,9 @@ export function VisitWorkflowPage() {
     () => visits.find((visit) => visit.id === selectedVisitId) ?? null,
     [selectedVisitId, visits]
   );
+
+  const canAddReportLink =
+    Boolean(selectedVisit?.diagnosis) && selectedVisit?.diagnosis !== "بانتظار تقييم الطبيب";
 
   const loadVisits = useCallback(async () => {
     const query = status ? `?status=${encodeURIComponent(status)}` : "";
@@ -221,6 +289,40 @@ export function VisitWorkflowPage() {
       await loadVisits();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر تنفيذ العملية.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function submitDoctorPayload(
+    visitId: number,
+    payload: Record<string, unknown>,
+    successMessage = "Doctor assessment was saved."
+  ) {
+    try {
+      setBusyId(visitId);
+      setError("");
+      setMessage("");
+      await apiRequest(`/center/visit-workflow/${visitId}/doctor`, {
+        method: "PATCH",
+        body: JSON.stringify(payload)
+      });
+      setPrescriptionWarnings([]);
+      setPendingDoctorSubmission(null);
+      setOverrideReason("");
+      setMessage(successMessage);
+      await loadVisits();
+    } catch (cause) {
+      const warnings = extractPrescriptionWarnings(cause);
+
+      if (warnings.length > 0) {
+        setPrescriptionWarnings(warnings);
+        setPendingDoctorSubmission({ visitId, payload });
+        setError("");
+        return;
+      }
+
+      setError(cause instanceof Error ? cause.message : "Unable to save doctor assessment.");
     } finally {
       setBusyId(null);
     }
@@ -311,6 +413,15 @@ export function VisitWorkflowPage() {
         ]
       : [];
 
+    void submitDoctorPayload(visitId, {
+      diagnosis: form.get("diagnosis"),
+      symptoms: form.get("symptoms") || undefined,
+      notes: form.get("notes") || undefined,
+      prescriptions,
+      labTestIds: form.getAll("labTestIds").map(Number)
+    });
+    return;
+
     void runAction(
       visitId,
       () =>
@@ -328,6 +439,42 @@ export function VisitWorkflowPage() {
     );
   }
 
+  function submitReportLink(event: FormEvent<HTMLFormElement>, visitId: number) {
+    event.preventDefault();
+
+    if (!reportLinkForm.title.trim() || !reportLinkForm.reportUrl.trim()) {
+      setError("أدخل عنوان التقرير ورابط التقرير قبل الحفظ.");
+      return;
+    }
+
+    try {
+      const reportUrl = new URL(reportLinkForm.reportUrl.trim());
+      if (!["http:", "https:"].includes(reportUrl.protocol)) {
+        throw new Error("Invalid protocol");
+      }
+    } catch {
+      setError("أدخل رابط تقرير صالح يبدأ بـ http أو https.");
+      return;
+    }
+
+    void runAction(
+      visitId,
+      () =>
+        apiRequest(`/center/visit-workflow/${visitId}/report-link`, {
+          method: "POST",
+          body: JSON.stringify({
+            title: reportLinkForm.title.trim(),
+            category: reportLinkForm.category,
+            reportUrl: reportLinkForm.reportUrl.trim(),
+            shareWithPatient: true
+          })
+        }),
+      "تم إرسال التقرير للمريض."
+    ).then(() => {
+      setReportLinkForm(defaultReportLinkForm);
+    });
+  }
+
   function submitLabResult(visitId: number, requestId: number) {
     const resultValue = window.prompt("أدخل نتيجة الفحص");
     if (!resultValue?.trim()) return;
@@ -341,6 +488,23 @@ export function VisitWorkflowPage() {
         }),
       "تم إرسال نتيجة المختبر للطبيب."
     );
+  }
+
+  function confirmPrescriptionOverride() {
+    if (!pendingDoctorSubmission) {
+      return;
+    }
+
+    if (hasHighSeverityWarning(prescriptionWarnings) && !overrideReason.trim()) {
+      setError("High severity prescription warnings require an override reason.");
+      return;
+    }
+
+    void submitDoctorPayload(pendingDoctorSubmission.visitId, {
+      ...pendingDoctorSubmission.payload,
+      overridePrescriptionWarnings: true,
+      overrideReason: overrideReason.trim() || undefined
+    });
   }
 
   return (
@@ -366,6 +530,46 @@ export function VisitWorkflowPage() {
 
       {error ? <div className="error-banner">{error}</div> : null}
       {message ? <div className="success-banner">{message}</div> : null}
+      {prescriptionWarnings.length > 0 && pendingDoctorSubmission ? (
+        <div className="warning-panel">
+          <div>
+            <p className="eyebrow">Prescription safety warning</p>
+            <h3>Review before saving prescription</h3>
+          </div>
+          <div className="stack-list">
+            {prescriptionWarnings.map((warning, index) => (
+              <article key={`${warning.prescriptionIndex}-${warning.warningType}-${index}`} className="inline-note">
+                <strong>{warning.severity}</strong> - {warning.medicineName}: {warning.message}
+                {warning.conflictWith ? <span> ({warning.conflictWith})</span> : null}
+              </article>
+            ))}
+          </div>
+          <label className="field">
+            <span>Override reason{hasHighSeverityWarning(prescriptionWarnings) ? " (required)" : ""}</span>
+            <textarea
+              value={overrideReason}
+              onChange={(event) => setOverrideReason(event.target.value)}
+              placeholder="Explain why the prescription should still be saved."
+            />
+          </label>
+          <div className="button-row">
+            <button className="primary-button" disabled={busyId === pendingDoctorSubmission.visitId} onClick={confirmPrescriptionOverride} type="button">
+              Confirm and save
+            </button>
+            <button
+              className="ghost-button"
+              onClick={() => {
+                setPrescriptionWarnings([]);
+                setPendingDoctorSubmission(null);
+                setOverrideReason("");
+              }}
+              type="button"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {canIntake ? (
         <SectionCard title="تسجيل زيارة جديدة" subtitle="إدخال المريض إلى النظام من الحجز أو الإحالة أو الوصول المباشر للمركز">
@@ -754,6 +958,111 @@ export function VisitWorkflowPage() {
                 ) : null}
               </article>
             ) : null}
+
+            <article className="visit-file-section">
+              <header className="section-header">
+                <div>
+                  <h3>روابط التقارير الطبية</h3>
+                  <p className="muted">بعد حفظ تقييم الطبيب، أضف رابط التقرير الخارجي ليظهر للمريض ويفتح في صفحة جديدة.</p>
+                </div>
+              </header>
+              {!canAddReportLink && canAssess ? (
+                <div className="inline-note">احفظ تقييم الطبيب أولاً، ثم أضف رابط التقرير الخارجي للمريض.</div>
+              ) : null}
+              <form onSubmit={(event) => submitReportLink(event, selectedVisit.id)}>
+                <div className="table-shell">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>رقم المريض</th>
+                        <th>اسم المريض</th>
+                        <th>اسم الطبيب</th>
+                        <th>اسم القسم</th>
+                        <th>تاريخ الطلب</th>
+                        <th>نوع التقرير</th>
+                        <th>رابط التقرير</th>
+                        <th>الإجراء</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {canAssess && canAddReportLink ? (
+                        <tr>
+                          <td>{patientNumber(selectedVisit)}</td>
+                          <td>{selectedVisit.patient.fullName}</td>
+                          <td>{selectedVisit.doctor?.fullName ?? user?.fullName ?? "الطبيب الحالي"}</td>
+                          <td>{reportCategoryLabel(reportLinkForm.category)}</td>
+                          <td>{formatDateTime(selectedVisit.visitDate)}</td>
+                          <td>
+                            <select
+                              value={reportLinkForm.category}
+                              onChange={(event) =>
+                                setReportLinkForm((current) => ({ ...current, category: event.target.value }))
+                              }
+                            >
+                              {reportCategoryOptions.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              value={reportLinkForm.title}
+                              onChange={(event) =>
+                                setReportLinkForm((current) => ({ ...current, title: event.target.value }))
+                              }
+                              placeholder="عنوان التقرير"
+                              required
+                            />
+                          </td>
+                          <td>
+                            <input
+                              dir="ltr"
+                              type="url"
+                              value={reportLinkForm.reportUrl}
+                              onChange={(event) =>
+                                setReportLinkForm((current) => ({ ...current, reportUrl: event.target.value }))
+                              }
+                              placeholder="https://example.com/report.pdf"
+                              required
+                            />
+                          </td>
+                          <td>
+                            <button className="primary-button" disabled={busyId === selectedVisit.id} type="submit">
+                              حفظ الرابط
+                            </button>
+                          </td>
+                        </tr>
+                      ) : null}
+                      {selectedVisit.resultReports?.map((report) => (
+                        <tr key={report.id}>
+                          <td>{patientNumber(selectedVisit)}</td>
+                          <td>{selectedVisit.patient.fullName}</td>
+                          <td>{report.author.fullName}</td>
+                          <td>{reportDepartment(report)}</td>
+                          <td>{formatDateTime(report.createdAt)}</td>
+                          <td>{report.title}</td>
+                          <td>
+                            {report.reportUrl ? (
+                              <a href={report.reportUrl} rel="noreferrer" target="_blank">
+                                فتح التقرير
+                              </a>
+                            ) : (
+                              "لا يوجد رابط"
+                            )}
+                          </td>
+                          <td>{report.shareWithPatient ? "ظاهر للمريض" : "داخلي"}</td>
+                        </tr>
+                      ))}
+                      {(selectedVisit.resultReports?.length ?? 0) === 0 && (!canAssess || !canAddReportLink) ? (
+                        <tr>
+                          <td colSpan={8}>لا توجد روابط تقارير محفوظة لهذا الملف.</td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </form>
+            </article>
 
             {canViewLab ? (
               <article className="visit-file-section">

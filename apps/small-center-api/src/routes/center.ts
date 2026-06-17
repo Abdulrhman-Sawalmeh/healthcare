@@ -35,6 +35,7 @@ import {
   createPrescriptionVerificationCode,
   hashPrescriptionVerificationCode
 } from "../services/prescription-verification";
+import { notifyPatientAboutResultReport } from "../services/result-report-notifications";
 import { asyncHandler } from "../utils/async-handler";
 import { visitWorkflowRouter } from "./visit-workflow";
 
@@ -145,6 +146,14 @@ const reportAttachmentSchema = z.object({
   contentBase64: z.string().min(1)
 });
 
+const reportUrlSchema = z
+  .string()
+  .trim()
+  .url("أدخل رابط تقرير صالح يبدأ بـ http أو https.")
+  .refine((value) => ["http:", "https:"].includes(new URL(value).protocol), {
+    message: "أدخل رابط تقرير صالح يبدأ بـ http أو https."
+  });
+
 const reportSchema = z.object({
   title: z.string().min(2),
   category: z
@@ -161,7 +170,8 @@ const reportSchema = z.object({
       "DISCHARGE"
     ])
     .default("GENERAL"),
-  summary: z.string().min(2),
+  reportUrl: reportUrlSchema,
+  summary: z.string().trim().optional(),
   findings: z.string().optional(),
   recommendations: z.string().optional(),
   recommendedFollowUp: z.string().optional(),
@@ -892,6 +902,8 @@ router.post(
       return res.status(404).json({ message: "تعذر العثور على الزيارة المطلوبة داخل هذا المركز." });
     }
 
+    const reportSummary = payload.summary?.trim() || "رابط التقرير متاح للمريض.";
+
     const report = await prisma.localResultReport.create({
       data: {
         centerId,
@@ -900,7 +912,8 @@ router.post(
         authorId: Number(req.auth?.sub),
         title: payload.title,
         category: payload.category,
-        summary: payload.summary,
+        summary: reportSummary,
+        reportUrl: payload.reportUrl,
         findings: payload.findings,
         recommendations: payload.recommendations,
         recommendedFollowUp: payload.recommendedFollowUp,
@@ -920,8 +933,17 @@ router.post(
         visitId: visit.id,
         patientId: visit.patientId,
         category: report.category,
+        reportUrl: report.reportUrl,
         shareWithPatient: report.shareWithPatient
       }
+    });
+
+    await notifyPatientAboutResultReport({
+      centerId,
+      patientId: visit.patientId,
+      reportTitle: report.title,
+      reportUrl: report.reportUrl,
+      shareWithPatient: report.shareWithPatient
     });
 
     res.status(201).json(report);
@@ -949,6 +971,8 @@ router.put(
       return res.status(404).json({ message: "تعذر العثور على تقرير النتائج المطلوب." });
     }
 
+    const reportSummary = payload.summary?.trim() || "رابط التقرير متاح للمريض.";
+
     const report = await prisma.localResultReport.update({
       where: {
         id: reportId
@@ -956,7 +980,8 @@ router.put(
       data: {
         title: payload.title,
         category: payload.category,
-        summary: payload.summary,
+        summary: reportSummary,
+        reportUrl: payload.reportUrl,
         findings: payload.findings,
         recommendations: payload.recommendations,
         recommendedFollowUp: payload.recommendedFollowUp,
@@ -975,14 +1000,30 @@ router.put(
       oldValue: {
         title: existingReport.title,
         category: existingReport.category,
+        reportUrl: existingReport.reportUrl,
         shareWithPatient: existingReport.shareWithPatient
       },
       newValue: {
         title: report.title,
         category: report.category,
+        reportUrl: report.reportUrl,
         shareWithPatient: report.shareWithPatient
       }
     });
+
+    if (
+      report.shareWithPatient &&
+      report.reportUrl &&
+      (!existingReport.shareWithPatient || existingReport.reportUrl !== report.reportUrl)
+    ) {
+      await notifyPatientAboutResultReport({
+        centerId,
+        patientId: existingReport.patientId,
+        reportTitle: report.title,
+        reportUrl: report.reportUrl,
+        shareWithPatient: report.shareWithPatient
+      });
+    }
 
     res.json(report);
   })

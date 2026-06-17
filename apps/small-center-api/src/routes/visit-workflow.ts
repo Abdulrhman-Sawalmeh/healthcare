@@ -11,6 +11,7 @@ import {
   createPrescriptionVerificationCode,
   hashPrescriptionVerificationCode
 } from "../services/prescription-verification";
+import { notifyPatientAboutResultReport } from "../services/result-report-notifications";
 import { asyncHandler } from "../utils/async-handler";
 
 const router = Router();
@@ -42,6 +43,24 @@ const doctorAssessmentSchema = z.object({
     unitPrice: z.coerce.number().nonnegative().optional(),
     instructions: z.string().optional()
   })).default([])
+});
+
+const reportUrlSchema = z
+  .string()
+  .trim()
+  .url("أدخل رابط تقرير صالح يبدأ بـ http أو https.")
+  .refine((value) => ["http:", "https:"].includes(new URL(value).protocol), {
+    message: "أدخل رابط تقرير صالح يبدأ بـ http أو https."
+  });
+
+const reportLinkSchema = z.object({
+  title: z.string().min(2),
+  category: z
+    .enum(["GENERAL", "LAB", "IMAGING", "RADIOLOGY", "PATHOLOGY", "CARDIOLOGY", "MICROBIOLOGY", "PROCEDURE"])
+    .default("GENERAL"),
+  reportUrl: reportUrlSchema,
+  summary: z.string().trim().optional(),
+  shareWithPatient: z.boolean().default(true)
 });
 
 const assignDoctorSchema = z.object({
@@ -81,6 +100,18 @@ router.get(
         patient: true,
         doctor: { select: { id: true, fullName: true, role: true } },
         prescriptions: true,
+        resultReports: {
+          include: {
+            author: {
+              include: {
+                doctorProfile: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: "desc"
+          }
+        },
         invoice: true
       },
       orderBy: [{ priority: "desc" }, { checkedInAt: "asc" }]
@@ -330,6 +361,81 @@ router.patch(
     }
 
     res.json(updated);
+  })
+);
+
+router.post(
+  "/:visitId/report-link",
+  authorize("CENTER_MANAGER", "DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = centerIdFromRequest(req);
+    const visitId = Number(req.params.visitId);
+    const payload = reportLinkSchema.parse(req.body);
+    const visit = await prisma.localVisit.findFirst({
+      where: {
+        id: visitId,
+        centerId
+      },
+      select: {
+        id: true,
+        patientId: true,
+        doctorId: true,
+        diagnosis: true
+      }
+    });
+
+    if (!visit) {
+      return res.status(404).json({ message: "ملف الزيارة غير موجود في هذا المركز." });
+    }
+
+    if (req.auth!.role === "DOCTOR" && visit.doctorId && visit.doctorId !== Number(req.auth!.sub)) {
+      return res.status(403).json({ message: "هذه الزيارة معينة لطبيب آخر." });
+    }
+
+    if (!visit.diagnosis || visit.diagnosis === "بانتظار تقييم الطبيب") {
+      return res.status(409).json({ message: "احفظ تقييم الطبيب أولاً قبل إضافة رابط التقرير." });
+    }
+
+    const report = await prisma.localResultReport.create({
+      data: {
+        centerId,
+        patientId: visit.patientId,
+        visitId: visit.id,
+        authorId: Number(req.auth?.sub),
+        title: payload.title,
+        category: payload.category,
+        summary: payload.summary?.trim() || payload.title,
+        reportUrl: payload.reportUrl,
+        shareWithPatient: payload.shareWithPatient,
+        attachmentFileName: null,
+        attachmentMimeType: null,
+        attachmentBase64: null
+      }
+    });
+
+    await recordAuditLog(req, {
+      action: "CREATE_RESULT_REPORT_LINK",
+      entityType: "LocalResultReport",
+      entityId: report.id,
+      centerId,
+      newValue: {
+        visitId: visit.id,
+        patientId: visit.patientId,
+        category: report.category,
+        reportUrl: report.reportUrl,
+        shareWithPatient: report.shareWithPatient
+      }
+    });
+
+    await notifyPatientAboutResultReport({
+      centerId,
+      patientId: visit.patientId,
+      reportTitle: report.title,
+      reportUrl: report.reportUrl,
+      shareWithPatient: report.shareWithPatient
+    });
+
+    res.status(201).json(report);
   })
 );
 

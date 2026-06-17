@@ -74,6 +74,15 @@ export function getApiUrl() {
   return API_URL;
 }
 
+export function getHealthUrl() {
+  return getApiUrl().replace(/\/api$/, "/health");
+}
+
+export async function checkApiHealth() {
+  const response = await fetch(getHealthUrl());
+  return response.ok;
+}
+
 export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const baseUrl = getApiUrl();
   const headers = new Headers(options.headers);

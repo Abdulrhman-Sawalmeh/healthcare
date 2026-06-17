@@ -1,4 +1,4 @@
-import { apiRequest } from "../api/client";
+import { apiRequest, checkApiHealth } from "../api/client";
 import {
   AiCareInsightRequest,
   AiCareInsightResponse,
@@ -8,14 +8,23 @@ import {
   CenterDashboard,
   CenterDoctorsBundle,
   CenterNotificationsBundle,
+  ConsentTargetsBundle,
   ConversationPatientOption,
   CreatePatientResponse,
   IntakeOptions,
   LocalPatientRecord,
+  MedicationRefillRequestRecord,
+  EligiblePrescriptionRecord,
+  FollowUpReminderRecord,
+  FollowUpReminderStatus,
+  MedicationRefillStatus,
   MessageAttachmentDraft,
   NetworkPatientSearchResult,
   NotificationRecord,
   PatientTimelineBundle,
+  PatientConsentRecord,
+  PatientConsentScope,
+  PatientConsentTargetType,
   PortalAppointmentSuggestionRecord,
   PortalDoctorRecord,
   PortalMedicalRecord,
@@ -70,9 +79,36 @@ export function canUseMessages(role?: Role) {
 }
 
 export const mediumApi = {
+  healthCheck: checkApiHealth,
   centerDashboard: () => apiRequest<CenterDashboard>("/center/dashboard"),
   portalSummary: () => apiRequest<PortalSummary>("/portal/summary"),
   portalMedicalRecord: () => apiRequest<PortalMedicalRecord>("/portal/medical-record"),
+  portalConsentTargets: () => apiRequest<ConsentTargetsBundle>("/portal/consent-targets"),
+  portalConsents: () => apiRequest<PatientConsentRecord[]>("/portal/consents"),
+  createPortalConsent: (payload: {
+    targetType: PatientConsentTargetType;
+    targetId: string;
+    scope: PatientConsentScope;
+    expiresAt: string;
+  }) =>
+    apiRequest<PatientConsentRecord>("/portal/consents", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  revokePortalConsent: (consentId: number) =>
+    apiRequest<PatientConsentRecord>(`/portal/consents/${consentId}/revoke`, {
+      method: "PATCH"
+    }),
+  portalRefillRequests: () =>
+    apiRequest<{ requests: MedicationRefillRequestRecord[]; eligiblePrescriptions: EligiblePrescriptionRecord[] }>(
+      "/portal/refill-requests"
+    ),
+  createPortalRefillRequest: (payload: { prescriptionId: number; notes?: string }) =>
+    apiRequest<MedicationRefillRequestRecord>("/portal/refill-requests", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  portalFollowUpReminders: () => apiRequest<FollowUpReminderRecord[]>("/portal/follow-up-reminders"),
 
   appointments: () => apiRequest<AppointmentItem[]>("/portal/appointments"),
   appointmentSuggestions: (doctorId: string, preferredDate: string, appointmentType = "CLINIC") =>
@@ -134,6 +170,44 @@ export const mediumApi = {
       body: JSON.stringify(payload)
     }),
   patientTimeline: (patientId: number) => apiRequest<PatientTimelineBundle>(`/patients/${patientId}/timeline`),
+  centerRefillRequests: (patientId?: number, status?: MedicationRefillStatus) =>
+    apiRequest<MedicationRefillRequestRecord[]>(
+      `/center/refill-requests${patientId || status ? `?${new URLSearchParams({
+        ...(patientId ? { patientId: String(patientId) } : {}),
+        ...(status ? { status } : {})
+      }).toString()}` : ""}`
+    ),
+  reviewRefillRequest: (requestId: number, payload: { decision: "APPROVE" | "REJECT"; notes?: string; rejectionReason?: string }) =>
+    apiRequest<MedicationRefillRequestRecord>(`/center/refill-requests/${requestId}/doctor`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  updateRefillStatus: (requestId: number, payload: { status: "PHARMACY_PREPARING" | "READY_FOR_PICKUP" | "COLLECTED"; notes?: string }) =>
+    apiRequest<MedicationRefillRequestRecord>(`/center/refill-requests/${requestId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  centerFollowUpReminders: (patientId?: number, status?: FollowUpReminderStatus) =>
+    apiRequest<FollowUpReminderRecord[]>(
+      `/center/follow-up-reminders${patientId || status ? `?${new URLSearchParams({
+        ...(patientId ? { patientId: String(patientId) } : {}),
+        ...(status ? { status } : {})
+      }).toString()}` : ""}`
+    ),
+  createFollowUpReminder: (payload: { patientId: number; doctorId?: number; visitId?: number; dueDate: string; reason: string; notes?: string }) =>
+    apiRequest<FollowUpReminderRecord>("/center/follow-up-reminders", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  updateFollowUpReminder: (reminderId: number, payload: { status?: FollowUpReminderStatus; dueDate?: string; reason?: string; notes?: string }) =>
+    apiRequest<FollowUpReminderRecord>(`/center/follow-up-reminders/${reminderId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  deleteFollowUpReminder: (reminderId: number) =>
+    apiRequest(`/center/follow-up-reminders/${reminderId}`, {
+      method: "DELETE"
+    }),
 
   visits: () => apiRequest<VisitRecord[]>("/center/visits"),
 

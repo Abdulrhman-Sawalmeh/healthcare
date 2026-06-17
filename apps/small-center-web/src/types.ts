@@ -387,6 +387,7 @@ export interface LocalVisitReportRecord {
   title: string;
   category: string;
   summary: string;
+  reportUrl?: string | null;
   findings?: string | null;
   recommendations?: string | null;
   recommendedFollowUp?: string | null;
@@ -694,6 +695,7 @@ export interface PortalClinicalReportRecord {
   notes?: string | null;
   source: "APPOINTMENT" | "RESULT_REPORT";
   summary?: string | null;
+  reportUrl?: string | null;
   findings?: string | null;
   recommendations?: string | null;
   recommendedFollowUp?: string | null;

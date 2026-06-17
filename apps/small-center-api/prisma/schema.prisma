@@ -128,14 +128,14 @@ model CenterAdministrator {
 }
 
 model Department {
-  id           String         @id @default(uuid())
+  id           String          @id @default(uuid())
   centerId     String
   name         String
   floor        Int?
   phone        String?
   description  String?
-  createdAt    DateTime       @default(now())
-  center       Center         @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  createdAt    DateTime        @default(now())
+  center       Center          @relation(fields: [centerId], references: [id], onDelete: Cascade)
   doctors      DoctorProfile[]
   appointments Appointment[]
   referrals    Referral[]
@@ -260,18 +260,18 @@ model MessageThread {
 }
 
 model Message {
-  id                   String        @id @default(uuid())
-  threadId             String
-  senderId             String
-  content              String
-  attachmentFileName   String?
-  attachmentMimeType   String?
-  attachmentBase64     String?
-  attachmentSizeBytes  Int?
-  isRead               Boolean       @default(false)
-  createdAt            DateTime      @default(now())
-  thread               MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  sender               User          @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  id                  String        @id @default(uuid())
+  threadId            String
+  senderId            String
+  content             String
+  attachmentFileName  String?
+  attachmentMimeType  String?
+  attachmentBase64    String?
+  attachmentSizeBytes Int?
+  isRead              Boolean       @default(false)
+  createdAt           DateTime      @default(now())
+  thread              MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender              User          @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([threadId, createdAt])
 }
@@ -423,6 +423,22 @@ enum LabRequestStatus {
   CANCELLED
 }
 
+enum MedicationRefillStatus {
+  REQUESTED
+  DOCTOR_APPROVED
+  PHARMACY_PREPARING
+  READY_FOR_PICKUP
+  COLLECTED
+  REJECTED
+}
+
+enum FollowUpReminderStatus {
+  PENDING
+  DONE
+  CANCELLED
+  MISSED
+}
+
 enum NetworkNotificationType {
   REQUEST_NEW_VISITS
   REQUEST_PATIENT_DATA
@@ -471,81 +487,83 @@ enum AlertSeverity {
 }
 
 model CentralCenter {
-  id                     Int                                @id @default(autoincrement())
-  centerCode             String                             @unique
-  centerName             String
-  centerType             CentralCenterType
-  region                 String
-  city                   String
-  address                String
-  phone                  String
-  email                  String
-  latitude               Float
-  longitude              Float
-  specialties            String[]
-  isConnected            Boolean                            @default(true)
-  connectionSuspendedAt  DateTime?
-  suspensionReason       String?
-  apiEndpoint            String?
-  apiKey                 String?                            @unique
-  lastSyncAt             DateTime?
-  registeredAt           DateTime                           @default(now())
-  doctorAvailability     CenterDoctorAvailability[]
-  operatingRoomStatus    CenterOperatingRoomAvailability[]
-  medicineAvailability   CenterMedicineAvailability[]
-  loadSnapshots          CenterLoadSnapshot[]
-  notificationsToCenter  CentralNotification[]
-  notificationsToCentral CenterNotification[]
-  communicationLogs      CommunicationLog[]
-  configs                CenterConfig[]
-  users                  CenterUserAccount[]
-  doctorProfiles         CenterDoctorProfile[]
-  localPatients          LocalPatient[]
-  localVisits            LocalVisit[]
-  resultReports          LocalResultReport[]
-  localInvoices          LocalInvoice[]
-  labTests               LabTestLocal[]
-  labRequests            LabRequestLocal[]
-  pharmacyInventory      PharmacyInventoryLocal[]
-  incomingNotifications  IncomingNotification[]
-  outgoingNotifications  OutgoingNotification[]
-  processingLogs         NotificationProcessingLog[]
-  alerts                 CenterSystemAlert[]
-  auditLogs              AuditLog[]
-  unifiedVisits          UnifiedVisit[]
-  referralsFrom          CentralReferral[]                  @relation("NetworkReferralFromCenter")
-  referralsTo            CentralReferral[]                  @relation("NetworkReferralToCenter")
+  id                       Int                               @id @default(autoincrement())
+  centerCode               String                            @unique
+  centerName               String
+  centerType               CentralCenterType
+  region                   String
+  city                     String
+  address                  String
+  phone                    String
+  email                    String
+  latitude                 Float
+  longitude                Float
+  specialties              String[]
+  isConnected              Boolean                           @default(true)
+  connectionSuspendedAt    DateTime?
+  suspensionReason         String?
+  apiEndpoint              String?
+  apiKey                   String?                           @unique
+  lastSyncAt               DateTime?
+  registeredAt             DateTime                          @default(now())
+  doctorAvailability       CenterDoctorAvailability[]
+  operatingRoomStatus      CenterOperatingRoomAvailability[]
+  medicineAvailability     CenterMedicineAvailability[]
+  loadSnapshots            CenterLoadSnapshot[]
+  notificationsToCenter    CentralNotification[]
+  notificationsToCentral   CenterNotification[]
+  communicationLogs        CommunicationLog[]
+  configs                  CenterConfig[]
+  users                    CenterUserAccount[]
+  doctorProfiles           CenterDoctorProfile[]
+  localPatients            LocalPatient[]
+  localVisits              LocalVisit[]
+  resultReports            LocalResultReport[]
+  localInvoices            LocalInvoice[]
+  labTests                 LabTestLocal[]
+  labRequests              LabRequestLocal[]
+  pharmacyInventory        PharmacyInventoryLocal[]
+  incomingNotifications    IncomingNotification[]
+  outgoingNotifications    OutgoingNotification[]
+  processingLogs           NotificationProcessingLog[]
+  alerts                   CenterSystemAlert[]
+  auditLogs                AuditLog[]
+  medicationRefillRequests MedicationRefillRequest[]
+  followUpReminders        FollowUpReminder[]
+  unifiedVisits            UnifiedVisit[]
+  referralsFrom            CentralReferral[]                 @relation("NetworkReferralFromCenter")
+  referralsTo              CentralReferral[]                 @relation("NetworkReferralToCenter")
 }
 
 model CentralUser {
-  id         Int      @id @default(autoincrement())
-  username   String   @unique
+  id           Int       @id @default(autoincrement())
+  username     String    @unique
   passwordHash String
-  fullName   String
-  email      String   @unique
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  lastLogin  DateTime?
+  fullName     String
+  email        String    @unique
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  lastLogin    DateTime?
 }
 
 model UnifiedPatient {
-  id               Int             @id @default(autoincrement())
-  unifiedId        String          @unique
-  nationalId       String?         @unique
-  fullName         String
-  dateOfBirth      DateTime
-  gender           Gender
-  primaryPhone     String          @unique
-  secondaryPhone   String?
-  address          String
-  bloodType        String?
-  allergies        String[]
-  chronicDiseases  String[]
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-  localPatients    LocalPatient[]
-  unifiedVisits    UnifiedVisit[]
-  referrals        CentralReferral[]
+  id              Int               @id @default(autoincrement())
+  unifiedId       String            @unique
+  nationalId      String?           @unique
+  fullName        String
+  dateOfBirth     DateTime
+  gender          Gender
+  primaryPhone    String            @unique
+  secondaryPhone  String?
+  address         String
+  bloodType       String?
+  allergies       String[]
+  chronicDiseases String[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  localPatients   LocalPatient[]
+  unifiedVisits   UnifiedVisit[]
+  referrals       CentralReferral[]
 
   @@index([fullName])
 }
@@ -569,14 +587,14 @@ model UnifiedVisit {
 }
 
 model MasterMedicine {
-  id                   Int                         @id @default(autoincrement())
+  id                   Int                          @id @default(autoincrement())
   genericName          String
   brandName            String
   category             String
   unit                 String
-  isCritical           Boolean                     @default(false)
-  version              Int                         @default(1)
-  updatedAt            DateTime                    @updatedAt
+  isCritical           Boolean                      @default(false)
+  version              Int                          @default(1)
+  updatedAt            DateTime                     @updatedAt
   medicineAvailability CenterMedicineAvailability[]
 
   @@index([category])
@@ -601,29 +619,29 @@ model MasterSpecialty {
 }
 
 model CentralReferral {
-  id                         Int                     @id @default(autoincrement())
-  fromCenterId               Int
-  toCenterId                 Int?
-  patientId                  Int
-  requiredSpecialty          String
-  priority                   NetworkReferralPriority
-  reason                     String
-  requiresOr                 Boolean                 @default(false)
-  requiredMedicineIds        Int[]
-  preferredRegion            String?
-  maxDistanceKm              Float                   @default(60)
-  status                     NetworkReferralStatus   @default(PENDING)
-  rejectionReason            String?
-  selectedCenterReason       String?
-  estimatedWaitTimeMinutes   Int?
-  requestedAt                DateTime                @default(now())
-  respondedAt                DateTime?
-  completedAt                DateTime?
-  notesFromSender            String?
-  notesFromReceiver          String?
-  fromCenter                 CentralCenter           @relation("NetworkReferralFromCenter", fields: [fromCenterId], references: [id], onDelete: Cascade)
-  toCenter                   CentralCenter?          @relation("NetworkReferralToCenter", fields: [toCenterId], references: [id], onDelete: SetNull)
-  patient                    UnifiedPatient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  id                       Int                     @id @default(autoincrement())
+  fromCenterId             Int
+  toCenterId               Int?
+  patientId                Int
+  requiredSpecialty        String
+  priority                 NetworkReferralPriority
+  reason                   String
+  requiresOr               Boolean                 @default(false)
+  requiredMedicineIds      Int[]
+  preferredRegion          String?
+  maxDistanceKm            Float                   @default(60)
+  status                   NetworkReferralStatus   @default(PENDING)
+  rejectionReason          String?
+  selectedCenterReason     String?
+  estimatedWaitTimeMinutes Int?
+  requestedAt              DateTime                @default(now())
+  respondedAt              DateTime?
+  completedAt              DateTime?
+  notesFromSender          String?
+  notesFromReceiver        String?
+  fromCenter               CentralCenter           @relation("NetworkReferralFromCenter", fields: [fromCenterId], references: [id], onDelete: Cascade)
+  toCenter                 CentralCenter?          @relation("NetworkReferralToCenter", fields: [toCenterId], references: [id], onDelete: SetNull)
+  patient                  UnifiedPatient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
   @@index([fromCenterId, status])
   @@index([toCenterId, status])
@@ -679,21 +697,21 @@ model CenterLoadSnapshot {
 }
 
 model CentralNotification {
-  id              Int                       @id @default(autoincrement())
+  id               Int                       @id @default(autoincrement())
   notificationType NetworkNotificationType
-  targetCenterId  Int
-  payload         Json
-  status          NetworkNotificationStatus @default(PENDING)
-  sentAt          DateTime?
-  acknowledgedAt  DateTime?
-  completedAt     DateTime?
-  responsePayload Json?
-  responseError   String?
-  retryCount      Int                       @default(0)
-  maxRetries      Int                       @default(24)
-  nextRetryAt     DateTime?
-  createdAt       DateTime                  @default(now())
-  targetCenter    CentralCenter             @relation(fields: [targetCenterId], references: [id], onDelete: Cascade)
+  targetCenterId   Int
+  payload          Json
+  status           NetworkNotificationStatus @default(PENDING)
+  sentAt           DateTime?
+  acknowledgedAt   DateTime?
+  completedAt      DateTime?
+  responsePayload  Json?
+  responseError    String?
+  retryCount       Int                       @default(0)
+  maxRetries       Int                       @default(24)
+  nextRetryAt      DateTime?
+  createdAt        DateTime                  @default(now())
+  targetCenter     CentralCenter             @relation(fields: [targetCenterId], references: [id], onDelete: Cascade)
 
   @@index([targetCenterId, status, nextRetryAt])
 }
@@ -714,16 +732,16 @@ model CenterNotification {
 }
 
 model CommunicationLog {
-  id              Int                    @id @default(autoincrement())
-  centerId        Int?
-  direction       CommunicationDirection
+  id               Int                       @id @default(autoincrement())
+  centerId         Int?
+  direction        CommunicationDirection
   notificationType NetworkNotificationType
-  status          NetworkNotificationStatus
-  requestPayload  Json?
-  responsePayload Json?
-  errorMessage    String?
-  createdAt       DateTime               @default(now())
-  center          CentralCenter?         @relation(fields: [centerId], references: [id], onDelete: SetNull)
+  status           NetworkNotificationStatus
+  requestPayload   Json?
+  responsePayload  Json?
+  errorMessage     String?
+  createdAt        DateTime                  @default(now())
+  center           CentralCenter?            @relation(fields: [centerId], references: [id], onDelete: SetNull)
 
   @@index([centerId, createdAt])
 }
@@ -741,39 +759,42 @@ model CenterConfig {
 }
 
 model CenterUserAccount {
-  id                             Int                        @id @default(autoincrement())
+  id                             Int                       @id @default(autoincrement())
   centerId                       Int
-  username                       String                     @unique
+  username                       String                    @unique
   passwordHash                   String
   fullName                       String
   role                           CenterUserRole
   phone                          String?
-  email                          String?                    @unique
-  isActive                       Boolean                    @default(true)
+  email                          String?                   @unique
+  isActive                       Boolean                   @default(true)
   createdById                    Int?
-  createdAt                      DateTime                   @default(now())
+  createdAt                      DateTime                  @default(now())
   lastLogin                      DateTime?
-  center                         CentralCenter              @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  createdBy                      CenterUserAccount?         @relation("CenterUserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  createdUsers                   CenterUserAccount[]        @relation("CenterUserCreatedBy")
+  center                         CentralCenter             @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  createdBy                      CenterUserAccount?        @relation("CenterUserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdUsers                   CenterUserAccount[]       @relation("CenterUserCreatedBy")
   doctorProfile                  CenterDoctorProfile?
-  visits                         LocalVisit[]               @relation("CenterUserVisits")
-  authoredReports                LocalResultReport[]        @relation("CenterUserAuthoredReports")
-  labRequests                    LabRequestLocal[]          @relation("CenterUserLabRequests")
-  processedIncomingNotifications IncomingNotification[]     @relation("ProcessedIncomingNotifications")
+  visits                         LocalVisit[]              @relation("CenterUserVisits")
+  authoredReports                LocalResultReport[]       @relation("CenterUserAuthoredReports")
+  doctorRefillRequests           MedicationRefillRequest[] @relation("DoctorRefillRequests")
+  pharmacyRefillRequests         MedicationRefillRequest[] @relation("PharmacyRefillRequests")
+  followUpReminders              FollowUpReminder[]        @relation("DoctorFollowUpReminders")
+  labRequests                    LabRequestLocal[]         @relation("CenterUserLabRequests")
+  processedIncomingNotifications IncomingNotification[]    @relation("ProcessedIncomingNotifications")
 
   @@index([centerId, role])
 }
 
 model CenterDoctorProfile {
-  id               Int                @id @default(autoincrement())
-  userAccountId    Int                @unique
+  id               Int               @id @default(autoincrement())
+  userAccountId    Int               @unique
   centerId         Int
-  nationalId       String             @unique
-  gender           Gender             @default(PREFER_NOT_TO_SAY)
+  nationalId       String            @unique
+  gender           Gender            @default(PREFER_NOT_TO_SAY)
   specialization   String
-  yearsExperience  Int                @default(0)
-  licenseNumber    String             @unique
+  yearsExperience  Int               @default(0)
+  licenseNumber    String            @unique
   qualification    String?
   shiftDays        String[]
   shiftStartTime   String?
@@ -782,76 +803,79 @@ model CenterDoctorProfile {
   hireDate         DateTime?
   bio              String?
   notes            String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  userAccount      CenterUserAccount  @relation(fields: [userAccountId], references: [id], onDelete: Cascade)
-  center           CentralCenter      @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  userAccount      CenterUserAccount @relation(fields: [userAccountId], references: [id], onDelete: Cascade)
+  center           CentralCenter     @relation(fields: [centerId], references: [id], onDelete: Cascade)
 
   @@index([centerId, specialization])
 }
 
 model LocalPatient {
-  id               Int            @id @default(autoincrement())
-  centerId         Int
-  unifiedPatientId Int?
-  unifiedId        String?
-  fullName         String
-  dateOfBirth      DateTime
-  gender           Gender
-  phone            String
-  address          String
-  emergencyContact String?
-  bloodType        String?
-  allergies        String[]
-  chronicDiseases  String[]
-  createdLocally   Boolean        @default(false)
-  qrToken          String         @unique @default(uuid())
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-  center           CentralCenter  @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  unifiedPatient   UnifiedPatient? @relation(fields: [unifiedPatientId], references: [id], onDelete: SetNull)
-  visits           LocalVisit[]
-  resultReports    LocalResultReport[]
-  invoices         LocalInvoice[]
-  labRequests      LabRequestLocal[]
+  id                       Int                       @id @default(autoincrement())
+  centerId                 Int
+  unifiedPatientId         Int?
+  unifiedId                String?
+  fullName                 String
+  dateOfBirth              DateTime
+  gender                   Gender
+  phone                    String
+  address                  String
+  emergencyContact         String?
+  bloodType                String?
+  allergies                String[]
+  chronicDiseases          String[]
+  createdLocally           Boolean                   @default(false)
+  qrToken                  String                    @unique @default(uuid())
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  center                   CentralCenter             @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  unifiedPatient           UnifiedPatient?           @relation(fields: [unifiedPatientId], references: [id], onDelete: SetNull)
+  visits                   LocalVisit[]
+  resultReports            LocalResultReport[]
+  invoices                 LocalInvoice[]
+  labRequests              LabRequestLocal[]
+  medicationRefillRequests MedicationRefillRequest[]
+  followUpReminders        FollowUpReminder[]
 
   @@index([centerId, phone])
   @@index([unifiedPatientId])
 }
 
 model LocalVisit {
-  id               Int                 @id @default(autoincrement())
-  centerId         Int
-  patientId        Int
-  doctorId         Int?
-  visitDate        DateTime
-  visitTime        String?
-  visitType        LocalVisitType
-  symptoms         String?
-  bloodPressure    String?
-  temperature      Float?
-  heartRate        Int?
-  diagnosis        String
-  notes            String?
-  priority         VisitPriority       @default(NORMAL)
-  workflowStatus   VisitWorkflowStatus @default(WAITING_DOCTOR)
-  uploadStatus     VisitUploadStatus   @default(NOT_READY)
-  checkedInAt      DateTime            @default(now())
-  completedAt      DateTime?
-  uploadedAt       DateTime?
-  uploadError      String?
-  centralVisitId   Int?                @unique
-  syncState        LocalVisitSyncState @default(PENDING)
-  syncedToCentral  Boolean             @default(false)
-  syncAttemptCount Int                 @default(0)
-  createdAt        DateTime            @default(now())
-  center           CentralCenter       @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  patient          LocalPatient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  doctor           CenterUserAccount?  @relation("CenterUserVisits", fields: [doctorId], references: [id], onDelete: SetNull)
-  unifiedVisit     UnifiedVisit?       @relation("LocalVisitSync", fields: [centralVisitId], references: [id], onDelete: SetNull)
-  prescriptions    LocalPrescription[]
-  resultReports    LocalResultReport[]
-  invoice          LocalInvoice?
+  id                Int                 @id @default(autoincrement())
+  centerId          Int
+  patientId         Int
+  doctorId          Int?
+  visitDate         DateTime
+  visitTime         String?
+  visitType         LocalVisitType
+  symptoms          String?
+  bloodPressure     String?
+  temperature       Float?
+  heartRate         Int?
+  diagnosis         String
+  notes             String?
+  priority          VisitPriority       @default(NORMAL)
+  workflowStatus    VisitWorkflowStatus @default(WAITING_DOCTOR)
+  uploadStatus      VisitUploadStatus   @default(NOT_READY)
+  checkedInAt       DateTime            @default(now())
+  completedAt       DateTime?
+  uploadedAt        DateTime?
+  uploadError       String?
+  centralVisitId    Int?                @unique
+  syncState         LocalVisitSyncState @default(PENDING)
+  syncedToCentral   Boolean             @default(false)
+  syncAttemptCount  Int                 @default(0)
+  createdAt         DateTime            @default(now())
+  center            CentralCenter       @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  patient           LocalPatient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor            CenterUserAccount?  @relation("CenterUserVisits", fields: [doctorId], references: [id], onDelete: SetNull)
+  unifiedVisit      UnifiedVisit?       @relation("LocalVisitSync", fields: [centralVisitId], references: [id], onDelete: SetNull)
+  prescriptions     LocalPrescription[]
+  resultReports     LocalResultReport[]
+  invoice           LocalInvoice?
+  followUpReminders FollowUpReminder[]
 
   @@index([centerId, workflowStatus, priority, checkedInAt])
   @@index([centerId, uploadStatus, visitDate])
@@ -860,27 +884,28 @@ model LocalVisit {
 }
 
 model LocalResultReport {
-  id                    Int                @id @default(autoincrement())
-  centerId              Int
-  patientId             Int
-  visitId               Int
-  authorId              Int
-  title                 String
-  category              String             @default("GENERAL")
-  summary               String
-  findings              String?
-  recommendations       String?
-  recommendedFollowUp   String?
-  shareWithPatient      Boolean            @default(true)
-  attachmentFileName    String?
-  attachmentMimeType    String?
-  attachmentBase64      String?
-  createdAt             DateTime           @default(now())
-  updatedAt             DateTime           @updatedAt
-  center                CentralCenter      @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  patient               LocalPatient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  visit                 LocalVisit         @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  author                CenterUserAccount  @relation("CenterUserAuthoredReports", fields: [authorId], references: [id], onDelete: Cascade)
+  id                  Int               @id @default(autoincrement())
+  centerId            Int
+  patientId           Int
+  visitId             Int
+  authorId            Int
+  title               String
+  category            String            @default("GENERAL")
+  summary             String
+  reportUrl           String?
+  findings            String?
+  recommendations     String?
+  recommendedFollowUp String?
+  shareWithPatient    Boolean           @default(true)
+  attachmentFileName  String?
+  attachmentMimeType  String?
+  attachmentBase64    String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  center              CentralCenter     @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  patient             LocalPatient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  visit               LocalVisit        @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  author              CenterUserAccount @relation("CenterUserAuthoredReports", fields: [authorId], references: [id], onDelete: Cascade)
 
   @@index([centerId, createdAt])
   @@index([patientId, createdAt])
@@ -888,23 +913,73 @@ model LocalResultReport {
 }
 
 model LocalPrescription {
-  id               Int        @id @default(autoincrement())
+  id               Int                       @id @default(autoincrement())
   visitId          Int
   medicineId       Int?
   medicineName     String
   dosage           String
   duration         String
-  quantity         Int        @default(1)
+  quantity         Int                       @default(1)
   unitPrice        Float?
   instructions     String?
-  dispensed        Boolean    @default(false)
-  verificationCode String?    @unique
+  dispensed        Boolean                   @default(false)
+  verificationCode String?                   @unique
   verificationHash String?
-  issuedAt         DateTime   @default(now())
-  visit            LocalVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  issuedAt         DateTime                  @default(now())
+  visit            LocalVisit                @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  refillRequests   MedicationRefillRequest[]
 
   @@index([visitId])
   @@index([verificationCode])
+}
+
+model MedicationRefillRequest {
+  id              Int                    @id @default(autoincrement())
+  centerId        Int
+  patientId       Int
+  prescriptionId  Int
+  requestedAt     DateTime               @default(now())
+  status          MedicationRefillStatus @default(REQUESTED)
+  doctorId        Int?
+  pharmacyUserId  Int?
+  rejectionReason String?
+  notes           String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  center          CentralCenter          @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  patient         LocalPatient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  prescription    LocalPrescription      @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  doctor          CenterUserAccount?     @relation("DoctorRefillRequests", fields: [doctorId], references: [id], onDelete: SetNull)
+  pharmacyUser    CenterUserAccount?     @relation("PharmacyRefillRequests", fields: [pharmacyUserId], references: [id], onDelete: SetNull)
+
+  @@index([patientId])
+  @@index([status])
+  @@index([prescriptionId])
+  @@index([centerId, status, requestedAt])
+}
+
+model FollowUpReminder {
+  id          Int                    @id @default(autoincrement())
+  centerId    Int
+  patientId   Int
+  doctorId    Int
+  visitId     Int?
+  dueDate     DateTime
+  reason      String
+  status      FollowUpReminderStatus @default(PENDING)
+  notes       String?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  completedAt DateTime?
+  cancelledAt DateTime?
+  center      CentralCenter          @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  patient     LocalPatient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor      CenterUserAccount      @relation("DoctorFollowUpReminders", fields: [doctorId], references: [id], onDelete: Cascade)
+  visit       LocalVisit?            @relation(fields: [visitId], references: [id], onDelete: SetNull)
+
+  @@index([patientId, dueDate])
+  @@index([doctorId, status, dueDate])
+  @@index([centerId, status, dueDate])
 }
 
 model LocalInvoice {
@@ -925,33 +1000,33 @@ model LocalInvoice {
 }
 
 model LabTestLocal {
-  id          Int           @id @default(autoincrement())
+  id          Int               @id @default(autoincrement())
   centerId    Int
   testName    String
   category    String
   normalRange String?
   price       Float
-  center      CentralCenter @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  center      CentralCenter     @relation(fields: [centerId], references: [id], onDelete: Cascade)
   requests    LabRequestLocal[]
 
   @@index([centerId, category])
 }
 
 model LabRequestLocal {
-  id              Int                @id @default(autoincrement())
+  id              Int               @id @default(autoincrement())
   centerId        Int
   patientId       Int
   doctorId        Int
   testId          Int
-  requestDate     DateTime           @default(now())
-  status          LabRequestStatus   @default(PENDING)
+  requestDate     DateTime          @default(now())
+  status          LabRequestStatus  @default(PENDING)
   resultValue     String?
   resultDate      DateTime?
-  syncedToCentral Boolean            @default(false)
-  center          CentralCenter      @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  patient         LocalPatient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  doctor          CenterUserAccount  @relation("CenterUserLabRequests", fields: [doctorId], references: [id], onDelete: Cascade)
-  test            LabTestLocal       @relation(fields: [testId], references: [id], onDelete: Cascade)
+  syncedToCentral Boolean           @default(false)
+  center          CentralCenter     @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  patient         LocalPatient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor          CenterUserAccount @relation("CenterUserLabRequests", fields: [doctorId], references: [id], onDelete: Cascade)
+  test            LabTestLocal      @relation(fields: [testId], references: [id], onDelete: Cascade)
 
   @@index([centerId, status, requestDate])
 }
@@ -972,61 +1047,61 @@ model PharmacyInventoryLocal {
 }
 
 model IncomingNotification {
-  id                 Int                       @id @default(autoincrement())
-  centerId           Int
+  id                    Int                         @id @default(autoincrement())
+  centerId              Int
   centralNotificationId Int?
-  notificationType   NetworkNotificationType
-  payload            Json
-  status             NetworkNotificationStatus @default(PENDING)
-  receivedAt         DateTime                  @default(now())
-  processingStartedAt DateTime?
-  completedAt        DateTime?
-  responsePayload    Json?
-  responseStatus     String?
-  responseError      String?
-  processedById      Int?
-  retryOfId          Int?
-  createdAt          DateTime                  @default(now())
-  center             CentralCenter             @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  processedBy        CenterUserAccount?        @relation("ProcessedIncomingNotifications", fields: [processedById], references: [id], onDelete: SetNull)
-  retryOf            IncomingNotification?     @relation("IncomingNotificationRetry", fields: [retryOfId], references: [id], onDelete: SetNull)
-  retries            IncomingNotification[]    @relation("IncomingNotificationRetry")
-  logs               NotificationProcessingLog[]
+  notificationType      NetworkNotificationType
+  payload               Json
+  status                NetworkNotificationStatus   @default(PENDING)
+  receivedAt            DateTime                    @default(now())
+  processingStartedAt   DateTime?
+  completedAt           DateTime?
+  responsePayload       Json?
+  responseStatus        String?
+  responseError         String?
+  processedById         Int?
+  retryOfId             Int?
+  createdAt             DateTime                    @default(now())
+  center                CentralCenter               @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  processedBy           CenterUserAccount?          @relation("ProcessedIncomingNotifications", fields: [processedById], references: [id], onDelete: SetNull)
+  retryOf               IncomingNotification?       @relation("IncomingNotificationRetry", fields: [retryOfId], references: [id], onDelete: SetNull)
+  retries               IncomingNotification[]      @relation("IncomingNotificationRetry")
+  logs                  NotificationProcessingLog[]
 
   @@index([centerId, status, receivedAt])
 }
 
 model OutgoingNotification {
-  id                 Int                       @id @default(autoincrement())
+  id                 Int                         @id @default(autoincrement())
   centerId           Int
   notificationType   NetworkNotificationType
   payload            Json
-  status             NetworkNotificationStatus @default(PENDING)
-  createdAt          DateTime                  @default(now())
+  status             NetworkNotificationStatus   @default(PENDING)
+  createdAt          DateTime                    @default(now())
   sentAt             DateTime?
   acknowledgedAt     DateTime?
   responsePayload    Json?
-  retryCount         Int                       @default(0)
-  maxRetries         Int                       @default(24)
+  retryCount         Int                         @default(0)
+  maxRetries         Int                         @default(24)
   nextRetryAt        DateTime?
   lastError          String?
   centralReferenceId Int?
-  center             CentralCenter             @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  center             CentralCenter               @relation(fields: [centerId], references: [id], onDelete: Cascade)
   logs               NotificationProcessingLog[]
 
   @@index([centerId, status, nextRetryAt])
 }
 
 model NotificationProcessingLog {
-  id                     Int                  @id @default(autoincrement())
+  id                     Int                   @id @default(autoincrement())
   centerId               Int
   incomingNotificationId Int?
   outgoingNotificationId Int?
-  severity               AlertSeverity        @default(INFO)
+  severity               AlertSeverity         @default(INFO)
   message                String
   context                Json?
-  createdAt              DateTime             @default(now())
-  center                 CentralCenter        @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  createdAt              DateTime              @default(now())
+  center                 CentralCenter         @relation(fields: [centerId], references: [id], onDelete: Cascade)
   incomingNotification   IncomingNotification? @relation(fields: [incomingNotificationId], references: [id], onDelete: SetNull)
   outgoingNotification   OutgoingNotification? @relation(fields: [outgoingNotificationId], references: [id], onDelete: SetNull)
 
@@ -1034,15 +1109,15 @@ model NotificationProcessingLog {
 }
 
 model CenterSystemAlert {
-  id          Int           @id @default(autoincrement())
-  centerId    Int
-  alertType   String
-  severity    AlertSeverity @default(INFO)
-  title       String
-  message     String
-  isResolved  Boolean       @default(false)
-  createdAt   DateTime      @default(now())
-  center      CentralCenter @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  id         Int           @id @default(autoincrement())
+  centerId   Int
+  alertType  String
+  severity   AlertSeverity @default(INFO)
+  title      String
+  message    String
+  isResolved Boolean       @default(false)
+  createdAt  DateTime      @default(now())
+  center     CentralCenter @relation(fields: [centerId], references: [id], onDelete: Cascade)
 
   @@index([centerId, severity, createdAt])
 }

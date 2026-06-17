@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Linking, StyleSheet, Text, View } from "react-native";
 
 import {
+  AppButton,
   Card,
   EmptyState,
   HeaderCard,
@@ -38,6 +39,14 @@ export function VisitsScreen() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  async function openReportUrl(reportUrl: string) {
+    try {
+      await Linking.openURL(reportUrl);
+    } catch {
+      setError("تعذر فتح رابط التقرير على هذا الجهاز.");
+    }
+  }
 
   if (loading) {
     return <LoadingState text="جار تحميل الزيارات..." />;
@@ -91,6 +100,15 @@ export function VisitsScreen() {
                     <Text style={styles.primaryText}>{report.title}</Text>
                     <Text style={styles.meta}>{report.summary}</Text>
                     <Text style={styles.dateText}>{formatDateTime(report.createdAt)}</Text>
+                    {report.reportUrl ? (
+                      <AppButton
+                        label="فتح التقرير"
+                        icon="document-text-outline"
+                        onPress={() => void openReportUrl(report.reportUrl!)}
+                        tone="ghost"
+                        style={styles.reportAction}
+                      />
+                    ) : null}
                   </View>
                 ))}
               </View>
@@ -148,7 +166,11 @@ const styles = StyleSheet.create({
   reportItem: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    paddingTop: spacing.xs
+    paddingTop: spacing.xs,
+    gap: spacing.xs
+  },
+  reportAction: {
+    alignSelf: "flex-end"
   },
   dateText: {
     color: colors.primary,

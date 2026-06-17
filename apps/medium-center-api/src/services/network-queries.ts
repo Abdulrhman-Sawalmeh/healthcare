@@ -704,6 +704,7 @@ export async function getCenterVisits(centerId: number) {
       title: report.title,
       category: report.category,
       summary: report.summary,
+      reportUrl: report.reportUrl,
       findings: report.findings,
       recommendations: report.recommendations,
       recommendedFollowUp: report.recommendedFollowUp,

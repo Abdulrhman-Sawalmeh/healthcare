@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { prisma } from "../lib/prisma";
 import { authorize } from "../middleware/auth";
+import { AppError } from "../middleware/error";
 import { recordAuditLog } from "../services/audit-log";
 import { notifyRole } from "../services/internal-notifications";
 import { syncCenterVisitsNow } from "../services/notification-processor";
@@ -11,6 +12,12 @@ import {
   createPrescriptionVerificationCode,
   hashPrescriptionVerificationCode
 } from "../services/prescription-verification";
+import {
+  checkPrescriptionSafety,
+  savePrescriptionWarnings,
+  validatePrescriptionSafetyOverride
+} from "../services/prescription-safety";
+import { notifyPatientAboutResultReport } from "../services/result-report-notifications";
 import { asyncHandler } from "../utils/async-handler";
 
 const router = Router();
@@ -55,7 +62,27 @@ const doctorAssessmentSchema = z.object({
       })
     )
     .default([]),
-  labTestIds: z.array(z.coerce.number().int().positive()).default([])
+  labTestIds: z.array(z.coerce.number().int().positive()).default([]),
+  overridePrescriptionWarnings: z.boolean().optional(),
+  overrideReason: z.string().trim().optional()
+});
+
+const reportUrlSchema = z
+  .string()
+  .trim()
+  .url("أدخل رابط تقرير صالح يبدأ بـ http أو https.")
+  .refine((value) => ["http:", "https:"].includes(new URL(value).protocol), {
+    message: "أدخل رابط تقرير صالح يبدأ بـ http أو https."
+  });
+
+const reportLinkSchema = z.object({
+  title: z.string().min(2),
+  category: z
+    .enum(["GENERAL", "LAB", "IMAGING", "RADIOLOGY", "PATHOLOGY", "CARDIOLOGY", "MICROBIOLOGY", "PROCEDURE"])
+    .default("GENERAL"),
+  reportUrl: reportUrlSchema,
+  summary: z.string().trim().optional(),
+  shareWithPatient: z.boolean().default(true)
 });
 
 const labResultSchema = z.object({
@@ -218,6 +245,18 @@ router.get(
         nursingAssessments: { orderBy: { assessedAt: "desc" } },
         prescriptions: true,
         labRequests: { include: { test: true }, orderBy: { requestDate: "asc" } },
+        resultReports: {
+          include: {
+            author: {
+              include: {
+                doctorProfile: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: "desc"
+          }
+        },
         invoice: true
       },
       orderBy: [{ priority: "desc" }, { checkedInAt: "asc" }]
@@ -888,6 +927,36 @@ router.patch(
       });
 
       if (payload.prescriptions.length > 0) {
+        const resolvedPrescriptions = payload.prescriptions.map((prescription, index) => {
+          const inventoryItem = prescription.medicineId ? medicineById.get(prescription.medicineId) : undefined;
+          const medicineName = inventoryItem?.medicineName ?? prescription.medicineName?.trim();
+
+          if (!medicineName) {
+            throw new AppError("Choose a medicine from inventory or enter the medicine name.", 400);
+          }
+
+          return {
+            ...prescription,
+            medicineName,
+            prescriptionIndex: index
+          };
+        });
+        const safetyWarnings = await checkPrescriptionSafety({
+          centerId,
+          patientId: visit.patientId,
+          activeVisitId: visitId,
+          prescriptions: resolvedPrescriptions.map((prescription) => ({
+            medicineId: prescription.medicineId,
+            medicineName: prescription.medicineName
+          }))
+        });
+
+        validatePrescriptionSafetyOverride({
+          warnings: safetyWarnings,
+          overrideWarnings: payload.overridePrescriptionWarnings,
+          overrideReason: payload.overrideReason
+        });
+
         await tx.localPrescription.createMany({
           data: payload.prescriptions.map((prescription, index) => {
             const inventoryItem = prescription.medicineId
@@ -913,6 +982,42 @@ router.patch(
             };
           })
         });
+        const createdPrescriptions = await tx.localPrescription.findMany({
+          where: {
+            visitId,
+            verificationCode: {
+              in: resolvedPrescriptions.map((prescription) =>
+                createPrescriptionVerificationCode(centerId, visitId, prescription.prescriptionIndex)
+              )
+            }
+          },
+          select: {
+            id: true,
+            verificationCode: true
+          }
+        });
+        const createdPrescriptionByCode = new Map(
+          createdPrescriptions.map((prescription) => [prescription.verificationCode, prescription])
+        );
+
+        for (const prescription of resolvedPrescriptions) {
+          const verificationCode = createPrescriptionVerificationCode(centerId, visitId, prescription.prescriptionIndex);
+          const createdPrescription = createdPrescriptionByCode.get(verificationCode);
+
+          if (!createdPrescription) {
+            continue;
+          }
+
+          await savePrescriptionWarnings(tx, {
+            patientId: visit.patientId,
+            prescriptionId: createdPrescription.id,
+            prescriptionIndex: prescription.prescriptionIndex,
+            warnings: safetyWarnings,
+            overridden: Boolean(payload.overridePrescriptionWarnings),
+            overrideReason: payload.overrideReason
+          });
+        }
+
         await tx.visitWorkflowTask.create({
           data: {
             visitId,
@@ -1102,6 +1207,81 @@ router.patch(
     });
 
     res.json(result);
+  })
+);
+
+router.post(
+  "/:visitId/report-link",
+  authorize("CENTER_MANAGER", "DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = centerIdFromRequest(req);
+    const visitId = Number(req.params.visitId);
+    const payload = reportLinkSchema.parse(req.body);
+    const visit = await prisma.localVisit.findFirst({
+      where: {
+        id: visitId,
+        centerId
+      },
+      select: {
+        id: true,
+        patientId: true,
+        doctorId: true,
+        diagnosis: true
+      }
+    });
+
+    if (!visit) {
+      return res.status(404).json({ message: "ملف الزيارة غير موجود في هذا المركز." });
+    }
+
+    if (req.auth!.role === "DOCTOR" && visit.doctorId && visit.doctorId !== Number(req.auth!.sub)) {
+      return res.status(403).json({ message: "هذه الزيارة معينة لطبيب آخر." });
+    }
+
+    if (!visit.diagnosis || visit.diagnosis === "بانتظار تقييم الطبيب") {
+      return res.status(409).json({ message: "احفظ تقييم الطبيب أولاً قبل إضافة رابط التقرير." });
+    }
+
+    const report = await prisma.localResultReport.create({
+      data: {
+        centerId,
+        patientId: visit.patientId,
+        visitId: visit.id,
+        authorId: Number(req.auth?.sub),
+        title: payload.title,
+        category: payload.category,
+        summary: payload.summary?.trim() || payload.title,
+        reportUrl: payload.reportUrl,
+        shareWithPatient: payload.shareWithPatient,
+        attachmentFileName: null,
+        attachmentMimeType: null,
+        attachmentBase64: null
+      }
+    });
+
+    await recordAuditLog(req, {
+      action: "CREATE_RESULT_REPORT_LINK",
+      entityType: "LocalResultReport",
+      entityId: report.id,
+      centerId,
+      newValue: {
+        visitId: visit.id,
+        patientId: visit.patientId,
+        category: report.category,
+        reportUrl: report.reportUrl,
+        shareWithPatient: report.shareWithPatient
+      }
+    });
+
+    await notifyPatientAboutResultReport({
+      centerId,
+      patientId: visit.patientId,
+      reportTitle: report.title,
+      reportUrl: report.reportUrl,
+      shareWithPatient: report.shareWithPatient
+    });
+
+    res.status(201).json(report);
   })
 );
 

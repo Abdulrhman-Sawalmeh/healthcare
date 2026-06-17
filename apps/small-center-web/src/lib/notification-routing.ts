@@ -73,7 +73,27 @@ export function resolveNotificationPath(input: NotificationRouteInput) {
     return input.workspace === "central" ? "/master-data" : "/notifications";
   }
 
-  if (includesAny(haystack, ["report", "reports", "تقارير", "إحصاء"])) {
+  if (
+    includesAny(haystack, [
+      "report",
+      "reports",
+      "result",
+      "results",
+      "lab",
+      "radiology",
+      "تقرير",
+      "التقرير",
+      "تقارير",
+      "التقارير",
+      "نتائج",
+      "النتائج",
+      "إحصاء"
+    ])
+  ) {
+    if (input.role === "PATIENT") {
+      return "/medical-record#reports";
+    }
+
     return input.workspace === "central" ? "/reports" : "/notifications";
   }
 

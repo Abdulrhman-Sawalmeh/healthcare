@@ -74,7 +74,15 @@ const labelMap: Record<string, string> = {
   REFERRAL_REQUEST: "طلب إحالة",
   ALERT: "تنبيه نظامي",
   TO_CENTER: "من النظام المركزي إلى المركز",
-  FROM_CENTER: "من المركز إلى النظام المركزي"
+  FROM_CENTER: "من المركز إلى النظام المركزي",
+  REQUESTED: "طلب جديد",
+  DOCTOR_APPROVED: "وافق الطبيب",
+  PHARMACY_PREPARING: "قيد التجهيز",
+  READY_FOR_PICKUP: "جاهز للاستلام",
+  COLLECTED: "تم الاستلام",
+  REJECTED: "مرفوض",
+  DONE: "منجز",
+  MISSED: "فائت"
 };
 
 function currentLocale() {

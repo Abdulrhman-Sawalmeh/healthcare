@@ -1,0 +1,1 @@
+ALTER TABLE "LocalResultReport" ADD COLUMN IF NOT EXISTS "reportUrl" TEXT;

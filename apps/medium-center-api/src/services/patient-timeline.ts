@@ -1,5 +1,11 @@
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
+import {
+  followUpReminderInclude,
+  mapFollowUpReminder,
+  mapMedicationRefillRequest,
+  refillRequestInclude
+} from "./patient-care-workflow";
 
 type TimelineEventType =
   | "appointment"
@@ -7,6 +13,8 @@ type TimelineEventType =
   | "prescription"
   | "lab_result"
   | "referral"
+  | "refill_request"
+  | "follow_up"
   | "note";
 
 type TimelineEvent = {
@@ -17,6 +25,8 @@ type TimelineEvent = {
   date: string;
   createdBy: string;
   sourceTable: string;
+  status?: string;
+  source?: string;
 };
 
 type TimelineCenter = {
@@ -47,6 +57,22 @@ const labStatusLabels: Record<string, string> = {
   CANCELLED: "ملغاة"
 };
 
+const refillStatusLabels: Record<string, string> = {
+  REQUESTED: "طلب جديد",
+  DOCTOR_APPROVED: "وافق الطبيب",
+  PHARMACY_PREPARING: "قيد التجهيز",
+  READY_FOR_PICKUP: "جاهز للاستلام",
+  COLLECTED: "تم الاستلام",
+  REJECTED: "مرفوض"
+};
+
+const followUpStatusLabels: Record<string, string> = {
+  PENDING: "قيد المتابعة",
+  DONE: "منجز",
+  CANCELLED: "ملغي",
+  MISSED: "فائت"
+};
+
 function joinParts(parts: Array<string | null | undefined>) {
   return parts.filter(Boolean).join(" • ");
 }
@@ -71,6 +97,14 @@ function referralStatusLabel(status: string) {
 
 function labStatusLabel(status: string) {
   return labStatusLabels[status] ?? status;
+}
+
+function refillStatusLabel(status: string) {
+  return refillStatusLabels[status] ?? status;
+}
+
+function followUpStatusLabel(status: string) {
+  return followUpStatusLabels[status] ?? status;
 }
 
 export async function getPatientTimelineForCenter(centerId: number, patientId: number) {
@@ -108,6 +142,18 @@ export async function getPatientTimelineForCenter(centerId: number, patientId: n
         },
         orderBy: {
           requestDate: "desc"
+        }
+      },
+      medicationRefillRequests: {
+        include: refillRequestInclude,
+        orderBy: {
+          requestedAt: "desc"
+        }
+      },
+      followUpReminders: {
+        include: followUpReminderInclude,
+        orderBy: {
+          dueDate: "desc"
         }
       }
     }
@@ -266,7 +312,50 @@ export async function getPatientTimelineForCenter(centerId: number, patientId: n
     ];
   });
 
-  const events = sortEvents([...visitEvents, ...prescriptionEvents, ...labEvents, ...referralEvents]);
+  const refillEvents = patient.medicationRefillRequests.map<TimelineEvent>((request) => ({
+    id: `refill-${request.id}`,
+    type: "refill_request",
+    title: `طلب تجديد دواء: ${request.prescription.medicineName}`,
+    description:
+      joinParts([
+        `الحالة: ${refillStatusLabel(request.status)}`,
+        `الجرعة: ${request.prescription.dosage}`,
+        `المدة: ${request.prescription.duration}`,
+        request.rejectionReason ? `سبب الرفض: ${request.rejectionReason}` : null,
+        request.notes ? `ملاحظات: ${request.notes}` : null
+      ]) || "تم تسجيل طلب تجديد دواء للمريض.",
+    date: request.updatedAt.toISOString(),
+    createdBy: request.doctor?.fullName ?? request.prescription.visit.doctor?.fullName ?? patient.center.centerName,
+    sourceTable: "MedicationRefillRequest",
+    status: request.status,
+    source: "MedicationRefillRequest"
+  }));
+
+  const followUpEvents = patient.followUpReminders.map<TimelineEvent>((reminder) => ({
+    id: `follow-up-${reminder.id}`,
+    type: "follow_up",
+    title: `تذكير متابعة: ${reminder.reason}`,
+    description:
+      joinParts([
+        `الحالة: ${followUpStatusLabel(reminder.status)}`,
+        reminder.visit?.diagnosis ? `الزيارة: ${reminder.visit.diagnosis}` : null,
+        reminder.notes ? `ملاحظات: ${reminder.notes}` : null
+      ]) || "تم تسجيل تذكير متابعة للمريض.",
+    date: reminder.dueDate.toISOString(),
+    createdBy: reminder.doctor.fullName,
+    sourceTable: "FollowUpReminder",
+    status: reminder.status,
+    source: "FollowUpReminder"
+  }));
+
+  const events = sortEvents([
+    ...visitEvents,
+    ...prescriptionEvents,
+    ...labEvents,
+    ...referralEvents,
+    ...refillEvents,
+    ...followUpEvents
+  ]);
   const centersSeenAt = uniqueCenters(
     patient.unifiedPatient?.localPatients.length
       ? patient.unifiedPatient.localPatients.map((entry) => ({
@@ -301,9 +390,13 @@ export async function getPatientTimelineForCenter(centerId: number, patientId: n
       visitCount: patient.visits.length,
       labResultsCount: labEvents.length,
       referralCount: referrals.length,
+      refillRequestCount: patient.medicationRefillRequests.length,
+      followUpReminderCount: patient.followUpReminders.length,
       timelineCount: events.length,
       lastEventAt: events[0]?.date ?? null
     },
-    events
+    events,
+    refillRequests: patient.medicationRefillRequests.map(mapMedicationRefillRequest),
+    followUpReminders: patient.followUpReminders.map(mapFollowUpReminder)
   };
 }

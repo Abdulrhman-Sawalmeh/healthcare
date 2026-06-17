@@ -18,6 +18,7 @@ import {
 } from "../components/ui";
 import { formatDate, formatDateTime, toArabicLabel } from "../lib/arabic";
 import { mediumApi } from "../services/mediumApi";
+import { readPatientOfflineSnapshot, writePatientOfflineSnapshot } from "../services/offlineCache";
 import { PortalClinicalReportRecord, PortalMedicalRecord, SubscriptionPlanRecord } from "../types";
 import { colors, spacing } from "../theme/tokens";
 
@@ -29,24 +30,47 @@ export function MedicalRecordScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [refillBusyId, setRefillBusyId] = useState<number | null>(null);
+  const [offline, setOffline] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
   const loadData = useCallback(async () => {
     setRefreshing(true);
+    let reachable = false;
+
     try {
+      reachable = await mediumApi.healthCheck().catch(() => false);
+
+      if (!reachable) {
+        throw new Error("Offline");
+      }
+
       const [recordPayload, plansPayload] = await Promise.all([
         mediumApi.portalMedicalRecord(),
         mediumApi.subscriptionPlans().catch(() => [])
       ]);
+      const snapshot = await writePatientOfflineSnapshot(recordPayload);
       setRecord(recordPayload);
       setPlans(plansPayload);
+      setOffline(false);
+      setLastSyncedAt(snapshot.cachedAt);
       if (!selectedPlanId && plansPayload[0]) {
         setSelectedPlanId(plansPayload[0].id);
       }
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر تحميل السجل الصحي.");
+      const cached = reachable ? null : await readPatientOfflineSnapshot();
+
+      if (cached) {
+        setRecord(cached.record);
+        setPlans([]);
+        setOffline(true);
+        setLastSyncedAt(cached.cachedAt);
+        setError("");
+      }
     } finally {
       setRefreshing(false);
       setLoading(false);
@@ -87,6 +111,22 @@ export function MedicalRecordScreen() {
     }
   }
 
+  async function requestRefill(prescriptionId: number) {
+    setRefillBusyId(prescriptionId);
+    setError("");
+    setMessage("");
+
+    try {
+      await mediumApi.createPortalRefillRequest({ prescriptionId });
+      setMessage("تم إرسال طلب تجديد الدواء إلى الطبيب.");
+      await loadData();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "تعذر إرسال طلب تجديد الدواء.");
+    } finally {
+      setRefillBusyId(null);
+    }
+  }
+
   async function openReportAttachment(report: PortalClinicalReportRecord) {
     if (!report.attachment?.contentBase64) {
       setError("لا يوجد ملف مرفق يمكن فتحه لهذا التقرير.");
@@ -99,6 +139,19 @@ export function MedicalRecordScreen() {
       );
     } catch {
       setError("تعذر فتح مرفق التقرير على هذا الجهاز.");
+    }
+  }
+
+  async function openReportUrl(report: PortalClinicalReportRecord) {
+    if (!report.reportUrl) {
+      setError("لا يوجد رابط تقرير متاح لهذا التقرير.");
+      return;
+    }
+
+    try {
+      await Linking.openURL(report.reportUrl);
+    } catch {
+      setError("تعذر فتح رابط التقرير على هذا الجهاز.");
     }
   }
 
@@ -117,6 +170,15 @@ export function MedicalRecordScreen() {
 
       {error ? <Notice text={error} tone="error" /> : null}
       {message ? <Notice text={message} tone="success" /> : null}
+      {offline ? (
+        <Card>
+          <Text style={styles.offlineTitle}>Offline data - may be outdated</Text>
+          <Text style={styles.meta}>
+            Last synced: {lastSyncedAt ? formatDateTime(lastSyncedAt) : "Unknown"}
+          </Text>
+          <AppButton icon="sync-outline" label="Retry Sync" onPress={() => void loadData()} tone="ghost" />
+        </Card>
+      ) : null}
 
       {record ? (
         <>
@@ -144,6 +206,63 @@ export function MedicalRecordScreen() {
             </View>
             <Text style={styles.meta}>الأمراض المزمنة: {record.profile.chronicConditions || "غير مسجلة"}</Text>
             <Text style={styles.meta}>جهة الطوارئ: {record.profile.emergencyContact || "غير مسجلة"}</Text>
+          </Card>
+
+          <Card>
+            <SectionTitle title="تجديد الأدوية" subtitle="يمكنك طلب تجديد وصفة مؤهلة ومتابعة حالتها من الطبيب والصيدلية." />
+            {(record.eligiblePrescriptions ?? []).map((prescription) => (
+              <View key={prescription.id} style={styles.listItem}>
+                <Text style={styles.itemTitle}>{prescription.medicineName}</Text>
+                <Text style={styles.meta}>
+                  {prescription.dosage} | {prescription.duration} | {formatDateTime(prescription.issuedAt)}
+                </Text>
+                <AppButton
+                  disabled={refillBusyId === prescription.id}
+                  icon="medkit-outline"
+                  label="طلب تجديد"
+                  onPress={() => void requestRefill(prescription.id)}
+                  style={styles.smallAction}
+                />
+              </View>
+            ))}
+            {(record.eligiblePrescriptions ?? []).length === 0 ? <EmptyState text="لا توجد وصفات مؤهلة لطلب تجديد حاليا." /> : null}
+
+            {(record.medicationRefills ?? []).map((request) => (
+              <View key={request.id} style={styles.listItem}>
+                <View style={styles.itemTop}>
+                  <StatusPill
+                    label={toArabicLabel(request.status)}
+                    tone={request.status === "REJECTED" ? "danger" : request.status === "COLLECTED" ? "primary" : "warning"}
+                  />
+                  <Text style={styles.itemTitle}>{request.medicineName}</Text>
+                </View>
+                <Text style={styles.meta}>
+                  {request.dosage} | {request.duration} | {formatDateTime(request.requestedAt)}
+                </Text>
+                {request.rejectionReason ? <Text style={styles.meta}>سبب الرفض: {request.rejectionReason}</Text> : null}
+              </View>
+            ))}
+          </Card>
+
+          <Card>
+            <SectionTitle title="تذكيرات المتابعة" subtitle="التذكيرات التي أضافها الطبيب بعد الزيارة." />
+            {(record.followUpReminders ?? []).map((reminder) => {
+              const overdue = reminder.status === "PENDING" && new Date(reminder.dueDate).getTime() < Date.now();
+
+              return (
+                <View key={reminder.id} style={styles.listItem}>
+                  <View style={styles.itemTop}>
+                    <StatusPill label={overdue ? "متأخر" : toArabicLabel(reminder.status)} tone={overdue ? "danger" : "warning"} />
+                    <Text style={styles.itemTitle}>{reminder.reason}</Text>
+                  </View>
+                  <Text style={styles.meta}>
+                    {reminder.doctorName} | {formatDateTime(reminder.dueDate)}
+                  </Text>
+                  {reminder.notes ? <Text style={styles.meta}>{reminder.notes}</Text> : null}
+                </View>
+              );
+            })}
+            {(record.followUpReminders ?? []).length === 0 ? <EmptyState text="لا توجد تذكيرات متابعة قادمة." /> : null}
           </Card>
 
           <Card>
@@ -182,6 +301,14 @@ export function MedicalRecordScreen() {
                 <Text style={styles.meta}>
                   {report.doctor.fullName} | {formatDateTime(report.scheduledAt)}
                 </Text>
+                {report.reportUrl ? (
+                  <AppButton
+                    label="فتح التقرير"
+                    icon="document-text-outline"
+                    onPress={() => void openReportUrl(report)}
+                    style={styles.smallAction}
+                  />
+                ) : null}
                 {report.attachment ? (
                   <View style={styles.attachmentRow}>
                     <View style={styles.attachmentTextWrap}>
@@ -302,6 +429,12 @@ const styles = StyleSheet.create({
   },
   label: {
     color: colors.text,
+    fontWeight: "900",
+    textAlign: "right"
+  },
+  offlineTitle: {
+    color: colors.danger,
+    fontSize: 16,
     fontWeight: "900",
     textAlign: "right"
   },

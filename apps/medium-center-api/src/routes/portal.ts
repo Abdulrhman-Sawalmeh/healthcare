@@ -1,9 +1,25 @@
 import { AppointmentStatus, SubscriptionStatus, UserRole } from "@prisma/client";
 import { Router } from "express";
+import { z } from "zod";
 
 import { prisma } from "../lib/prisma";
 import { authenticate, authorize } from "../middleware/auth";
 import { AppError } from "../middleware/error";
+import { recordAuditLog } from "../services/audit-log";
+import { notifyRole } from "../services/internal-notifications";
+import {
+  expireStalePatientConsents,
+  mapPatientConsent,
+  resolveConsentTargetLabel
+} from "../services/patient-access-control";
+import {
+  activeRefillStatuses,
+  getPortalFollowUpReminders,
+  getPortalMedicationRefillBundle,
+  mapMedicationRefillRequest,
+  refillRequestInclude,
+  resolvePortalLocalPatient
+} from "../services/patient-care-workflow";
 import { asyncHandler } from "../utils/async-handler";
 import {
   mapAppointment,
@@ -24,6 +40,21 @@ import { referralsRouter } from "./referrals";
 import { subscriptionsRouter } from "./subscriptions";
 
 const router = Router();
+
+const consentScopeSchema = z.enum([
+  "BASIC_INFO",
+  "VISITS",
+  "LAB_RESULTS",
+  "PRESCRIPTIONS",
+  "FULL_SUMMARY"
+]);
+
+const consentSchema = z.object({
+  targetType: z.enum(["DOCTOR", "CENTER"]),
+  targetId: z.union([z.string(), z.number()]).transform((value) => String(value).trim()),
+  scope: consentScopeSchema,
+  expiresAt: z.coerce.date()
+});
 
 const appointmentInclude = {
   center: true,
@@ -108,6 +139,11 @@ const localResultReportInclude = {
   }
 } as const;
 
+const medicationRefillRequestSchema = z.object({
+  prescriptionId: z.coerce.number().int().positive(),
+  notes: z.string().trim().max(500).optional()
+});
+
 function mapAppointmentAsClinicalReport(
   appointment: Parameters<typeof mapAppointment>[0]
 ) {
@@ -117,6 +153,7 @@ function mapAppointmentAsClinicalReport(
     ...mapped,
     source: "APPOINTMENT",
     summary: appointment.notes ?? null,
+    reportUrl: null,
     findings: null,
     recommendations: null,
     recommendedFollowUp: null,
@@ -130,6 +167,7 @@ function mapLocalResultReport(
     title: string;
     category: string;
     summary: string;
+    reportUrl: string | null;
     findings: string | null;
     recommendations: string | null;
     recommendedFollowUp: string | null;
@@ -165,6 +203,7 @@ function mapLocalResultReport(
     notes: report.summary,
     source: "RESULT_REPORT",
     summary: report.summary,
+    reportUrl: report.reportUrl,
     findings: report.findings,
     recommendations: report.recommendations,
     recommendedFollowUp: report.recommendedFollowUp,
@@ -260,6 +299,230 @@ async function getPatientLocalResultReports(
     )
   );
 }
+
+router.get(
+  "/consent-targets",
+  authenticate,
+  authorize(UserRole.PATIENT),
+  asyncHandler(async (req, res) => {
+    const patientProfileId = requireProfileId(req.auth?.patientProfileId, "Patient profile is required.");
+    const scope = await resolvePortalLocalPatient(patientProfileId);
+
+    if (!scope?.centerId || !scope.localPatient) {
+      throw new AppError("Local patient record was not found for this portal account.", 404);
+    }
+
+    const [centers, doctors] = await Promise.all([
+      prisma.centralCenter.findMany({
+        where: { isConnected: true },
+        select: {
+          id: true,
+          centerCode: true,
+          centerName: true,
+          city: true
+        },
+        orderBy: { centerName: "asc" },
+        take: 100
+      }),
+      prisma.centerUserAccount.findMany({
+        where: {
+          isActive: true,
+          role: "DOCTOR"
+        },
+        include: {
+          center: {
+            select: {
+              centerName: true,
+              centerCode: true
+            }
+          },
+          doctorProfile: {
+            select: {
+              specialization: true
+            }
+          }
+        },
+        orderBy: { fullName: "asc" },
+        take: 100
+      })
+    ]);
+
+    res.json({
+      centers: centers.map((center) => ({
+        id: String(center.id),
+        label: center.centerName,
+        subtitle: `${center.centerCode} - ${center.city}`
+      })),
+      doctors: doctors.map((doctor) => ({
+        id: String(doctor.id),
+        label: doctor.fullName,
+        subtitle: `${doctor.doctorProfile?.specialization ?? "Doctor"} - ${doctor.center.centerName}`
+      }))
+    });
+  })
+);
+
+router.get(
+  "/consents",
+  authenticate,
+  authorize(UserRole.PATIENT),
+  asyncHandler(async (req, res) => {
+    const patientProfileId = requireProfileId(req.auth?.patientProfileId, "Patient profile is required.");
+    const scope = await resolvePortalLocalPatient(patientProfileId);
+
+    if (!scope?.centerId || !scope.localPatient) {
+      throw new AppError("Local patient record was not found for this portal account.", 404);
+    }
+
+    await expireStalePatientConsents(scope.localPatient.id);
+
+    const consents = await prisma.patientConsent.findMany({
+      where: {
+        patientId: scope.localPatient.id,
+        status: "ACTIVE",
+        expiresAt: {
+          gt: new Date()
+        }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+    const labels = await Promise.all(
+      consents.map((consent) => resolveConsentTargetLabel(consent.targetType, consent.targetId))
+    );
+
+    res.json(consents.map((consent, index) => mapPatientConsent(consent, labels[index])));
+  })
+);
+
+router.post(
+  "/consents",
+  authenticate,
+  authorize(UserRole.PATIENT),
+  asyncHandler(async (req, res) => {
+    const patientProfileId = requireProfileId(req.auth?.patientProfileId, "Patient profile is required.");
+    const scope = await resolvePortalLocalPatient(patientProfileId);
+    const payload = consentSchema.parse(req.body);
+    const now = new Date();
+    const maxExpiry = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+
+    if (!scope?.centerId || !scope.localPatient) {
+      throw new AppError("Local patient record was not found for this portal account.", 404);
+    }
+
+    if (payload.expiresAt <= now) {
+      throw new AppError("Consent expiration must be in the future.", 400);
+    }
+
+    if (payload.expiresAt > maxExpiry) {
+      throw new AppError("Consent can be granted for up to 90 days.", 400);
+    }
+
+    const targetLabel = await resolveConsentTargetLabel(payload.targetType, payload.targetId);
+
+    if (!targetLabel) {
+      throw new AppError("Consent target was not found or is inactive.", 404);
+    }
+
+    await expireStalePatientConsents(scope.localPatient.id);
+
+    const consent = await prisma.$transaction(async (tx) => {
+      await tx.patientConsent.updateMany({
+        where: {
+          patientId: scope.localPatient!.id,
+          targetType: payload.targetType,
+          targetId: payload.targetId,
+          scope: payload.scope,
+          status: "ACTIVE"
+        },
+        data: {
+          status: "REVOKED",
+          revokedAt: now
+        }
+      });
+
+      return tx.patientConsent.create({
+        data: {
+          centerId: scope.centerId,
+          patientId: scope.localPatient!.id,
+          grantedByPatientProfileId: patientProfileId,
+          targetType: payload.targetType,
+          targetId: payload.targetId,
+          scope: payload.scope,
+          expiresAt: payload.expiresAt
+        }
+      });
+    });
+
+    await recordAuditLog(req, {
+      action: "PATIENT_CONSENT_GRANTED",
+      entityType: "PatientConsent",
+      entityId: consent.id,
+      centerId: scope.centerId,
+      newValue: {
+        patientId: scope.localPatient.id,
+        targetType: consent.targetType,
+        targetId: consent.targetId,
+        scope: consent.scope,
+        expiresAt: consent.expiresAt.toISOString()
+      }
+    });
+
+    res.status(201).json(mapPatientConsent(consent, targetLabel));
+  })
+);
+
+router.patch(
+  "/consents/:consentId/revoke",
+  authenticate,
+  authorize(UserRole.PATIENT),
+  asyncHandler(async (req, res) => {
+    const patientProfileId = requireProfileId(req.auth?.patientProfileId, "Patient profile is required.");
+    const consentId = Number(req.params.consentId);
+    const scope = await resolvePortalLocalPatient(patientProfileId);
+
+    if (!Number.isInteger(consentId) || consentId <= 0) {
+      throw new AppError("Consent ID must be a positive integer.", 400);
+    }
+
+    if (!scope?.centerId || !scope.localPatient) {
+      throw new AppError("Local patient record was not found for this portal account.", 404);
+    }
+
+    const consent = await prisma.patientConsent.findFirst({
+      where: {
+        id: consentId,
+        patientId: scope.localPatient.id
+      }
+    });
+
+    if (!consent) {
+      throw new AppError("Consent was not found for this patient.", 404);
+    }
+
+    const revoked = await prisma.patientConsent.update({
+      where: { id: consent.id },
+      data: {
+        status: "REVOKED",
+        revokedAt: new Date()
+      }
+    });
+    const targetLabel = await resolveConsentTargetLabel(revoked.targetType, revoked.targetId);
+
+    await recordAuditLog(req, {
+      action: "PATIENT_CONSENT_REVOKED",
+      entityType: "PatientConsent",
+      entityId: revoked.id,
+      centerId: scope.centerId,
+      oldValue: { status: consent.status },
+      newValue: {
+        status: revoked.status,
+        revokedAt: revoked.revokedAt?.toISOString()
+      }
+    });
+
+    res.json(mapPatientConsent(revoked, targetLabel));
+  })
+);
 
 router.get(
   "/summary",
@@ -414,7 +677,11 @@ router.get(
       throw new AppError("Patient profile not found.", 404);
     }
 
-    const localReports = await getPatientLocalResultReports(patient, true);
+    const [localReports, refillBundle, followUpReminders] = await Promise.all([
+      getPatientLocalResultReports(patient, true),
+      getPortalMedicationRefillBundle(patientId),
+      getPortalFollowUpReminders(patientId)
+    ]);
     const clinicalReports = [
       ...patient.appointments
         .filter((appointment) => appointment.status === AppointmentStatus.COMPLETED)
@@ -448,8 +715,104 @@ router.get(
         )
         .map(mapAppointment),
       referrals: patient.referrals.map(mapReferral),
-      subscriptions: patient.subscriptions.map(mapSubscription)
+      subscriptions: patient.subscriptions.map(mapSubscription),
+      medicationRefills: refillBundle.requests,
+      eligiblePrescriptions: refillBundle.eligiblePrescriptions,
+      followUpReminders
     });
+  })
+);
+
+router.get(
+  "/refill-requests",
+  authenticate,
+  authorize(UserRole.PATIENT),
+  asyncHandler(async (req, res) => {
+    const patientId = requireProfileId(req.auth?.patientProfileId, "Patient profile is required.");
+
+    res.json(await getPortalMedicationRefillBundle(patientId));
+  })
+);
+
+router.post(
+  "/refill-requests",
+  authenticate,
+  authorize(UserRole.PATIENT),
+  asyncHandler(async (req, res) => {
+    const patientProfileId = requireProfileId(req.auth?.patientProfileId, "Patient profile is required.");
+    const payload = medicationRefillRequestSchema.parse(req.body);
+    const scope = await resolvePortalLocalPatient(patientProfileId);
+
+    if (!scope?.centerId || !scope.localPatient) {
+      throw new AppError("Local patient record was not found for this portal account.", 404);
+    }
+
+    const prescription = await prisma.localPrescription.findFirst({
+      where: {
+        id: payload.prescriptionId,
+        visit: {
+          centerId: scope.centerId,
+          patientId: scope.localPatient.id
+        }
+      },
+      include: {
+        visit: {
+          include: {
+            doctor: true
+          }
+        }
+      }
+    });
+
+    if (!prescription) {
+      throw new AppError("Prescription is not available for refill from this patient account.", 404);
+    }
+
+    const activeRequest = await prisma.medicationRefillRequest.findFirst({
+      where: {
+        centerId: scope.centerId,
+        patientId: scope.localPatient.id,
+        prescriptionId: prescription.id,
+        status: {
+          in: activeRefillStatuses
+        }
+      }
+    });
+
+    if (activeRequest) {
+      throw new AppError("There is already an active refill request for this prescription.", 409);
+    }
+
+    const request = await prisma.medicationRefillRequest.create({
+      data: {
+        centerId: scope.centerId,
+        patientId: scope.localPatient.id,
+        prescriptionId: prescription.id,
+        notes: payload.notes
+      },
+      include: refillRequestInclude
+    });
+
+    await notifyRole({
+      centerId: scope.centerId,
+      role: "DOCTOR",
+      type: "MEDICATION_REFILL_REQUEST",
+      title: "طلب تجديد دواء جديد",
+      message: `${scope.localPatient.fullName} طلب تجديد وصفة ${prescription.medicineName}.`
+    });
+
+    res.status(201).json(mapMedicationRefillRequest(request));
+  })
+);
+
+router.get(
+  "/follow-up-reminders",
+  authenticate,
+  authorize(UserRole.PATIENT),
+  asyncHandler(async (req, res) => {
+    const patientId = requireProfileId(req.auth?.patientProfileId, "Patient profile is required.");
+
+    res.json(await getPortalFollowUpReminders(patientId));
   })
 );
 

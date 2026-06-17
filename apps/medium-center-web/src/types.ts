@@ -306,6 +306,8 @@ export type PatientTimelineEventType =
   | "prescription"
   | "lab_result"
   | "referral"
+  | "refill_request"
+  | "follow_up"
   | "note";
 
 export interface PatientTimelineEvent {
@@ -316,6 +318,105 @@ export interface PatientTimelineEvent {
   date: string;
   createdBy: string;
   sourceTable: string;
+  status?: string;
+  source?: string;
+}
+
+export type PrescriptionWarningSeverity = "LOW" | "MEDIUM" | "HIGH";
+export type PrescriptionWarningType = "ALLERGY" | "DRUG_CONFLICT";
+
+export interface PrescriptionSafetyWarningRecord {
+  prescriptionIndex: number;
+  medicineName: string;
+  warningType: PrescriptionWarningType;
+  severity: PrescriptionWarningSeverity;
+  message: string;
+  conflictWith?: string | null;
+}
+
+export interface PatientLabTrendPoint {
+  date: string;
+  value: number;
+  rawValue?: string | null;
+}
+
+export interface PatientLabTrend {
+  testName: string | null;
+  unit?: string | null;
+  normalRange?: string | null;
+  availableTests: string[];
+  points: PatientLabTrendPoint[];
+}
+
+export type MedicationRefillStatus =
+  | "REQUESTED"
+  | "DOCTOR_APPROVED"
+  | "PHARMACY_PREPARING"
+  | "READY_FOR_PICKUP"
+  | "COLLECTED"
+  | "REJECTED";
+
+export interface MedicationRefillRequestRecord {
+  id: number;
+  centerId: number;
+  patientId: number;
+  patientName: string;
+  patientUnifiedId?: string | null;
+  prescriptionId: number;
+  medicineName: string;
+  dosage: string;
+  duration: string;
+  instructions?: string | null;
+  visitId: number;
+  visitDate: string;
+  doctorId?: number | null;
+  doctorName?: string | null;
+  pharmacyUserId?: number | null;
+  pharmacyUserName?: string | null;
+  requestedAt: string;
+  status: MedicationRefillStatus;
+  rejectionReason?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EligiblePrescriptionRecord {
+  id: number;
+  visitId: number;
+  medicineName: string;
+  dosage: string;
+  duration: string;
+  instructions?: string | null;
+  issuedAt: string;
+  dispensed: boolean;
+  doctorId?: number | null;
+  doctorName?: string | null;
+  visitDate: string;
+  latestRefillStatus?: MedicationRefillStatus | null;
+}
+
+export type FollowUpReminderStatus = "PENDING" | "DONE" | "CANCELLED" | "MISSED";
+
+export interface FollowUpReminderRecord {
+  id: number;
+  centerId: number;
+  patientId: number;
+  patientName: string;
+  patientUnifiedId?: string | null;
+  doctorId: number;
+  doctorName: string;
+  visitId?: number | null;
+  visitSummary?: string | null;
+  visitDate?: string | null;
+  dueDate: string;
+  reason: string;
+  status: FollowUpReminderStatus;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+  cancelledAt?: string | null;
 }
 
 export interface PatientTimelineBundle {
@@ -340,10 +441,14 @@ export interface PatientTimelineBundle {
     visitCount: number;
     labResultsCount: number;
     referralCount: number;
+    refillRequestCount?: number;
+    followUpReminderCount?: number;
     timelineCount: number;
     lastEventAt?: string | null;
   };
   events: PatientTimelineEvent[];
+  refillRequests?: MedicationRefillRequestRecord[];
+  followUpReminders?: FollowUpReminderRecord[];
 }
 
 export interface VisitRecord {
@@ -387,6 +492,7 @@ export interface LocalVisitReportRecord {
   title: string;
   category: string;
   summary: string;
+  reportUrl?: string | null;
   findings?: string | null;
   recommendations?: string | null;
   recommendedFollowUp?: string | null;
@@ -694,6 +800,7 @@ export interface PortalClinicalReportRecord {
   notes?: string | null;
   source: "APPOINTMENT" | "RESULT_REPORT";
   summary?: string | null;
+  reportUrl?: string | null;
   findings?: string | null;
   recommendations?: string | null;
   recommendedFollowUp?: string | null;
@@ -910,6 +1017,9 @@ export interface PortalMedicalRecord {
   upcomingAppointments: PortalAppointmentRecord[];
   referrals: PortalReferralRecord[];
   subscriptions: PortalSubscriptionRecord[];
+  medicationRefills?: MedicationRefillRequestRecord[];
+  eligiblePrescriptions?: EligiblePrescriptionRecord[];
+  followUpReminders?: FollowUpReminderRecord[];
 }
 
 export type AiCareInsightContext = "PATIENT_SELF_CARE" | "CLINICAL_TRIAGE" | "FOLLOW_UP";

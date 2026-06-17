@@ -16,6 +16,7 @@ import { DoctorsScreen } from "./DoctorsScreen";
 import { MedicalRecordScreen } from "./MedicalRecordScreen";
 import { MessagesScreen } from "./MessagesScreen";
 import { NotificationsScreen } from "./NotificationsScreen";
+import { PatientPermissionsScreen } from "./PatientPermissionsScreen";
 import { PrescriptionVerificationScreen } from "./PrescriptionVerificationScreen";
 import { ProfileScreen } from "./ProfileScreen";
 import { ReferralsScreen } from "./ReferralsScreen";
@@ -28,6 +29,7 @@ type FeatureKey =
   | "visits"
   | "referrals"
   | "notifications"
+  | "permissions"
   | "prescription-verification"
   | "ai-assistant"
   | "profile";
@@ -49,6 +51,7 @@ export function ServicesScreen() {
 
     if (user.role === "PATIENT") {
       return [
+        { key: "permissions", title: "My Data Permissions", subtitle: "Grant or revoke temporary record access", icon: "shield-checkmark-outline" },
         { key: "doctors", title: "الأطباء", subtitle: "دليل الأطباء ومواعيدهم المقترحة", icon: "medkit-outline" },
         { key: "medical-record", title: "السجل الصحي", subtitle: "التقارير، الإحالات، والاشتراكات", icon: "folder-open-outline" },
         { key: "notifications", title: "الإشعارات", subtitle: "مستجدات المواعيد والتقارير", icon: "notifications-outline" },
@@ -105,7 +108,7 @@ export function ServicesScreen() {
         <View style={styles.backBar}>
           <AppButton icon="arrow-forward-outline" label="العودة للخدمات" onPress={() => setFeature(null)} tone="ghost" />
         </View>
-        {renderFeature(feature)}
+        {renderFeature(feature, setFeature)}
       </View>
     );
   }
@@ -135,7 +138,7 @@ export function ServicesScreen() {
   );
 }
 
-function renderFeature(feature: FeatureKey) {
+function renderFeature(feature: FeatureKey, setFeature?: (feature: FeatureKey | null) => void) {
   switch (feature) {
     case "doctors":
       return <DoctorsScreen />;
@@ -148,7 +151,9 @@ function renderFeature(feature: FeatureKey) {
     case "referrals":
       return <ReferralsScreen />;
     case "notifications":
-      return <NotificationsScreen />;
+      return <NotificationsScreen onOpenMedicalRecord={() => setFeature?.("medical-record")} />;
+    case "permissions":
+      return <PatientPermissionsScreen />;
     case "prescription-verification":
       return <PrescriptionVerificationScreen />;
     case "ai-assistant":

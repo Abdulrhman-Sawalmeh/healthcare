@@ -69,11 +69,47 @@ export function resolveNotificationPath(input: NotificationRouteInput) {
     return resolveDoctorsPath(input);
   }
 
+  if (
+    includesAny(haystack, [
+      "refill",
+      "medication",
+      "follow-up",
+      "follow up",
+      "reminder",
+      "تجديد",
+      "دواء",
+      "متابعة",
+      "تذكير"
+    ])
+  ) {
+    return input.role === "PATIENT" ? "/medical-record" : input.workspace === "center" ? "/patients" : "/notifications";
+  }
+
   if (includesAny(haystack, ["master_data", "master data", "البيانات المرجعية"])) {
     return input.workspace === "central" ? "/master-data" : "/notifications";
   }
 
-  if (includesAny(haystack, ["report", "reports", "تقارير", "إحصاء"])) {
+  if (
+    includesAny(haystack, [
+      "report",
+      "reports",
+      "result",
+      "results",
+      "lab",
+      "radiology",
+      "تقرير",
+      "التقرير",
+      "تقارير",
+      "التقارير",
+      "نتائج",
+      "النتائج",
+      "إحصاء"
+    ])
+  ) {
+    if (input.role === "PATIENT") {
+      return "/medical-record#reports";
+    }
+
     return input.workspace === "central" ? "/reports" : "/notifications";
   }
 

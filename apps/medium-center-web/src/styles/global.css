@@ -603,6 +603,16 @@ table {
   color: white;
 }
 
+.bell-icon {
+  width: 1.35rem;
+  height: 1.35rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
 .topbar-badge {
   position: absolute;
   top: -0.35rem;
@@ -612,7 +622,7 @@ table {
   display: inline-grid;
   place-items: center;
   border-radius: 999px;
-  background: #f4c542;
+  background: #d92d20;
   color: #ffffff;
   border: 2px solid rgba(255, 255, 255, 0.86);
   font-size: 0.72rem;
@@ -881,6 +891,47 @@ table {
   background: linear-gradient(180deg, var(--accent-secondary), var(--accent));
 }
 
+.lab-trend-chart {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.lab-trend-chart svg {
+  width: 100%;
+  min-height: 220px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+}
+
+.lab-trend-chart line {
+  stroke: rgba(15, 61, 54, 0.18);
+  stroke-width: 2;
+}
+
+.lab-trend-chart path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lab-trend-chart circle {
+  fill: var(--accent-secondary);
+  stroke: #fff;
+  stroke-width: 2;
+}
+
+.lab-trend-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .data-table {
   overflow: auto;
 }
@@ -976,6 +1027,21 @@ table {
   background: rgba(195, 137, 46, 0.12);
   color: #8b651d;
   font-size: 0.92rem;
+}
+
+.warning-panel {
+  display: grid;
+  gap: 1rem;
+  border: 1px solid color-mix(in srgb, var(--warning) 32%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--warning) 10%, #fff);
+  padding: var(--space-5);
+  box-shadow: 0 18px 40px rgba(18, 62, 104, 0.08);
+}
+
+.warning-panel h3 {
+  margin: 0.2rem 0 0;
+  color: var(--text);
 }
 
 .inset-card {
@@ -1959,6 +2025,33 @@ textarea:focus-visible {
   font-weight: 800;
 }
 
+.success-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid color-mix(in srgb, var(--success) 28%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--success) 12%, #fff);
+  color: var(--success);
+  font-weight: 900;
+  line-height: 1.7;
+  padding: var(--space-4);
+  box-shadow: 0 10px 24px rgba(18, 62, 104, 0.08);
+}
+
+.success-banner::before {
+  content: "✓";
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--success);
+  color: #fff;
+  font-weight: 900;
+  flex: 0 0 auto;
+}
+
 .table-controls {
   display: grid;
   grid-template-columns: minmax(220px, 1.5fr) minmax(160px, 0.8fr) minmax(130px, 0.6fr) auto auto minmax(150px, auto) auto auto;
@@ -1996,6 +2089,17 @@ textarea:focus-visible {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface-strong);
+}
+
+.report-results-card {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.report-results-card .table-shell {
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .data-table,

@@ -34,6 +34,7 @@ const defaultVisitForm = {
 const defaultReportForm = {
   title: "",
   category: "GENERAL",
+  reportUrl: "",
   summary: "",
   findings: "",
   recommendations: "",
@@ -169,6 +170,7 @@ function buildStructuredReportDraft(visit: VisitRecord, category: string) {
     recommendations: template.recommendations,
     recommendedFollowUp: template.followUp,
     shareWithPatient: true,
+    reportUrl: "",
     attachment: null as LocalVisitReportAttachment | null
   };
 }
@@ -211,6 +213,7 @@ function buildSmartReportDraft(visit: VisitRecord) {
         : "الالتزام بالتوصيات السريرية والعودة عند حدوث أي تغير مهم.",
     recommendedFollowUp: focus.followUp,
     shareWithPatient: true,
+    reportUrl: "",
     attachment: null as LocalVisitReportAttachment | null
   };
 }
@@ -331,6 +334,7 @@ export function VisitsPage() {
     setReportForm({
       title: report.title,
       category: report.category,
+      reportUrl: report.reportUrl ?? "",
       summary: report.summary,
       findings: report.findings ?? "",
       recommendations: report.recommendations ?? "",
@@ -503,8 +507,18 @@ export function VisitsPage() {
       return;
     }
 
-    if (!reportForm.title.trim() || !reportForm.summary.trim()) {
-      setError("أكمل عنوان التقرير والملخص السريري قبل الحفظ.");
+    if (!reportForm.title.trim() || !reportForm.reportUrl.trim()) {
+      setError("أكمل عنوان التقرير ورابط التقرير قبل الحفظ.");
+      return;
+    }
+
+    try {
+      const reportUrl = new URL(reportForm.reportUrl.trim());
+      if (!["http:", "https:"].includes(reportUrl.protocol)) {
+        throw new Error("Invalid report URL protocol");
+      }
+    } catch {
+      setError("أدخل رابط تقرير صالح يبدأ بـ http أو https.");
       return;
     }
 
@@ -520,18 +534,10 @@ export function VisitsPage() {
         body: JSON.stringify({
           title: reportForm.title.trim(),
           category: reportForm.category,
-          summary: reportForm.summary.trim(),
-          findings: reportForm.findings.trim() || undefined,
-          recommendations: reportForm.recommendations.trim() || undefined,
-          recommendedFollowUp: reportForm.recommendedFollowUp.trim() || undefined,
+          reportUrl: reportForm.reportUrl.trim(),
+          summary: reportForm.summary.trim() || undefined,
           shareWithPatient: reportForm.shareWithPatient,
-          attachment: reportForm.attachment
-            ? {
-                fileName: reportForm.attachment.fileName,
-                mimeType: reportForm.attachment.mimeType,
-                contentBase64: reportForm.attachment.contentBase64
-              }
-            : null
+          attachment: null
         })
       });
 
@@ -541,8 +547,8 @@ export function VisitsPage() {
       setError("");
       setSuccessMessage(
         reportForm.shareWithPatient
-          ? "تم حفظ التقرير وإرساله إلى سجل المريض الصحي."
-          : "تم حفظ التقرير كداخلي فقط ولن يظهر للمريض."
+          ? "تم إرسال التقرير للمريض."
+          : "تم حفظ رابط التقرير كداخلي فقط ولن يظهر للمريض."
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر حفظ تقرير النتائج.");
@@ -606,15 +612,15 @@ export function VisitsPage() {
 
   return (
     <div className="page-stack visit-operations-page">
-      {successMessage ? <div className="empty-state compact">{successMessage}</div> : null}
+      {successMessage ? <div className="success-banner">{successMessage}</div> : null}
       {error ? <div className="error-banner">{error}</div> : null}
 
       <section className="hero-strip visit-hero-shell">
         <div className="hero-copy-block">
-          <p className="eyebrow">Smart Report Studio</p>
+          <p className="eyebrow">Report Links</p>
           <h1>إدارة الزيارات وتقارير النتائج</h1>
           <p className="muted">
-            مساحة عمل موحّدة لتوثيق الزيارة، ثم إنشاء تقرير نتائج احترافي قابل للمشاركة مع المريض أو تنزيله كمرفق.
+            مساحة عمل موحّدة لتوثيق الزيارة، ثم مشاركة رابط التقرير الجاهز مع المريض ليُفتح في صفحة مستقلة.
           </p>
         </div>
         <div className="workflow-scene-shell">
@@ -626,10 +632,9 @@ export function VisitsPage() {
             <button
               className="primary-button"
               type="button"
-              onClick={() => selectedVisit && applySmartDraft()}
-              disabled={!selectedVisit}
+              onClick={resetReportForm}
             >
-              توليد مسودة ذكية
+              رابط تقرير جديد
             </button>
             <button className="ghost-button" type="button" onClick={resetReportForm}>
               تقرير جديد
@@ -832,15 +837,8 @@ export function VisitsPage() {
 
       <section className="split-grid">
         <SectionCard
-          title="استوديو تقارير النتائج"
-          subtitle="اختر زيارة من القائمة ثم أنشئ تقريرًا جاهزًا للمريض مع مرفق اختياري."
-          action={
-            selectedVisit ? (
-              <button className="ghost-button" type="button" onClick={applySmartDraft}>
-                تعبئة ذكية من الزيارة
-              </button>
-            ) : undefined
-          }
+          title="روابط تقارير النتائج"
+          subtitle="اختر زيارة من القائمة ثم أضف رابط التقرير الذي سيظهر للمريض ويفتح في صفحة جديدة."
           className="visit-report-studio"
         >
           {selectedVisit ? (
@@ -859,21 +857,6 @@ export function VisitsPage() {
 
               {canAuthorReports ? (
                 <form className="form-grid" onSubmit={handleReportSubmit}>
-                  <div className="field field-span-2">
-                    <span>قوالب التقارير الشاملة</span>
-                    <div className="chip-row">
-                      {reportTemplates.map((template) => (
-                        <button
-                          className="ghost-button"
-                          key={template.category}
-                          onClick={() => applyReportTemplate(template.category)}
-                          type="button"
-                        >
-                          {template.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                   <label className="field field-span-2">
                     <span>عنوان التقرير</span>
                     <input
@@ -915,68 +898,29 @@ export function VisitsPage() {
                     </label>
                   </label>
                   <label className="field field-span-2">
-                    <span>الملخص السريري</span>
+                    <span>رابط التقرير للمريض</span>
+                    <input
+                      dir="ltr"
+                      type="url"
+                      value={reportForm.reportUrl}
+                      required
+                      onChange={(event) => setReportForm((current) => ({ ...current, reportUrl: event.target.value }))}
+                      placeholder="https://example.com/report.pdf"
+                    />
+                    <small className="muted">سيظهر هذا الرابط للمريض في السجل الصحي ويفتح في تبويب جديد.</small>
+                  </label>
+                  <label className="field field-span-2">
+                    <span>ملاحظة مختصرة للمريض</span>
                     <textarea
                       value={reportForm.summary}
-                      required
                       onChange={(event) => setReportForm((current) => ({ ...current, summary: event.target.value }))}
-                      placeholder="اكتب خلاصة مفهومة وواضحة للمريض أو للفريق الطبي."
+                      placeholder="مثال: نتائج المختبر جاهزة للمراجعة، يرجى فتح الرابط للاطلاع عليها."
                     />
                   </label>
-                  <label className="field field-span-2">
-                    <span>النتائج الأساسية</span>
-                    <textarea
-                      value={reportForm.findings}
-                      onChange={(event) => setReportForm((current) => ({ ...current, findings: event.target.value }))}
-                      placeholder="القياسات، النتائج، النقاط السريرية الأساسية..."
-                    />
-                  </label>
-                  <label className="field field-span-2">
-                    <span>التوصيات</span>
-                    <textarea
-                      value={reportForm.recommendations}
-                      onChange={(event) =>
-                        setReportForm((current) => ({ ...current, recommendations: event.target.value }))
-                      }
-                      placeholder="التوصيات العلاجية أو تعليمات المريض."
-                    />
-                  </label>
-                  <label className="field field-span-2">
-                    <span>المتابعة المقترحة</span>
-                    <input
-                      value={reportForm.recommendedFollowUp}
-                      onChange={(event) =>
-                        setReportForm((current) => ({
-                          ...current,
-                          recommendedFollowUp: event.target.value
-                        }))
-                      }
-                      placeholder="مثال: مراجعة خلال 6 أسابيع أو عند عودة الأعراض."
-                    />
-                  </label>
-                  <label className="field field-span-2">
-                    <span>رفع مرفق</span>
-                    <input accept=".pdf,image/png,image/jpeg,image/webp" onChange={handleAttachmentChange} type="file" />
-                    <small className="muted">الأنواع المدعومة: PDF, PNG, JPG, WEBP حتى 2.5MB.</small>
-                  </label>
-                  {reportForm.attachment ? (
-                    <div className="field field-span-2 report-attachment-preview">
-                      <span>المرفق الحالي</span>
-                      <strong>{reportForm.attachment.fileName}</strong>
-                      <p>{reportForm.attachment.mimeType}</p>
-                      <button
-                        className="ghost-button"
-                        type="button"
-                        onClick={() => setReportForm((current) => ({ ...current, attachment: null }))}
-                      >
-                        إزالة المرفق
-                      </button>
-                    </div>
-                  ) : null}
                   <div className="field-span-2 button-row">
                     <button
                       className="primary-button"
-                      disabled={submittingReport || uploadingAttachment}
+                      disabled={submittingReport}
                       type="submit"
                     >
                       {submittingReport
@@ -1007,8 +951,14 @@ export function VisitsPage() {
                       <span>{formatDateTime(report.createdAt)}</span>
                       <span>{report.shareWithPatient ? "مرئي للمريض" : "داخلي"}</span>
                     </div>
+                    {report.reportUrl ? <p className="muted">الرابط جاهز للفتح من سجل المريض.</p> : null}
                     {report.recommendedFollowUp ? <p className="muted">المتابعة: {report.recommendedFollowUp}</p> : null}
                     <div className="button-row">
+                      {report.reportUrl ? (
+                        <a className="primary-button" href={report.reportUrl} rel="noreferrer" target="_blank">
+                          فتح التقرير
+                        </a>
+                      ) : null}
                       {canAuthorReports ? (
                         <button className="ghost-button" onClick={() => hydrateReportForm(report)} type="button">
                           تعديل

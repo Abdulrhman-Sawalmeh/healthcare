@@ -117,6 +117,7 @@ function mapAppointmentAsClinicalReport(
     ...mapped,
     source: "APPOINTMENT",
     summary: appointment.notes ?? null,
+    reportUrl: null,
     findings: null,
     recommendations: null,
     recommendedFollowUp: null,
@@ -130,6 +131,7 @@ function mapLocalResultReport(
     title: string;
     category: string;
     summary: string;
+    reportUrl: string | null;
     findings: string | null;
     recommendations: string | null;
     recommendedFollowUp: string | null;
@@ -165,6 +167,7 @@ function mapLocalResultReport(
     notes: report.summary,
     source: "RESULT_REPORT",
     summary: report.summary,
+    reportUrl: report.reportUrl,
     findings: report.findings,
     recommendations: report.recommendations,
     recommendedFollowUp: report.recommendedFollowUp,

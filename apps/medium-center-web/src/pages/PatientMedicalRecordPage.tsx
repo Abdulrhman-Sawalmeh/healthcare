@@ -1,5 +1,5 @@
 import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { PatientContactBar } from "../components/PatientContactBar";
@@ -36,6 +36,34 @@ function escapeHtml(value: string) {
 function formatAmount(amountInCents: number, currency: string) {
   const currencyLabel = currency === "ILS" ? "شيكل" : currency;
   return `${(amountInCents / 100).toFixed(2)} ${currencyLabel}`;
+}
+
+const refillStatusLabels: Record<string, string> = {
+  REQUESTED: "طلب جديد",
+  DOCTOR_APPROVED: "وافق الطبيب",
+  PHARMACY_PREPARING: "قيد التجهيز",
+  READY_FOR_PICKUP: "جاهز للاستلام",
+  COLLECTED: "تم الاستلام",
+  REJECTED: "مرفوض"
+};
+
+const followUpStatusLabels: Record<string, string> = {
+  PENDING: "قيد المتابعة",
+  DONE: "منجز",
+  CANCELLED: "ملغي",
+  MISSED: "فائت"
+};
+
+function refillStatusLabel(status: string) {
+  return refillStatusLabels[status] ?? toArabicLabel(status);
+}
+
+function followUpStatusLabel(status: string) {
+  return followUpStatusLabels[status] ?? toArabicLabel(status);
+}
+
+function isFollowUpOverdue(status: string, dueDate: string) {
+  return status === "PENDING" && new Date(dueDate).getTime() < Date.now();
 }
 
 function renderPrintableReportSections(report: PortalClinicalReportRecord) {
@@ -305,15 +333,23 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalClinical
 }
 
 export function PatientMedicalRecordPage() {
+  const location = useLocation();
   const [record, setRecord] = useState<PortalMedicalRecord | null>(null);
   const [plans, setPlans] = useState<PortalSubscriptionPlanRecord[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState("");
   const [paymentToken, setPaymentToken] = useState("");
   const [subscriptionMessage, setSubscriptionMessage] = useState("");
+  const [refillMessage, setRefillMessage] = useState("");
+  const [refillError, setRefillError] = useState("");
+  const [refillBusyId, setRefillBusyId] = useState<number | null>(null);
   const [activatingSubscription, setActivatingSubscription] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
+  const [reportSearch, setReportSearch] = useState("");
+  const [reportFromDate, setReportFromDate] = useState("");
+  const [reportToDate, setReportToDate] = useState("");
   const detailPanelRef = useRef<HTMLElement | null>(null);
+  const reportResultsRef = useRef<HTMLElement | null>(null);
 
   async function loadRecord() {
     const payload = await apiRequest<PortalMedicalRecord>("/portal/medical-record");
@@ -347,6 +383,17 @@ export function PatientMedicalRecordPage() {
     });
   }, [activePanel]);
 
+  useEffect(() => {
+    if (loading || location.hash !== "#reports" || !reportResultsRef.current) {
+      return;
+    }
+
+    reportResultsRef.current.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
+    });
+  }, [loading, location.hash, record]);
+
   const activeReport = useMemo(() => {
     if (!record || activePanel?.kind !== "report") {
       return null;
@@ -354,6 +401,42 @@ export function PatientMedicalRecordPage() {
 
     return record.clinicalReports.find((report) => report.id === activePanel.id) ?? null;
   }, [activePanel, record]);
+
+  const filteredClinicalReports = useMemo(() => {
+    if (!record) {
+      return [];
+    }
+
+    const query = reportSearch.trim().toLowerCase();
+    const fromTime = reportFromDate ? new Date(`${reportFromDate}T00:00:00`).getTime() : null;
+    const toTime = reportToDate ? new Date(`${reportToDate}T23:59:59`).getTime() : null;
+
+    return record.clinicalReports.filter((report) => {
+      if (report.source !== "RESULT_REPORT" || !report.reportUrl) {
+        return false;
+      }
+
+      const scheduledTime = new Date(report.scheduledAt).getTime();
+      const matchesDate =
+        (!fromTime || scheduledTime >= fromTime) &&
+        (!toTime || scheduledTime <= toTime);
+      const haystack = [
+        report.reason,
+        report.notes,
+        report.summary,
+        report.doctor.fullName,
+        report.department.name,
+        report.reportUrl,
+        record.patient.fullName,
+        record.patient.medicalRecordNumber
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return matchesDate && (!query || haystack.includes(query));
+    });
+  }, [record, reportFromDate, reportSearch, reportToDate]);
 
   const activeReferral = useMemo(() => {
     if (!record || activePanel?.kind !== "referral") {
@@ -411,6 +494,25 @@ export function PatientMedicalRecordPage() {
       setSubscriptionMessage(cause instanceof Error ? cause.message : "Subscription activation failed.");
     } finally {
       setActivatingSubscription(false);
+    }
+  }
+
+  async function handleRequestRefill(prescriptionId: number) {
+    setRefillBusyId(prescriptionId);
+    setRefillError("");
+    setRefillMessage("");
+
+    try {
+      await apiRequest("/portal/refill-requests", {
+        method: "POST",
+        body: JSON.stringify({ prescriptionId })
+      });
+      setRefillMessage("تم إرسال طلب تجديد الدواء إلى الطبيب.");
+      await loadRecord();
+    } catch (cause) {
+      setRefillError(cause instanceof Error ? cause.message : "تعذر إرسال طلب تجديد الدواء.");
+    } finally {
+      setRefillBusyId(null);
     }
   }
 
@@ -591,6 +693,14 @@ export function PatientMedicalRecordPage() {
               <span>المركز</span>
               <strong>{activeReport.center.name}</strong>
             </div>
+            {activeReport.reportUrl ? (
+              <div className="detail-field detail-field-wide">
+                <span>رابط التقرير</span>
+                <a className="primary-button" href={activeReport.reportUrl} rel="noreferrer" target="_blank">
+                  فتح التقرير في صفحة جديدة
+                </a>
+              </div>
+            ) : null}
             {[
               { label: "ملخص التقرير", value: activeReport.summary ?? activeReport.notes },
               { label: "النتائج والفحوصات", value: activeReport.findings },
@@ -620,11 +730,21 @@ export function PatientMedicalRecordPage() {
               </div>
             ) : null}
           </div>
-          <p className="inline-note">زر الطباعة يفتح نسخة مناسبة للطباعة ويمكن حفظها من المتصفح كملف PDF.</p>
+          <p className="inline-note">
+            {activeReport.reportUrl
+              ? "يفتح رابط التقرير في صفحة جديدة كما هو منشور من الطبيب."
+              : "زر الطباعة يفتح نسخة مناسبة للطباعة ويمكن حفظها من المتصفح كملف PDF."}
+          </p>
           <div className="chip-row">
-            <button className="primary-button" type="button" onClick={() => openPrintableReport(record, activeReport)}>
-              طباعة أو حفظ PDF
-            </button>
+            {activeReport.reportUrl ? (
+              <a className="primary-button" href={activeReport.reportUrl} rel="noreferrer" target="_blank">
+                فتح التقرير
+              </a>
+            ) : (
+              <button className="primary-button" type="button" onClick={() => openPrintableReport(record, activeReport)}>
+                طباعة أو حفظ PDF
+              </button>
+            )}
             <Link className="ghost-button" to="/messages">
               مراسلة الطبيب
             </Link>
@@ -836,37 +956,70 @@ export function PatientMedicalRecordPage() {
       {renderDetailPanel()}
 
       <section className="split-grid">
-        <article className="section-card">
+        <article className="section-card report-results-card" id="reports" ref={reportResultsRef}>
           <div className="section-header">
             <div>
-              <p className="eyebrow">التقارير السريرية</p>
-              <h3>ملخصات الزيارات المكتملة</h3>
+              <p className="eyebrow">التقارير والنتائج</p>
+              <h3>روابط التقارير الطبية</h3>
             </div>
           </div>
-          <div className="stack-list">
-            {record.clinicalReports.map((report) => (
-              <article
-                className="stack-item interactive-card"
-                key={report.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => openPanel({ kind: "report", id: report.id })}
-                onKeyDown={(event) => handlePanelActivation(event, { kind: "report", id: report.id })}
-              >
-                <strong>{report.reason}</strong>
-                <p>{report.notes ?? "لا توجد ملاحظات سريرية إضافية."}</p>
-                <div className="tile-stats">
-                  <span>{report.doctor.fullName}</span>
-                  <span>{report.department.name}</span>
-                  <span>{formatDateTime(report.scheduledAt)}</span>
-                </div>
-                <p className="action-hint">اضغط لفتح التقرير وطباعة نسخة PDF.</p>
-              </article>
-            ))}
-            {record.clinicalReports.length === 0 ? (
-              <div className="empty-state compact">لا توجد تقارير مكتملة حتى الآن.</div>
-            ) : null}
+          <div className="form-grid">
+            <label className="field">
+              <span>من تاريخ</span>
+              <input type="date" value={reportFromDate} onChange={(event) => setReportFromDate(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>إلى تاريخ</span>
+              <input type="date" value={reportToDate} onChange={(event) => setReportToDate(event.target.value)} />
+            </label>
+            <label className="field field-span-2">
+              <span>بحث</span>
+              <input
+                value={reportSearch}
+                onChange={(event) => setReportSearch(event.target.value)}
+                placeholder="ابحث باسم الطبيب، القسم، عنوان التقرير، أو رقم المريض"
+              />
+            </label>
           </div>
+          <div className="table-shell">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>رقم المريض</th>
+                  <th>اسم المريض</th>
+                  <th>اسم الطبيب</th>
+                  <th>اسم القسم</th>
+                  <th>تاريخ الطلب</th>
+                  <th>رابط التقرير</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredClinicalReports.map((report) => (
+                  <tr key={report.id}>
+                    <td>{record.patient.medicalRecordNumber}</td>
+                    <td>{record.patient.fullName}</td>
+                    <td>{report.doctor.fullName}</td>
+                    <td>{report.department.name}</td>
+                    <td>{formatDateTime(report.scheduledAt)}</td>
+                    <td>
+                      <a className="table-action-button" href={report.reportUrl ?? "#"} rel="noreferrer" target="_blank">
+                        عرض التفاصيل
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+                {filteredClinicalReports.length === 0 ? (
+                  <tr>
+                    <td colSpan={6}>لا توجد بيانات متاحة في الجدول.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+          <p className="table-status">
+            يعرض {filteredClinicalReports.length} من أصل{" "}
+            {record.clinicalReports.filter((report) => report.source === "RESULT_REPORT" && report.reportUrl).length} مدخل
+          </p>
         </article>
 
         <article className="section-card">
@@ -900,6 +1053,87 @@ export function PatientMedicalRecordPage() {
             ))}
             {record.referrals.length === 0 ? (
               <div className="empty-state compact">لا توجد إحالات مسجلة حاليًا.</div>
+            ) : null}
+          </div>
+        </article>
+      </section>
+
+      <section className="split-grid">
+        <article className="section-card">
+          <div className="section-header">
+            <div>
+              <p className="eyebrow">تجديد الأدوية</p>
+              <h3>طلب تجديد وصفة ومتابعة الحالة</h3>
+            </div>
+          </div>
+          {refillError ? <div className="error-banner">{refillError}</div> : null}
+          {refillMessage ? <div className="success-banner">{refillMessage}</div> : null}
+          <div className="stack-list compact">
+            {(record.eligiblePrescriptions ?? []).map((prescription) => (
+              <article className="stack-item" key={prescription.id}>
+                <strong>{prescription.medicineName}</strong>
+                <p>{joinMeta([prescription.dosage, prescription.duration, prescription.doctorName])}</p>
+                <div className="tile-stats">
+                  <span>{formatDateTime(prescription.issuedAt)}</span>
+                  <span>{prescription.dispensed ? "مصروف" : "غير مصروف"}</span>
+                </div>
+                <button
+                  className="primary-button"
+                  disabled={refillBusyId === prescription.id}
+                  onClick={() => void handleRequestRefill(prescription.id)}
+                  type="button"
+                >
+                  طلب تجديد
+                </button>
+              </article>
+            ))}
+            {(record.eligiblePrescriptions ?? []).length === 0 ? (
+              <div className="empty-state compact">لا توجد وصفات مؤهلة لطلب تجديد حالياً.</div>
+            ) : null}
+          </div>
+
+          <div className="stack-list compact">
+            {(record.medicationRefills ?? []).map((request) => (
+              <article className="stack-item" key={request.id}>
+                <div className="progress-row">
+                  <strong>{request.medicineName}</strong>
+                  <span className={request.status === "REJECTED" ? "status-badge danger" : "status-badge success"}>
+                    {refillStatusLabel(request.status)}
+                  </span>
+                </div>
+                <p>{joinMeta([request.dosage, request.duration, request.doctorName, formatDateTime(request.requestedAt)])}</p>
+                {request.rejectionReason ? <p className="muted">سبب الرفض: {request.rejectionReason}</p> : null}
+              </article>
+            ))}
+          </div>
+        </article>
+
+        <article className="section-card">
+          <div className="section-header">
+            <div>
+              <p className="eyebrow">تذكيرات المتابعة</p>
+              <h3>المواعيد المطلوبة بعد الزيارة</h3>
+            </div>
+          </div>
+          <div className="stack-list compact">
+            {(record.followUpReminders ?? []).map((reminder) => {
+              const overdue = isFollowUpOverdue(reminder.status, reminder.dueDate);
+
+              return (
+                <article className="stack-item" key={reminder.id}>
+                  <div className="progress-row">
+                    <strong>{reminder.reason}</strong>
+                    <span className={overdue ? "status-badge danger" : "status-badge success"}>
+                      {overdue ? "متأخر" : followUpStatusLabel(reminder.status)}
+                    </span>
+                  </div>
+                  <p>{joinMeta([reminder.doctorName, formatDateTime(reminder.dueDate), reminder.visitSummary])}</p>
+                  {reminder.notes ? <p className="muted">{reminder.notes}</p> : null}
+                </article>
+              );
+            })}
+            {(record.followUpReminders ?? []).length === 0 ? (
+              <div className="empty-state compact">لا توجد تذكيرات متابعة قادمة.</div>
             ) : null}
           </div>
         </article>

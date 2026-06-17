@@ -30,7 +30,7 @@ const symbolMap: Record<string, string> = {
   "medical-outline": "+",
   "medkit-outline": "+",
   "mic-outline": "o",
-  "notifications-outline": "!",
+  "notifications-outline": "🔔",
   "people-outline": "☷",
   "person-add-outline": "+",
   "person-circle-outline": "◉",
