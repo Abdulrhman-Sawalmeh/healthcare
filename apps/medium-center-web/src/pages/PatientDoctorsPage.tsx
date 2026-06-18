@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { requestAppointmentSuggestions } from "../api/appointment-suggestions";
@@ -39,6 +39,9 @@ export function PatientDoctorsPage() {
   const [error, setError] = useState("");
   const [availabilityError, setAvailabilityError] = useState("");
   const [availabilityInfo, setAvailabilityInfo] = useState("");
+  const [pendingScrollTarget, setPendingScrollTarget] = useState<"profile" | "availability" | null>(null);
+  const doctorSpotlightRef = useRef<HTMLElement | null>(null);
+  const doctorAvailabilityRef = useRef<HTMLDivElement | null>(null);
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
 
@@ -138,6 +141,31 @@ export function PatientDoctorsPage() {
   const sameDaySlots = availableSlots.filter((slot) => isSameDay(slot.scheduledAt)).length;
   const uniqueDepartments = new Set(doctors.map((doctor) => doctor.department.id)).size;
   const featuredDoctor = selectedDoctor ?? filteredDoctors[0];
+
+  function scrollToSection(target: HTMLElement | null) {
+    window.setTimeout(() => {
+      target?.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    }, 0);
+  }
+
+  function selectDoctor(doctorId: string, target: "profile" | "availability") {
+    setSelectedDoctorId(doctorId);
+    setPendingScrollTarget(target);
+  }
+
+  useEffect(() => {
+    if (!pendingScrollTarget || !selectedDoctor) {
+      return;
+    }
+
+    scrollToSection(
+      pendingScrollTarget === "availability" ? doctorAvailabilityRef.current : doctorSpotlightRef.current
+    );
+    setPendingScrollTarget(null);
+  }, [pendingScrollTarget, selectedDoctor]);
 
   if (loading) {
     return <div className="screen-center">جارٍ تحميل قائمة الأطباء...</div>;
@@ -249,7 +277,7 @@ export function PatientDoctorsPage() {
               className="primary-button"
               type="button"
               onClick={() => {
-                setSelectedDoctorId(featuredDoctor.id);
+                selectDoctor(featuredDoctor.id, "availability");
               }}
             >
               عرض المواعيد المتاحة
@@ -273,7 +301,12 @@ export function PatientDoctorsPage() {
                   className="doctor-name-button"
                   type="button"
                   onClick={() => {
-                    setSelectedDoctorId((current) => (current === doctor.id ? "" : doctor.id));
+                    if (selectedDoctorId === doctor.id) {
+                      setSelectedDoctorId("");
+                      return;
+                    }
+
+                    selectDoctor(doctor.id, "profile");
                   }}
                 >
                   {doctor.fullName}
@@ -292,7 +325,12 @@ export function PatientDoctorsPage() {
                     className="ghost-button"
                     type="button"
                     onClick={() => {
-                      setSelectedDoctorId((current) => (current === doctor.id ? "" : doctor.id));
+                      if (selectedDoctorId === doctor.id) {
+                        setSelectedDoctorId("");
+                        return;
+                      }
+
+                      selectDoctor(doctor.id, "profile");
                     }}
                   >
                     {isSelected ? "إخفاء الملف" : "عرض الملف"}
@@ -307,7 +345,7 @@ export function PatientDoctorsPage() {
           ) : null}
         </div>
 
-        <aside className="section-card doctor-spotlight-panel">
+        <aside className="section-card doctor-spotlight-panel" ref={doctorSpotlightRef}>
           {selectedDoctor ? (
             <>
               <div className="section-header">
@@ -350,7 +388,7 @@ export function PatientDoctorsPage() {
                 </Link>
               </div>
 
-              <div className="info-row">
+              <div className="info-row" ref={doctorAvailabilityRef}>
                 <div>
                   <strong>المواعيد المتاحة</strong>
                   <p className="muted">أقرب مواعيد قابلة للحجز الآن مع هذا الطبيب.</p>

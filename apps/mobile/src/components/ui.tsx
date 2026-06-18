@@ -1,3 +1,4 @@
+import { forwardRef } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -16,21 +17,22 @@ import {
 import { AppIcon, IconName } from "./Icon";
 import { colors, radii, spacing } from "../theme/tokens";
 
-export function Screen({
-  children,
-  refreshing,
-  onRefresh,
-  keyboard = false,
-  style
-}: {
+export const Screen = forwardRef<ScrollView, {
   children: any;
   refreshing?: boolean;
   onRefresh?: () => void;
   keyboard?: boolean;
   style?: StyleProp<ViewStyle>;
-}) {
+}>(function Screen({
+  children,
+  refreshing,
+  onRefresh,
+  keyboard = false,
+  style
+}, ref) {
   return (
     <ScrollView
+      ref={ref}
       contentContainerStyle={[styles.screenContent, style]}
       keyboardDismissMode={keyboard ? "on-drag" : "none"}
       keyboardShouldPersistTaps={keyboard ? "handled" : "never"}
@@ -44,7 +46,7 @@ export function Screen({
       {children}
     </ScrollView>
   );
-}
+});
 
 export function HeaderCard({
   eyebrow,

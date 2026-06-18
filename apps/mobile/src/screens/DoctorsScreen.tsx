@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import {
   AppButton,
@@ -53,6 +53,9 @@ export function DoctorsScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [shouldScrollToSuggestions, setShouldScrollToSuggestions] = useState(false);
+  const screenRef = useRef<ScrollView | null>(null);
+  const suggestionsRef = useRef<View | null>(null);
 
   const isPatient = user?.role === "PATIENT";
   const isManager = user?.role === "CENTER_MANAGER";
@@ -82,6 +85,42 @@ export function DoctorsScreen() {
     void loadData();
   }, [loadData]);
 
+  function scrollToTarget(target: View | null) {
+    setTimeout(() => {
+      const node = target as unknown as {
+        scrollIntoView?: (options?: { behavior?: "smooth"; block?: "start" }) => void;
+        measureLayout?: (
+          relativeToNativeNode: unknown,
+          onSuccess: (x: number, y: number) => void,
+          onFail?: () => void
+        ) => void;
+      };
+      const scroller = screenRef.current as unknown as { scrollTo?: (options: { y: number; animated: boolean }) => void };
+
+      if (typeof node?.scrollIntoView === "function") {
+        node.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+
+      if (typeof node?.measureLayout === "function" && scroller) {
+        node.measureLayout(
+          scroller,
+          (_x, y) => scroller.scrollTo?.({ y: Math.max(y - spacing.md, 0), animated: true }),
+          () => undefined
+        );
+      }
+    }, 0);
+  }
+
+  useEffect(() => {
+    if (!shouldScrollToSuggestions || suggestions.length === 0) {
+      return;
+    }
+
+    scrollToTarget(suggestionsRef.current);
+    setShouldScrollToSuggestions(false);
+  }, [shouldScrollToSuggestions, suggestions.length]);
+
   async function loadSuggestions(doctor: PortalDoctorRecord) {
     setBusy(true);
     setError("");
@@ -90,6 +129,7 @@ export function DoctorsScreen() {
       const payload = await mediumApi.appointmentSuggestions(doctor.id, new Date().toISOString());
       setSuggestions(payload);
       setSelectedDoctorId(doctor.id);
+      setShouldScrollToSuggestions(payload.length > 0);
       setMessage(payload.length ? "تم تحميل أقرب المواعيد المتاحة." : "لا توجد اقتراحات قريبة حاليا.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر تحميل مواعيد الطبيب.");
@@ -179,7 +219,7 @@ export function DoctorsScreen() {
   }
 
   return (
-    <Screen keyboard refreshing={refreshing} onRefresh={() => void loadData()}>
+    <Screen ref={screenRef} keyboard refreshing={refreshing} onRefresh={() => void loadData()}>
       <HeaderCard
         eyebrow="الأطباء"
         icon="medkit-outline"
@@ -282,6 +322,7 @@ export function DoctorsScreen() {
       </Card>
 
       {isPatient && suggestions.length > 0 ? (
+        <View ref={suggestionsRef}>
         <Card>
           <SectionTitle title="أقرب المواعيد المقترحة" />
           {suggestions.slice(0, 6).map((slot) => (
@@ -291,6 +332,7 @@ export function DoctorsScreen() {
             </View>
           ))}
         </Card>
+        </View>
       ) : null}
     </Screen>
   );

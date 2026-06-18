@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { AppointmentCard } from "../components/AppointmentCard";
 import {
@@ -37,6 +37,8 @@ export function AppointmentsScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const screenRef = useRef<ScrollView | null>(null);
+  const confirmRef = useRef<View | null>(null);
 
   const selectedDoctor = useMemo(
     () => doctors.find((doctor) => doctor.id === selectedDoctorId),
@@ -68,6 +70,33 @@ export function AppointmentsScreen() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  function scrollToTarget(target: View | null) {
+    setTimeout(() => {
+      const node = target as unknown as {
+        scrollIntoView?: (options?: { behavior?: "smooth"; block?: "start" }) => void;
+        measureLayout?: (
+          relativeToNativeNode: unknown,
+          onSuccess: (x: number, y: number) => void,
+          onFail?: () => void
+        ) => void;
+      };
+      const scroller = screenRef.current as unknown as { scrollTo?: (options: { y: number; animated: boolean }) => void };
+
+      if (typeof node?.scrollIntoView === "function") {
+        node.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+
+      if (typeof node?.measureLayout === "function" && scroller) {
+        node.measureLayout(
+          scroller,
+          (_x, y) => scroller.scrollTo?.({ y: Math.max(y - spacing.md, 0), animated: true }),
+          () => undefined
+        );
+      }
+    }, 0);
+  }
 
   async function loadSuggestions() {
     if (!selectedDoctor) return;
@@ -144,7 +173,7 @@ export function AppointmentsScreen() {
   }
 
   return (
-    <Screen keyboard refreshing={refreshing} onRefresh={() => void loadData()}>
+    <Screen ref={screenRef} keyboard refreshing={refreshing} onRefresh={() => void loadData()}>
       <HeaderCard
         eyebrow="حجز ومتابعة"
         icon="calendar-outline"
@@ -202,6 +231,7 @@ export function AppointmentsScreen() {
                   const selected = new Date(slot.scheduledAt);
                   setDate(selected.toISOString().slice(0, 10));
                   setTime(selected.toTimeString().slice(0, 5));
+                  scrollToTarget(confirmRef.current);
                 }}
               />
             ))}
@@ -210,7 +240,9 @@ export function AppointmentsScreen() {
 
         <TextField label="سبب الزيارة" onChangeText={setReason} placeholder="مثال: مراجعة ضغط الدم" value={reason} />
         <TextField label="ملاحظات اختيارية" multiline onChangeText={setNotes} placeholder="أي تفاصيل تساعد الطبيب قبل الموعد" value={notes} />
-        <AppButton disabled={submitting} icon="checkmark-circle-outline" label="تأكيد الحجز" onPress={() => void createAppointment()} />
+        <View ref={confirmRef}>
+          <AppButton disabled={submitting} icon="checkmark-circle-outline" label="تأكيد الحجز" onPress={() => void createAppointment()} />
+        </View>
       </Card>
 
       <Card>

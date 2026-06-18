@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { requestAppointmentSuggestions } from "../api/appointment-suggestions";
@@ -127,6 +127,9 @@ export function PatientAppointmentsPage() {
   const [successMessage, setSuccessMessage] = useState("");
   const [preferredSlotWindow, setPreferredSlotWindow] = useState<SlotWindow>("ANY");
   const [sameDayOnly, setSameDayOnly] = useState(false);
+  const bookingFormRef = useRef<HTMLElement | null>(null);
+  const availabilitySectionRef = useRef<HTMLDivElement | null>(null);
+  const submitActionsRef = useRef<HTMLDivElement | null>(null);
 
   const doctorIdFromQuery = searchParams.get("doctorId") ?? "";
   const scheduledAtFromQuery = searchParams.get("scheduledAt") ?? "";
@@ -184,6 +187,7 @@ export function PatientAppointmentsPage() {
 
     setError("");
     setSuccessMessage("");
+    scrollToSection(bookingFormRef.current);
   }, [doctorIdFromQuery, scheduledAtFromQuery, doctors]);
 
   const selectedDoctor = useMemo(
@@ -331,6 +335,15 @@ export function PatientAppointmentsPage() {
     setSuccessMessage("");
   }
 
+  function scrollToSection(target: HTMLElement | null) {
+    window.setTimeout(() => {
+      target?.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    }, 0);
+  }
+
   function updateForm(updates: Partial<AppointmentFormState>) {
     setForm((current) => ({
       ...current,
@@ -338,7 +351,7 @@ export function PatientAppointmentsPage() {
     }));
   }
 
-  async function loadSuggestions(preferredDate = form.scheduledAt) {
+  async function loadSuggestions(preferredDate = form.scheduledAt, options: { scrollToAvailability?: boolean } = {}) {
     if (!selectedDoctor) {
       clearSuggestions();
       setSuggestionsError("اختر الطبيب أولًا لعرض المواعيد المتاحة له.");
@@ -368,6 +381,9 @@ export function PatientAppointmentsPage() {
       );
     } finally {
       setSuggestionsLoading(false);
+      if (options.scrollToAvailability) {
+        scrollToSection(availabilitySectionRef.current);
+      }
     }
   }
 
@@ -387,6 +403,7 @@ export function PatientAppointmentsPage() {
     });
     clearFeedback();
     clearSuggestions();
+    scrollToSection(submitActionsRef.current);
   }
 
   function applyPreset(preset: BookingReasonPreset) {
@@ -458,7 +475,7 @@ export function PatientAppointmentsPage() {
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         setError("الموعد الذي أدخلته غير متاح لهذا الطبيب. اختر موعدًا متاحًا من الاقتراحات التالية.");
-        await loadSuggestions(form.scheduledAt);
+        await loadSuggestions(form.scheduledAt, { scrollToAvailability: true });
       } else {
         setError(
           cause instanceof ApiError
@@ -514,7 +531,7 @@ export function PatientAppointmentsPage() {
               type="button"
               onClick={() => {
                 if (selectedDoctor) {
-                  void loadSuggestions();
+                  void loadSuggestions(form.scheduledAt, { scrollToAvailability: true });
                 }
               }}
               disabled={!selectedDoctor || suggestionsLoading}
@@ -559,7 +576,7 @@ export function PatientAppointmentsPage() {
 
       <section className="booking-layout">
         <div className="booking-main-column">
-          <section className="section-card booking-form-card">
+          <section className="section-card booking-form-card" ref={bookingFormRef}>
             <div className="section-header">
               <div>
                 <p className="eyebrow">طلب موعد جديد</p>
@@ -751,7 +768,7 @@ export function PatientAppointmentsPage() {
               {successMessage ? <div className="success-banner field-span-2">{successMessage}</div> : null}
               {error ? <div className="error-banner field-span-2">{error}</div> : null}
 
-              <div className="field-span-2 availability-filter-shell">
+              <div className="field-span-2 availability-filter-shell" ref={availabilitySectionRef}>
                 <div className="info-row">
                   <div>
                     <strong>فلترة التوفر</strong>
@@ -801,7 +818,7 @@ export function PatientAppointmentsPage() {
                 onSelect={applySuggestion}
               />
 
-              <div className="field-span-2 button-row">
+              <div className="field-span-2 button-row" ref={submitActionsRef}>
                 <button className="primary-button" type="submit" disabled={submitting}>
                   {submitting ? "جارٍ تثبيت الموعد..." : "تأكيد الحجز"}
                 </button>
@@ -810,7 +827,7 @@ export function PatientAppointmentsPage() {
                   type="button"
                   onClick={() => {
                     if (selectedDoctor) {
-                      void loadSuggestions();
+                      void loadSuggestions(form.scheduledAt, { scrollToAvailability: true });
                     }
                   }}
                   disabled={!selectedDoctor || suggestionsLoading}

@@ -43,6 +43,10 @@ const appointmentSuggestionQuerySchema = z.object({
   priority: z.enum(appointmentPriorityValues).default("NORMAL")
 });
 
+function isAlignedAppointmentSlot(date: Date) {
+  return date.getSeconds() === 0 && date.getMilliseconds() === 0 && [0, 30].includes(date.getMinutes());
+}
+
 router.get(
   "/suggestions",
   authenticate,
@@ -151,6 +155,10 @@ router.post(
       throw new AppError("Appointment time must be in the future.", 400);
     }
 
+    if (!isAlignedAppointmentSlot(payload.scheduledAt)) {
+      throw new AppError("Appointment time must start on an available 30-minute slot.", 400);
+    }
+
     const patientId =
       req.auth?.role === UserRole.PATIENT
         ? requireProfileId(req.auth.patientProfileId, "Patient profile is required.")
@@ -186,7 +194,10 @@ router.post(
       throw new AppError("The selected time is already booked for this doctor. Please choose another slot.", 409);
     }
 
-    const appointment = await prisma.appointment.create({
+    let appointment;
+
+    try {
+      appointment = await prisma.appointment.create({
       data: {
         centerId,
         departmentId: payload.departmentId,
@@ -212,7 +223,14 @@ router.post(
           }
         }
       }
-    });
+      });
+    } catch (cause) {
+      if (cause instanceof Prisma.PrismaClientKnownRequestError && cause.code === "P2002") {
+        throw new AppError("The selected time is already booked for this doctor. Please choose another slot.", 409);
+      }
+
+      throw cause;
+    }
 
     await prisma.notification.createMany({
       data: [
