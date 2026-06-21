@@ -21,7 +21,13 @@ export async function getCentralDashboardData() {
     prisma.centralCenter.count({ where: { isConnected: true } }),
     prisma.centralCenter.count({ where: { isConnected: false } }),
     prisma.unifiedPatient.count(),
-    prisma.centralReferral.count({ where: { status: "PENDING" } }),
+    prisma.centralReferral.count({
+      where: {
+        status: {
+          in: ["PENDING", "REQUESTED", "AUTO_SELECTED", "PENDING_RECEIVING_MANAGER", "RECEIVING_MANAGER_ACCEPTED", "ASSIGNED_TO_DOCTOR", "VISIT_CREATED"]
+        }
+      }
+    }),
     prisma.centralNotification.count({ where: { status: { in: ["PENDING", "FAILED"] } } }),
     prisma.outgoingNotification.count({ where: { status: { in: ["PENDING", "FAILED"] } } }),
     prisma.centralCenter.findMany({
@@ -264,7 +270,11 @@ export async function getCentralReferralsOverview() {
     include: {
       fromCenter: true,
       toCenter: true,
-      patient: true
+      patient: true,
+      assignedDoctor: true,
+      acceptedByManager: true,
+      rejectedByManager: true,
+      createdVisit: true
     },
     orderBy: {
       requestedAt: "desc"
@@ -283,11 +293,36 @@ export async function getCentralReferralsOverview() {
     reason: referral.reason,
     selectedCenterReason: referral.selectedCenterReason,
     rejectionReason: referral.rejectionReason,
+    managerDecisionReason: referral.managerDecisionReason,
+    matchingScore: referral.matchingScore,
     estimatedWaitTimeMinutes: referral.estimatedWaitTimeMinutes,
     requestedAt: referral.requestedAt,
     respondedAt: referral.respondedAt,
+    decisionAt: referral.decisionAt,
+    assignedAt: referral.assignedAt,
+    visitCreatedAt: referral.visitCreatedAt,
+    completedAt: referral.completedAt,
     notesFromSender: referral.notesFromSender,
-    notesFromReceiver: referral.notesFromReceiver
+    notesFromReceiver: referral.notesFromReceiver,
+    assignedDoctor: referral.assignedDoctor
+      ? {
+          id: referral.assignedDoctor.id,
+          fullName: referral.assignedDoctor.fullName
+        }
+      : null,
+    acceptedByManager: referral.acceptedByManager
+      ? {
+          id: referral.acceptedByManager.id,
+          fullName: referral.acceptedByManager.fullName
+        }
+      : null,
+    rejectedByManager: referral.rejectedByManager
+      ? {
+          id: referral.rejectedByManager.id,
+          fullName: referral.rejectedByManager.fullName
+        }
+      : null,
+    createdVisitId: referral.createdVisit?.id ?? null
   }));
 }
 
@@ -528,7 +563,9 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
       unsyncedVisits,
       incomingPending,
       outgoingPending,
-      openReferrals: referrals.filter((item) => item.status === "PENDING").length,
+      openReferrals: referrals.filter((item) =>
+        ["PENDING", "REQUESTED", "AUTO_SELECTED", "PENDING_RECEIVING_MANAGER", "RECEIVING_MANAGER_ACCEPTED", "ASSIGNED_TO_DOCTOR", "VISIT_CREATED"].includes(item.status)
+      ).length,
       labOpenRequests,
       lowStockItems
     },
@@ -672,6 +709,12 @@ export async function getCenterVisits(centerId: number) {
           createdAt: "desc"
         }
       },
+      referral: {
+        include: {
+          fromCenter: true,
+          toCenter: true
+        }
+      },
       invoice: true
     },
     orderBy: {
@@ -694,6 +737,17 @@ export async function getCenterVisits(centerId: number) {
     heartRate: visit.heartRate,
     visitDate: visit.visitDate,
     visitTime: visit.visitTime,
+    visitSource: visit.visitSource,
+    referral: visit.referral
+      ? {
+          id: visit.referral.id,
+          fromCenter: visit.referral.fromCenter.centerName,
+          toCenter: visit.referral.toCenter?.centerName ?? null,
+          reason: visit.referral.reason,
+          requiredSpecialty: visit.referral.requiredSpecialty,
+          status: visit.referral.status
+        }
+      : null,
     syncState: visit.syncState,
     syncedToCentral: visit.syncedToCentral,
     prescriptionCount: visit.prescriptions.length,
@@ -820,10 +874,21 @@ export async function getCenterNotifications(centerId: number) {
     })
   ]);
 
+  const targetPattern = /\[\[target:([^\]]+)\]\]/;
+  const mapAlert = (alert: (typeof alerts)[number]) => {
+    const match = alert.message.match(targetPattern);
+
+    return {
+      ...alert,
+      message: alert.message.replace(targetPattern, "").trim(),
+      targetUrl: match?.[1] ?? null
+    };
+  };
+
   return {
     incoming,
     outgoing,
-    alerts,
+    alerts: alerts.map(mapAlert),
     logs
   };
 }

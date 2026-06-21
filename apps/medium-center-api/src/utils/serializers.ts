@@ -207,12 +207,26 @@ export function mapThread(thread: ThreadPayload, patientIdentity: PatientIdentit
   };
 }
 
+const notificationTargetPattern = /\[\[target:([^\]]+)\]\]/;
+
+function extractNotificationTarget(body: string) {
+  const match = body.match(notificationTargetPattern);
+
+  return {
+    targetUrl: match?.[1] ?? null,
+    body: body.replace(notificationTargetPattern, "").trim()
+  };
+}
+
 export function mapNotification(notification: Notification) {
+  const target = extractNotificationTarget(notification.body);
+
   return {
     id: notification.id,
     title: notification.title,
-    body: notification.body,
+    body: target.body,
     type: notification.type,
+    targetUrl: target.targetUrl,
     isRead: notification.isRead,
     createdAt: notification.createdAt
   };

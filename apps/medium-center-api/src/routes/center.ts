@@ -143,6 +143,10 @@ const patientSchema = z.object({
   dateOfBirth: z.coerce.date(),
   gender: z.enum(["MALE", "FEMALE", "OTHER", "PREFER_NOT_TO_SAY"]),
   primaryPhone: z.string().min(6),
+  email: z.preprocess(
+    (value) => (typeof value === "string" ? value.trim() : value),
+    z.string().email("أدخل البريد الإلكتروني الصحيح للمريض.")
+  ),
   address: z.string().min(5),
   emergencyContact: z.string().optional(),
   bloodType: z.string().optional(),
@@ -230,6 +234,21 @@ const referralSchema = z.object({
   processNow: z.boolean().default(true)
 });
 
+const referralRejectSchema = z.object({
+  reason: z.string().trim().min(3)
+});
+
+const referralAssignDoctorSchema = z.object({
+  doctorId: z.coerce.number().int().positive()
+});
+
+const referralStartVisitSchema = z.object({
+  symptoms: z.string().trim().optional(),
+  diagnosis: z.string().trim().optional(),
+  notes: z.string().trim().optional(),
+  visitType: z.enum(["CONSULTATION", "EMERGENCY", "FOLLOW_UP", "LAB"]).default("CONSULTATION")
+});
+
 const labRequestSchema = z.object({
   patientId: z.coerce.number(),
   doctorId: z.coerce.number(),
@@ -288,6 +307,71 @@ const followUpReminderUpdateSchema = z
   .refine((payload) => Object.keys(payload).length > 0, {
     message: "At least one reminder field must be provided."
   });
+
+const centralReferralInclude = {
+  patient: true,
+  fromCenter: true,
+  toCenter: true,
+  assignedDoctor: true,
+  acceptedByManager: true,
+  rejectedByManager: true,
+  createdVisit: true
+} as const;
+
+type CentralReferralPayload = Prisma.CentralReferralGetPayload<{
+  include: typeof centralReferralInclude;
+}>;
+
+function mapCentralReferral(referral: CentralReferralPayload) {
+  return {
+    id: referral.id,
+    patientName: referral.patient.fullName,
+    patientUnifiedId: referral.patient.unifiedId,
+    fromCenter: referral.fromCenter.centerName,
+    fromCenterId: referral.fromCenterId,
+    toCenter: referral.toCenter?.centerName ?? "بانتظار اختيار الجهة المستقبلة",
+    toCenterId: referral.toCenterId,
+    requiredSpecialty: referral.requiredSpecialty,
+    priority: referral.priority,
+    status: referral.status,
+    reason: referral.reason,
+    selectedCenterReason: referral.selectedCenterReason,
+    rejectionReason: referral.rejectionReason,
+    managerDecisionReason: referral.managerDecisionReason,
+    matchingScore: referral.matchingScore,
+    estimatedWaitTimeMinutes: referral.estimatedWaitTimeMinutes,
+    requestedAt: referral.requestedAt,
+    respondedAt: referral.respondedAt,
+    decisionAt: referral.decisionAt,
+    assignedAt: referral.assignedAt,
+    visitCreatedAt: referral.visitCreatedAt,
+    completedAt: referral.completedAt,
+    notesFromSender: referral.notesFromSender,
+    notesFromReceiver: referral.notesFromReceiver,
+    assignedDoctor: referral.assignedDoctor
+      ? {
+          id: referral.assignedDoctor.id,
+          fullName: referral.assignedDoctor.fullName
+        }
+      : null,
+    acceptedByManager: referral.acceptedByManager
+      ? {
+          id: referral.acceptedByManager.id,
+          fullName: referral.acceptedByManager.fullName
+        }
+      : null,
+    rejectedByManager: referral.rejectedByManager
+      ? {
+          id: referral.rejectedByManager.id,
+          fullName: referral.rejectedByManager.fullName
+        }
+      : null,
+    createdVisitId: referral.createdVisit?.id ?? null
+  };
+}
+
+const receivingReviewStatuses = ["AUTO_SELECTED", "PENDING_RECEIVING_MANAGER", "ACCEPTED"] as const;
+const receivingInboxStatuses = [...receivingReviewStatuses, "RECEIVING_MANAGER_ACCEPTED"] as const;
 
 const doctorAccountSchema = z.object({
   username: z.string().optional(),
@@ -866,6 +950,7 @@ router.post(
       centerId,
       fullName: payload.fullName,
       nationalId: payload.nationalId,
+      email: payload.email,
       primaryPhone: payload.primaryPhone,
       dateOfBirth: payload.dateOfBirth,
       gender: payload.gender,
@@ -1669,11 +1754,7 @@ router.get(
         where: {
           OR: [{ fromCenterId: centerId }, { toCenterId: centerId }]
         },
-        include: {
-          patient: true,
-          fromCenter: true,
-          toCenter: true
-        },
+        include: centralReferralInclude,
         orderBy: {
           requestedAt: "desc"
         }
@@ -1697,25 +1778,7 @@ router.get(
 
     res.json(
       [
-        ...referrals.map((referral) => ({
-          id: referral.id,
-          patientName: referral.patient.fullName,
-          patientUnifiedId: referral.patient.unifiedId,
-          fromCenter: referral.fromCenter.centerName,
-          toCenter:
-            referral.toCenter?.centerName ?? "بانتظار اختيار الجهة المستقبلة",
-          requiredSpecialty: referral.requiredSpecialty,
-          priority: referral.priority,
-          status: referral.status,
-          reason: referral.reason,
-          selectedCenterReason: referral.selectedCenterReason,
-          rejectionReason: referral.rejectionReason,
-          estimatedWaitTimeMinutes: referral.estimatedWaitTimeMinutes,
-          requestedAt: referral.requestedAt,
-          respondedAt: referral.respondedAt,
-          notesFromSender: referral.notesFromSender,
-          notesFromReceiver: referral.notesFromReceiver
-        })),
+        ...referrals.map(mapCentralReferral),
         ...outgoingReferralRequests.map((notification) => {
           const payload = notification.payload as Record<string, unknown>;
 
@@ -1731,11 +1794,21 @@ router.get(
             reason: String(payload.reason ?? "Referral request queued for central processing."),
             selectedCenterReason: null,
             rejectionReason: notification.lastError,
+            managerDecisionReason: null,
+            matchingScore: null,
             estimatedWaitTimeMinutes: null,
             requestedAt: notification.createdAt,
             respondedAt: notification.sentAt,
+            decisionAt: null,
+            assignedAt: null,
+            visitCreatedAt: null,
+            completedAt: null,
             notesFromSender: payload.notes_from_sender ? String(payload.notes_from_sender) : null,
-            notesFromReceiver: null
+            notesFromReceiver: null,
+            assignedDoctor: null,
+            acceptedByManager: null,
+            rejectedByManager: null,
+            createdVisitId: null
           };
         })
       ].sort((left, right) => new Date(right.requestedAt).getTime() - new Date(left.requestedAt).getTime())
@@ -1779,19 +1852,446 @@ router.post(
       await processOutgoingNotifications(centerId);
     }
 
-    await recordAuditLog(req, {
-      action: "CREATE_REFERRAL",
-      entityType: "OutgoingNotification",
-      entityId: queueItem.id,
-      centerId,
-      newValue: {
-        patientUnifiedId,
-        requiredSpecialty: payload.requiredSpecialty,
-        priority: payload.priority
+    await Promise.all([
+      notifyRole({
+        centerId,
+        role: "CENTER_MANAGER",
+        type: "REFERRAL_CREATED",
+        title: "تم إرسال طلب إحالة",
+        message: `تم إرسال طلب إحالة إلى ${payload.requiredSpecialty} عبر المحرك المركزي.`
+      }),
+      recordAuditLog(req, {
+        action: "REFERRAL_CREATED",
+        entityType: "OutgoingNotification",
+        entityId: queueItem.id,
+        centerId,
+        newValue: {
+          patientUnifiedId,
+          requiredSpecialty: payload.requiredSpecialty,
+          priority: payload.priority
+        }
+      })
+    ]);
+
+    res.status(201).json(queueItem);
+  })
+);
+
+router.get(
+  "/referrals/incoming",
+  authorize("CENTER_MANAGER"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const referrals = await prisma.centralReferral.findMany({
+      where: {
+        toCenterId: centerId,
+        status: {
+          in: [...receivingInboxStatuses]
+        }
+      },
+      include: centralReferralInclude,
+      orderBy: {
+        requestedAt: "desc"
       }
     });
 
-    res.status(201).json(queueItem);
+    res.json(referrals.map(mapCentralReferral));
+  })
+);
+
+router.get(
+  "/referrals/assigned-to-me",
+  authorize("DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const referrals = await prisma.centralReferral.findMany({
+      where: {
+        toCenterId: centerId,
+        assignedDoctorId: actorId,
+        status: {
+          in: ["ASSIGNED_TO_DOCTOR", "VISIT_CREATED", "COMPLETED"]
+        }
+      },
+      include: centralReferralInclude,
+      orderBy: [{ assignedAt: "desc" }, { requestedAt: "desc" }]
+    });
+
+    res.json(referrals.map(mapCentralReferral));
+  })
+);
+
+router.post(
+  "/referrals/:referralId/manager-accept",
+  authorize("CENTER_MANAGER"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const referralId = parsePositiveParam(req.params.referralId, "Referral ID");
+    const existing = await prisma.centralReferral.findUnique({
+      where: { id: referralId },
+      include: centralReferralInclude
+    });
+
+    if (!existing || existing.toCenterId !== centerId) {
+      throw new AppError("هذه الإحالة غير موجهة إلى مركزك.", 403);
+    }
+
+    if (!receivingReviewStatuses.includes(existing.status as (typeof receivingReviewStatuses)[number])) {
+      throw new AppError("لا يمكن قبول هذه الإحالة في حالتها الحالية.", 400);
+    }
+
+    const referral = await prisma.centralReferral.update({
+      where: { id: existing.id },
+      data: {
+        status: "RECEIVING_MANAGER_ACCEPTED",
+        acceptedByManagerId: actorId,
+        rejectedByManagerId: null,
+        managerDecisionReason: null,
+        decisionAt: new Date()
+      },
+      include: centralReferralInclude
+    });
+
+    await Promise.all([
+      notifyRole({
+        centerId: referral.fromCenterId,
+        role: "CENTER_MANAGER",
+        type: "REFERRAL_MANAGER_ACCEPTED",
+        title: "تم قبول الإحالة من المركز المستقبل",
+        message: `قبل مركز ${referral.toCenter?.centerName ?? "الاستقبال"} إحالة ${referral.patient.fullName}. [[target:/referrals?referralId=${referral.id}]]`
+      }),
+      recordAuditLog(req, {
+        action: "REFERRAL_MANAGER_ACCEPTED",
+        entityType: "CentralReferral",
+        entityId: referral.id,
+        centerId,
+        oldValue: { status: existing.status },
+        newValue: { status: referral.status, acceptedByManagerId: actorId }
+      })
+    ]);
+
+    res.json(mapCentralReferral(referral));
+  })
+);
+
+router.post(
+  "/referrals/:referralId/manager-reject",
+  authorize("CENTER_MANAGER"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const referralId = parsePositiveParam(req.params.referralId, "Referral ID");
+    const payload = referralRejectSchema.parse(req.body);
+    const existing = await prisma.centralReferral.findUnique({
+      where: { id: referralId },
+      include: centralReferralInclude
+    });
+
+    if (!existing || existing.toCenterId !== centerId) {
+      throw new AppError("هذه الإحالة غير موجهة إلى مركزك.", 403);
+    }
+
+    if (!receivingReviewStatuses.includes(existing.status as (typeof receivingReviewStatuses)[number])) {
+      throw new AppError("لا يمكن رفض هذه الإحالة في حالتها الحالية.", 400);
+    }
+
+    const referral = await prisma.centralReferral.update({
+      where: { id: existing.id },
+      data: {
+        status: "RECEIVING_MANAGER_REJECTED",
+        rejectedByManagerId: actorId,
+        acceptedByManagerId: null,
+        managerDecisionReason: payload.reason,
+        rejectionReason: payload.reason,
+        decisionAt: new Date()
+      },
+      include: centralReferralInclude
+    });
+
+    await Promise.all([
+      notifyRole({
+        centerId: referral.fromCenterId,
+        role: "CENTER_MANAGER",
+        type: "REFERRAL_MANAGER_REJECTED",
+        title: "تم رفض الإحالة من المركز المستقبل",
+        message: `رفض مركز ${referral.toCenter?.centerName ?? "الاستقبال"} إحالة ${referral.patient.fullName}. السبب: ${payload.reason} [[target:/referrals?referralId=${referral.id}]]`
+      }),
+      recordAuditLog(req, {
+        action: "REFERRAL_MANAGER_REJECTED",
+        entityType: "CentralReferral",
+        entityId: referral.id,
+        centerId,
+        oldValue: { status: existing.status },
+        newValue: { status: referral.status, rejectedByManagerId: actorId }
+      })
+    ]);
+
+    res.json(mapCentralReferral(referral));
+  })
+);
+
+router.post(
+  "/referrals/:referralId/assign-doctor",
+  authorize("CENTER_MANAGER"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const referralId = parsePositiveParam(req.params.referralId, "Referral ID");
+    const payload = referralAssignDoctorSchema.parse(req.body);
+    const [existing, doctor] = await Promise.all([
+      prisma.centralReferral.findUnique({
+        where: { id: referralId },
+        include: centralReferralInclude
+      }),
+      prisma.centerUserAccount.findFirst({
+        where: {
+          id: payload.doctorId,
+          centerId,
+          role: "DOCTOR",
+          isActive: true
+        },
+        include: {
+          doctorProfile: true
+        }
+      })
+    ]);
+
+    if (!existing || existing.toCenterId !== centerId) {
+      throw new AppError("هذه الإحالة غير موجهة إلى مركزك.", 403);
+    }
+
+    if (existing.status !== "RECEIVING_MANAGER_ACCEPTED") {
+      throw new AppError("يجب قبول الإحالة من المدير قبل إسنادها لطبيب.", 400);
+    }
+
+    if (!doctor) {
+      throw new AppError("الطبيب المحدد غير موجود داخل مركزك.", 400);
+    }
+
+    const specialtyMatches =
+      doctor.doctorProfile?.specialization?.toLowerCase().includes(existing.requiredSpecialty.toLowerCase()) ||
+      existing.requiredSpecialty.toLowerCase().includes(doctor.doctorProfile?.specialization?.toLowerCase() ?? "");
+
+    const referral = await prisma.centralReferral.update({
+      where: { id: existing.id },
+      data: {
+        status: "ASSIGNED_TO_DOCTOR",
+        assignedDoctorId: doctor.id,
+        assignedAt: new Date(),
+        notesFromReceiver: specialtyMatches
+          ? existing.notesFromReceiver
+          : [
+              existing.notesFromReceiver,
+              `تم الإسناد إلى ${doctor.fullName}. التخصص المسجل للطبيب: ${doctor.doctorProfile?.specialization ?? "غير محدد"}.`
+            ]
+              .filter(Boolean)
+              .join("\n")
+      },
+      include: centralReferralInclude
+    });
+
+    await Promise.all([
+      notifyRole({
+        centerId,
+        role: "DOCTOR",
+        type: "REFERRAL_ASSIGNED_TO_DOCTOR",
+        title: "إحالة مسندة لطبيب",
+        message: `تم إسناد إحالة ${referral.patient.fullName} إلى ${doctor.fullName}. [[target:/referrals?view=assigned&referralId=${referral.id}]]`
+      }),
+      notifyRole({
+        centerId: referral.fromCenterId,
+        role: "CENTER_MANAGER",
+        type: "REFERRAL_ASSIGNED_TO_DOCTOR",
+        title: "تم إسناد الإحالة لطبيب",
+        message: `تم إسناد إحالة ${referral.patient.fullName} إلى طبيب في ${referral.toCenter?.centerName ?? "المركز المستقبل"}. [[target:/referrals?referralId=${referral.id}]]`
+      }),
+      recordAuditLog(req, {
+        action: "REFERRAL_ASSIGNED_TO_DOCTOR",
+        entityType: "CentralReferral",
+        entityId: referral.id,
+        centerId,
+        oldValue: { status: existing.status, assignedDoctorId: existing.assignedDoctorId },
+        newValue: { status: referral.status, assignedDoctorId: doctor.id, specialtyMatches }
+      })
+    ]);
+
+    res.json(mapCentralReferral(referral));
+  })
+);
+
+router.post(
+  "/referrals/:referralId/start-visit",
+  authorize("DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const referralId = parsePositiveParam(req.params.referralId, "Referral ID");
+    const payload = referralStartVisitSchema.parse(req.body);
+    const existing = await prisma.centralReferral.findUnique({
+      where: { id: referralId },
+      include: centralReferralInclude
+    });
+
+    if (!existing || existing.toCenterId !== centerId || existing.assignedDoctorId !== actorId) {
+      throw new AppError("لا يمكنك بدء زيارة لإحالة غير مسندة لك.", 403);
+    }
+
+    if (existing.createdVisit) {
+      res.json({
+        referral: mapCentralReferral(existing),
+        visitId: existing.createdVisit.id
+      });
+      return;
+    }
+
+    if (existing.status !== "ASSIGNED_TO_DOCTOR") {
+      throw new AppError("لا يمكن بدء الزيارة قبل إسناد الإحالة للطبيب.", 400);
+    }
+
+    let localPatient = await prisma.localPatient.findFirst({
+      where: {
+        centerId,
+        OR: [{ unifiedPatientId: existing.patientId }, { unifiedId: existing.patient.unifiedId }]
+      }
+    });
+
+    if (!localPatient) {
+      localPatient = await prisma.localPatient.create({
+        data: {
+          centerId,
+          unifiedPatientId: existing.patientId,
+          unifiedId: existing.patient.unifiedId,
+          fullName: existing.patient.fullName,
+          dateOfBirth: existing.patient.dateOfBirth,
+          gender: existing.patient.gender,
+          phone: existing.patient.primaryPhone,
+          address: existing.patient.address,
+          emergencyContact: existing.patient.secondaryPhone,
+          bloodType: existing.patient.bloodType,
+          allergies: existing.patient.allergies,
+          chronicDiseases: existing.patient.chronicDiseases,
+          createdLocally: false
+        }
+      });
+    }
+
+    const now = new Date();
+    const visit = await prisma.localVisit.create({
+      data: {
+        centerId,
+        patientId: localPatient.id,
+        doctorId: actorId,
+        visitDate: now,
+        visitTime: now.toTimeString().slice(0, 5),
+        visitType: payload.visitType,
+        symptoms: payload.symptoms,
+        diagnosis: payload.diagnosis || `زيارة إحالة إلى ${existing.requiredSpecialty}`,
+        notes: [
+          `زيارة محوّلة من: ${existing.fromCenter.centerName}`,
+          `سبب الإحالة: ${existing.reason}`,
+          `التخصص المطلوب: ${existing.requiredSpecialty}`,
+          payload.notes
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        priority: existing.priority,
+        workflowStatus: "IN_TREATMENT",
+        visitSource: "REFERRAL",
+        referralId: existing.id
+      }
+    });
+
+    const referral = await prisma.centralReferral.update({
+      where: { id: existing.id },
+      data: {
+        status: "VISIT_CREATED",
+        visitCreatedAt: now
+      },
+      include: centralReferralInclude
+    });
+
+    await Promise.all([
+      notifyRole({
+        centerId: referral.fromCenterId,
+        role: "CENTER_MANAGER",
+        type: "REFERRAL_VISIT_CREATED",
+        title: "تم بدء زيارة الإحالة",
+        message: `بدأ الطبيب زيارة محوّلة للمريض ${referral.patient.fullName} في ${referral.toCenter?.centerName ?? "المركز المستقبل"}. [[target:/referrals?referralId=${referral.id}]]`
+      }),
+      recordAuditLog(req, {
+        action: "REFERRAL_VISIT_CREATED",
+        entityType: "CentralReferral",
+        entityId: referral.id,
+        centerId,
+        oldValue: { status: existing.status },
+        newValue: { status: referral.status, visitId: visit.id }
+      })
+    ]);
+
+    res.status(201).json({
+      referral: mapCentralReferral(referral),
+      visitId: visit.id
+    });
+  })
+);
+
+router.post(
+  "/referrals/:referralId/complete",
+  authorize("CENTER_MANAGER", "DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const referralId = parsePositiveParam(req.params.referralId, "Referral ID");
+    const existing = await prisma.centralReferral.findUnique({
+      where: { id: referralId },
+      include: centralReferralInclude
+    });
+
+    if (!existing || existing.toCenterId !== centerId) {
+      throw new AppError("هذه الإحالة غير موجهة إلى مركزك.", 403);
+    }
+
+    if (req.auth?.role === "DOCTOR" && existing.assignedDoctorId !== actorId) {
+      throw new AppError("يمكن للطبيب إنهاء الإحالات المسندة إليه فقط.", 403);
+    }
+
+    if (!["VISIT_CREATED", "ASSIGNED_TO_DOCTOR", "COMPLETED"].includes(existing.status)) {
+      throw new AppError("لا يمكن إنهاء الإحالة في حالتها الحالية.", 400);
+    }
+
+    if (existing.status === "COMPLETED") {
+      res.json(mapCentralReferral(existing));
+      return;
+    }
+
+    const referral = await prisma.centralReferral.update({
+      where: { id: existing.id },
+      data: {
+        status: "COMPLETED",
+        completedAt: new Date()
+      },
+      include: centralReferralInclude
+    });
+
+    await Promise.all([
+      notifyRole({
+        centerId: referral.fromCenterId,
+        role: "CENTER_MANAGER",
+        type: "REFERRAL_COMPLETED",
+        title: "اكتملت الإحالة",
+        message: `تم إغلاق إحالة ${referral.patient.fullName} في ${referral.toCenter?.centerName ?? "المركز المستقبل"}. [[target:/referrals?referralId=${referral.id}]]`
+      }),
+      recordAuditLog(req, {
+        action: "REFERRAL_COMPLETED",
+        entityType: "CentralReferral",
+        entityId: referral.id,
+        centerId,
+        oldValue: { status: existing.status },
+        newValue: { status: referral.status, completedAt: referral.completedAt }
+      })
+    ]);
+
+    res.json(mapCentralReferral(referral));
   })
 );
 

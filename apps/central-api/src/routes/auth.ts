@@ -5,6 +5,7 @@ import { signAuthToken } from "../lib/jwt";
 import { prisma } from "../lib/prisma";
 import { authenticate } from "../middleware/auth";
 import { recordAuditLog } from "../services/audit-log";
+import { confirmPasswordReset, requestPasswordReset, verifyPasswordResetCode } from "../services/password-reset";
 import { loginWorkspaceUser, resolveSessionUser } from "../services/workspace-auth";
 import { asyncHandler } from "../utils/async-handler";
 
@@ -16,6 +17,21 @@ const loginSchema = z.object({
   identifier: z.string().min(3).optional(),
   email: z.string().min(3).optional(),
   password: z.string().min(8)
+});
+
+const passwordResetRequestSchema = z.object({
+  email: z.string().email()
+});
+
+const passwordResetVerifySchema = z.object({
+  email: z.string().email(),
+  code: z.string().trim().min(4).max(10)
+});
+
+const passwordResetConfirmSchema = z.object({
+  email: z.string().email(),
+  resetToken: z.string().min(32),
+  newPassword: z.string().min(8)
 });
 
 async function resolveDemoIdentifier(identifier: string) {
@@ -98,6 +114,47 @@ router.post(
     res.json({
       token,
       user: result.user
+    });
+  })
+);
+
+router.post(
+  "/password-reset/request",
+  asyncHandler(async (req, res) => {
+    const payload = passwordResetRequestSchema.parse(req.body);
+
+    await requestPasswordReset(payload.email);
+
+    res.json({
+      success: true,
+      message: "If this email belongs to an active account, a verification code has been sent."
+    });
+  })
+);
+
+router.post(
+  "/password-reset/verify",
+  asyncHandler(async (req, res) => {
+    const payload = passwordResetVerifySchema.parse(req.body);
+    const result = await verifyPasswordResetCode(payload);
+
+    res.json({
+      success: true,
+      resetToken: result.resetToken,
+      resetTokenExpiresAt: result.resetTokenExpiresAt
+    });
+  })
+);
+
+router.post(
+  "/password-reset/confirm",
+  asyncHandler(async (req, res) => {
+    const payload = passwordResetConfirmSchema.parse(req.body);
+
+    await confirmPasswordReset(payload);
+
+    res.json({
+      success: true
     });
   })
 );

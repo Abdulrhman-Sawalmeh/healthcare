@@ -8,6 +8,7 @@ import { CareAssistantPage } from "./pages/CareAssistantPage";
 import { CentersPage } from "./pages/CentersPage";
 import { CenterDoctorsPage } from "./pages/CenterDoctorsPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { DoctorAppointmentsPage } from "./pages/DoctorAppointmentsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MasterDataPage } from "./pages/MasterDataPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
@@ -86,6 +87,16 @@ function DoctorsRoute() {
   return <CenterDoctorsPage />;
 }
 
+function AppointmentsRoute() {
+  const { user } = useAuth();
+
+  if (user?.role === "PATIENT") {
+    return <PatientAppointmentsPage />;
+  }
+
+  return <DoctorAppointmentsPage />;
+}
+
 export function App() {
   return (
     <BrowserRouter>
@@ -102,8 +113,8 @@ export function App() {
           <Route
             path="/appointments"
             element={
-              <ProtectedRoute roles={["PATIENT"]}>
-                <PatientAppointmentsPage />
+              <ProtectedRoute roles={["PATIENT", "DOCTOR"]}>
+                <AppointmentsRoute />
               </ProtectedRoute>
             }
           />

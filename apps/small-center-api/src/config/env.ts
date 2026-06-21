@@ -10,7 +10,7 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(8),
   CORS_ORIGIN: z.string().default("http://localhost:5176"),
-  AI_PROVIDER: z.enum(["auto", "openrouter", "gemini", "local"]).default("auto"),
+  AI_PROVIDER: z.enum(["auto", "openai", "openrouter", "gemini", "local"]).default("auto"),
   OPENROUTER_API_KEY: z.string().optional(),
   OPENROUTER_MODEL: z.string().default("openrouter/free"),
   OPENROUTER_APP_URL: z.string().optional(),

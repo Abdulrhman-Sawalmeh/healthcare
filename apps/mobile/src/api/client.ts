@@ -95,10 +95,16 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
     headers.set("Authorization", `Bearer ${apiToken}`);
   }
 
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...options,
-    headers
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...options,
+      headers
+    });
+  } catch {
+    throw new ApiError(`تعذر الاتصال بالخادم. تأكد أن الهاتف والكمبيوتر على نفس الشبكة وأن الرابط ${baseUrl} يعمل.`);
+  }
 
   const contentType = response.headers.get("content-type") ?? "";
   const isJson = contentType.includes("application/json");

@@ -361,6 +361,15 @@ export interface VisitRecord {
   heartRate?: number | null;
   visitDate: string;
   visitTime?: string | null;
+  visitSource?: string | null;
+  referral?: {
+    id: number;
+    fromCenter: string;
+    toCenter?: string | null;
+    reason: string;
+    requiredSpecialty: string;
+    status: string;
+  } | null;
   syncState: string;
   syncedToCentral: boolean;
   prescriptionCount: number;
@@ -404,18 +413,39 @@ export interface ReferralRecord {
   patientName?: string;
   patientUnifiedId?: string;
   fromCenter: string;
+  fromCenterId?: number;
   toCenter: string;
+  toCenterId?: number | null;
   requiredSpecialty: string;
   priority: string;
   status: string;
   reason?: string;
   selectedCenterReason?: string | null;
   rejectionReason?: string | null;
+  managerDecisionReason?: string | null;
+  matchingScore?: number | null;
   estimatedWaitTimeMinutes?: number | null;
   requestedAt: string;
   respondedAt?: string | null;
+  decisionAt?: string | null;
+  assignedAt?: string | null;
+  visitCreatedAt?: string | null;
+  completedAt?: string | null;
   notesFromSender?: string | null;
   notesFromReceiver?: string | null;
+  assignedDoctor?: {
+    id: number;
+    fullName: string;
+  } | null;
+  acceptedByManager?: {
+    id: number;
+    fullName: string;
+  } | null;
+  rejectedByManager?: {
+    id: number;
+    fullName: string;
+  } | null;
+  createdVisitId?: number | null;
 }
 
 export interface MasterDataBundle {
@@ -529,6 +559,7 @@ export interface CenterNotificationsBundle {
     severity: string;
     createdAt: string;
     isResolved: boolean;
+    targetUrl?: string | null;
   }>;
   logs: Array<{
     id: number;

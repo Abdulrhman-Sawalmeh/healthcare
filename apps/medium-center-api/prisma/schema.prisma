@@ -524,8 +524,17 @@ enum NetworkReferralStatus {
   PENDING
   ACCEPTED
   REJECTED
+  REQUESTED
+  AUTO_SELECTED
+  NO_CANDIDATE_REJECTED
+  PENDING_RECEIVING_MANAGER
+  RECEIVING_MANAGER_ACCEPTED
+  RECEIVING_MANAGER_REJECTED
+  ASSIGNED_TO_DOCTOR
+  VISIT_CREATED
   COMPLETED
   CANCELLED
+  RETURNED_WITH_REASON
 }
 
 enum CommunicationDirection {
@@ -687,8 +696,16 @@ model CentralReferral {
   maxDistanceKm            Float                   @default(60)
   status                   NetworkReferralStatus   @default(PENDING)
   rejectionReason          String?
+  managerDecisionReason    String?
   selectedCenterReason     String?
+  matchingScore            Int?
   estimatedWaitTimeMinutes Int?
+  assignedDoctorId         Int?
+  acceptedByManagerId      Int?
+  rejectedByManagerId      Int?
+  decisionAt               DateTime?
+  assignedAt               DateTime?
+  visitCreatedAt           DateTime?
   requestedAt              DateTime                @default(now())
   respondedAt              DateTime?
   completedAt              DateTime?
@@ -697,9 +714,14 @@ model CentralReferral {
   fromCenter               CentralCenter           @relation("NetworkReferralFromCenter", fields: [fromCenterId], references: [id], onDelete: Cascade)
   toCenter                 CentralCenter?          @relation("NetworkReferralToCenter", fields: [toCenterId], references: [id], onDelete: SetNull)
   patient                  UnifiedPatient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  assignedDoctor           CenterUserAccount?      @relation("ReferralAssignedDoctor", fields: [assignedDoctorId], references: [id], onDelete: SetNull)
+  acceptedByManager        CenterUserAccount?      @relation("ReferralAcceptedByManager", fields: [acceptedByManagerId], references: [id], onDelete: SetNull)
+  rejectedByManager        CenterUserAccount?      @relation("ReferralRejectedByManager", fields: [rejectedByManagerId], references: [id], onDelete: SetNull)
+  createdVisit             LocalVisit?             @relation("ReferralCreatedVisit")
 
   @@index([fromCenterId, status])
   @@index([toCenterId, status])
+  @@index([assignedDoctorId, status])
   @@index([patientId, requestedAt])
 }
 
@@ -813,6 +835,26 @@ model CenterConfig {
   @@unique([centerId, configKey])
 }
 
+model PasswordResetCode {
+  id                  Int       @id @default(autoincrement())
+  accountType         String
+  accountId           String
+  email               String
+  codeHash            String
+  expiresAt           DateTime
+  verifiedAt          DateTime?
+  resetTokenHash      String?
+  resetTokenExpiresAt DateTime?
+  consumedAt          DateTime?
+  attempts            Int       @default(0)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([email, accountType, expiresAt])
+  @@index([email, resetTokenExpiresAt])
+  @@index([accountType, accountId, consumedAt])
+}
+
 model CenterUserAccount {
   id                             Int                       @id @default(autoincrement())
   centerId                       Int
@@ -845,6 +887,9 @@ model CenterUserAccount {
   completedLabRequests           LabRequestLocal[]         @relation("CompletedLabRequests")
   processedIncomingNotifications IncomingNotification[]    @relation("ProcessedIncomingNotifications")
   emergencyAccesses              EmergencyAccess[]
+  assignedReferrals              CentralReferral[]         @relation("ReferralAssignedDoctor")
+  acceptedReferrals              CentralReferral[]         @relation("ReferralAcceptedByManager")
+  rejectedReferrals              CentralReferral[]         @relation("ReferralRejectedByManager")
 
   @@index([centerId, role])
 }
@@ -933,11 +978,14 @@ model LocalVisit {
   syncState          LocalVisitSyncState @default(PENDING)
   syncedToCentral    Boolean             @default(false)
   syncAttemptCount   Int                 @default(0)
+  visitSource        String              @default("LOCAL")
+  referralId         Int?                @unique
   createdAt          DateTime            @default(now())
   center             CentralCenter       @relation(fields: [centerId], references: [id], onDelete: Cascade)
   patient            LocalPatient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
   doctor             CenterUserAccount?  @relation("CenterUserVisits", fields: [doctorId], references: [id], onDelete: SetNull)
   unifiedVisit       UnifiedVisit?       @relation("LocalVisitSync", fields: [centralVisitId], references: [id], onDelete: SetNull)
+  referral           CentralReferral?    @relation("ReferralCreatedVisit", fields: [referralId], references: [id], onDelete: SetNull)
   prescriptions      LocalPrescription[]
   resultReports      LocalResultReport[]
   nursingAssessments NursingAssessment[]
@@ -950,6 +998,7 @@ model LocalVisit {
   @@index([centerId, uploadStatus, visitDate])
   @@index([centerId, syncState, visitDate])
   @@index([patientId, visitDate])
+  @@index([referralId])
 }
 
 model NursingAssessment {

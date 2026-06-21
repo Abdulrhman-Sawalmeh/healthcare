@@ -132,7 +132,7 @@ export function AppointmentsScreen() {
     setMessage("");
 
     try {
-      await mediumApi.createAppointment({
+      const createdAppointment = await mediumApi.createAppointment({
         doctorId: selectedDoctor.id,
         departmentId: selectedDoctor.department.id,
         scheduledAt: combineDateAndTime(date, time),
@@ -144,7 +144,9 @@ export function AppointmentsScreen() {
       setReason("");
       setNotes("");
       setSuggestions([]);
-      setMessage("تم إنشاء الموعد بنجاح.");
+      setMessage(
+        `تم حجز موعدك بنجاح في ${formatDateTime(createdAppointment.scheduledAt)}. سيتواصل معك الطبيب قريباً.`
+      );
       await loadData();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر إنشاء الموعد.");

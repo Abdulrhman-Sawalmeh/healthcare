@@ -434,7 +434,7 @@ export function DashboardPage() {
       </SectionCard>
       ) : null}
 
-      <div className="split-grid">
+      <div className={user?.role === "DOCTOR" ? "page-stack" : "split-grid"}>
         <SectionCard
           title="آخر الزيارات"
           subtitle="أحدث الزيارات المسجلة داخل المركز."
@@ -478,6 +478,7 @@ export function DashboardPage() {
           </div>
         </SectionCard>
 
+        {user?.role !== "DOCTOR" ? (
         <SectionCard title="فريق العمل حسب الدور" subtitle="يوفر النظام واجهات مختلفة لكل دور داخل المركز الصحي.">
           <div className="stack-list compact">
             {centerData.team.map((member) => {
@@ -510,6 +511,7 @@ export function DashboardPage() {
             })}
           </div>
         </SectionCard>
+        ) : null}
       </div>
 
       <SectionCard

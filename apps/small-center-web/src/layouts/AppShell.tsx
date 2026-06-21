@@ -163,7 +163,8 @@ export function AppShell() {
                     workspace: currentUser.workspace,
                     type: alert.severity,
                     title: alert.title,
-                    body: alert.message
+                    body: alert.message,
+                    targetUrl: alert.targetUrl
                   })
                 }))
               : []),
@@ -249,14 +250,15 @@ export function AppShell() {
               helper: alert.message,
               status: alert.severity,
               createdAt: alert.createdAt,
-              to: resolveNotificationPath({
-                role: currentUser.role,
-                workspace: currentUser.workspace,
-                type: alert.severity,
-                title: alert.title,
-                body: alert.message
-              })
-            })),
+                to: resolveNotificationPath({
+                  role: currentUser.role,
+                  workspace: currentUser.workspace,
+                  type: alert.severity,
+                  title: alert.title,
+                  body: alert.message,
+                  targetUrl: alert.targetUrl
+                })
+              })),
             ...centerPayload.outgoing.map((item) => ({
               id: `out-${item.id}`,
               title: toArabicLabel(item.notificationType),

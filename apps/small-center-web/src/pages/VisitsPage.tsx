@@ -851,8 +851,15 @@ export function VisitsPage() {
                   <span>{selectedVisit.doctorName}</span>
                   <span>{formatDateTime(selectedVisit.visitDate)}</span>
                   <span>{toArabicLabel(selectedVisit.visitType)}</span>
+                  {selectedVisit.visitSource === "REFERRAL" ? <span>زيارة محوّلة</span> : null}
                   <span>{ensureVisitReports(selectedVisit).length} تقارير</span>
                 </div>
+                {selectedVisit.referral ? (
+                  <div className="inline-note">
+                    محوّل من: {selectedVisit.referral.fromCenter} | سبب الإحالة: {selectedVisit.referral.reason} |
+                    التخصص المطلوب: {selectedVisit.referral.requiredSpecialty}
+                  </div>
+                ) : null}
               </div>
 
               {canAuthorReports ? (
@@ -1018,9 +1025,15 @@ export function VisitsPage() {
                   <p className="eyebrow">{toArabicLabel(visit.visitType)}</p>
                   <h3>{visit.patientName}</h3>
                   <p>{visit.diagnosis}</p>
+                  {visit.referral ? (
+                    <p className="muted">
+                      زيارة محوّلة من {visit.referral.fromCenter} إلى {visit.referral.requiredSpecialty}
+                    </p>
+                  ) : null}
                   <div className="tile-stats">
                     <span>{visit.doctorName}</span>
                     <span>{formatDateTime(visit.visitDate)}</span>
+                    {visit.visitSource === "REFERRAL" ? <span>محوّل</span> : null}
                     <span>{ensureVisitReports(visit).length} تقارير</span>
                   </div>
                   <div className="button-row">
@@ -1068,10 +1081,16 @@ export function VisitsPage() {
                     <td>
                       <strong>{visit.patientName}</strong>
                       <span>{toArabicLabel(visit.visitType)}</span>
+                      {visit.visitSource === "REFERRAL" ? <span>زيارة محوّلة</span> : null}
                     </td>
                     <td>{visit.doctorName}</td>
                     <td>
                       <strong>{visit.diagnosis}</strong>
+                      {visit.referral ? (
+                        <span>
+                          محوّل من: {visit.referral.fromCenter} | {visit.referral.requiredSpecialty}
+                        </span>
+                      ) : null}
                       <span>{visit.prescriptionCount} وصفات دوائية</span>
                     </td>
                     <td>

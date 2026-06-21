@@ -329,7 +329,8 @@ export function NotificationsPage() {
                 workspace: user?.workspace,
                 type: alert.severity,
                 title: alert.title,
-                body: alert.message
+                body: alert.message,
+                targetUrl: alert.targetUrl
               });
 
               return (

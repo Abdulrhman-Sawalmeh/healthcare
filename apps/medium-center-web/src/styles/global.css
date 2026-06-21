@@ -2052,6 +2052,16 @@ textarea:focus-visible {
   flex: 0 0 auto;
 }
 
+.booking-success-card,
+.highlighted-appointment {
+  border-color: color-mix(in srgb, var(--success) 28%, var(--border));
+  background: color-mix(in srgb, var(--success) 7%, #fff);
+}
+
+.booking-success-card {
+  scroll-margin-top: 24px;
+}
+
 .table-controls {
   display: grid;
   grid-template-columns: minmax(220px, 1.5fr) minmax(160px, 0.8fr) minmax(130px, 0.6fr) auto auto minmax(150px, auto) auto auto;

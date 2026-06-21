@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { requestAppointmentSuggestions } from "../api/appointment-suggestions";
 import { ApiError, apiRequest } from "../api/client";
 import { SmartBookingAssistant } from "../components/SmartBookingAssistant";
+import { StatusBadge } from "../components/StatusBadge";
 import { SuggestedAppointmentSlots } from "../components/SuggestedAppointmentSlots";
 import { useAuth } from "../context/AuthContext";
 import { BookingReasonPreset, getSmartBookingInsight } from "../lib/booking-assistant";
@@ -125,8 +126,10 @@ export function PatientAppointmentsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [confirmedAppointment, setConfirmedAppointment] = useState<PortalAppointmentRecord | null>(null);
   const [preferredSlotWindow, setPreferredSlotWindow] = useState<SlotWindow>("ANY");
   const [sameDayOnly, setSameDayOnly] = useState(false);
+  const successRef = useRef<HTMLElement | null>(null);
   const bookingFormRef = useRef<HTMLElement | null>(null);
   const availabilitySectionRef = useRef<HTMLDivElement | null>(null);
   const submitActionsRef = useRef<HTMLDivElement | null>(null);
@@ -333,6 +336,7 @@ export function PatientAppointmentsPage() {
   function clearFeedback() {
     setError("");
     setSuccessMessage("");
+    setConfirmedAppointment(null);
   }
 
   function scrollToSection(target: HTMLElement | null) {
@@ -455,7 +459,7 @@ export function PatientAppointmentsPage() {
     try {
       const scheduledAtIso = new Date(form.scheduledAt).toISOString();
 
-      await apiRequest("/portal/appointments", {
+      const createdAppointment = await apiRequest<PortalAppointmentRecord>("/portal/appointments", {
         method: "POST",
         body: JSON.stringify({
           centerId: String(user.center.id),
@@ -468,10 +472,14 @@ export function PatientAppointmentsPage() {
         })
       });
 
-      setSuccessMessage(`تم حجز موعدك بنجاح مع ${selectedDoctor.fullName} بتاريخ ${formatDateTime(scheduledAtIso)}.`);
+      setConfirmedAppointment(createdAppointment);
+      setSuccessMessage(
+        `تم حجز موعدك بنجاح في ${formatDateTime(createdAppointment.scheduledAt)}. سيتواصل معك الطبيب قريباً.`
+      );
       setForm(initialForm);
       clearSuggestions();
       await loadData();
+      scrollToSection(successRef.current);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         setError("الموعد الذي أدخلته غير متاح لهذا الطبيب. اختر موعدًا متاحًا من الاقتراحات التالية.");
@@ -564,6 +572,27 @@ export function PatientAppointmentsPage() {
           </article>
         </div>
       </section>
+
+      {confirmedAppointment ? (
+        <section className="section-card booking-success-card" ref={successRef}>
+          <div className="success-banner">{successMessage}</div>
+          <div className="info-row">
+            <div>
+              <p className="eyebrow">تم تأكيد إرسال الطلب للطبيب</p>
+              <h3>نجاح الحجز بالموعد المحدد</h3>
+              <p className="muted">
+                الموعد مع {confirmedAppointment.doctor.fullName} في قسم {confirmedAppointment.department.name}.
+              </p>
+            </div>
+            <StatusBadge status={confirmedAppointment.status} />
+          </div>
+          <div className="tile-stats">
+            <span>{formatDateTime(confirmedAppointment.scheduledAt)}</span>
+            <span>{toArabicLabel(confirmedAppointment.type)}</span>
+            <span>{confirmedAppointment.center.name}</span>
+          </div>
+        </section>
+      ) : null}
 
       <section className="care-path-grid">
         {careOptions.map((option) => (
@@ -765,7 +794,9 @@ export function PatientAppointmentsPage() {
                 />
               </label>
 
-              {successMessage ? <div className="success-banner field-span-2">{successMessage}</div> : null}
+              {successMessage && !confirmedAppointment ? (
+                <div className="success-banner field-span-2">{successMessage}</div>
+              ) : null}
               {error ? <div className="error-banner field-span-2">{error}</div> : null}
 
               <div className="field-span-2 availability-filter-shell" ref={availabilitySectionRef}>

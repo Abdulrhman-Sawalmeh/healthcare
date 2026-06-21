@@ -19,7 +19,21 @@ export async function getCentralDashboardData() {
     prisma.centralCenter.count({ where: { isConnected: true } }),
     prisma.centralCenter.count({ where: { isConnected: false } }),
     prisma.unifiedPatient.count(),
-    prisma.centralReferral.count({ where: { status: "PENDING" } }),
+    prisma.centralReferral.count({
+      where: {
+        status: {
+          in: [
+            "PENDING",
+            "REQUESTED",
+            "AUTO_SELECTED",
+            "PENDING_RECEIVING_MANAGER",
+            "RECEIVING_MANAGER_ACCEPTED",
+            "ASSIGNED_TO_DOCTOR",
+            "VISIT_CREATED"
+          ]
+        }
+      }
+    }),
     prisma.centralNotification.count({ where: { status: { in: ["PENDING", "FAILED"] } } }),
     prisma.outgoingNotification.count({ where: { status: { in: ["PENDING", "FAILED"] } } }),
     prisma.centralCenter.findMany({
@@ -261,7 +275,11 @@ export async function getCentralReferralsOverview() {
     include: {
       fromCenter: true,
       toCenter: true,
-      patient: true
+      patient: true,
+      assignedDoctor: true,
+      acceptedByManager: true,
+      rejectedByManager: true,
+      createdVisit: true
     },
     orderBy: {
       requestedAt: "desc"
@@ -280,11 +298,36 @@ export async function getCentralReferralsOverview() {
     reason: referral.reason,
     selectedCenterReason: referral.selectedCenterReason,
     rejectionReason: referral.rejectionReason,
+    managerDecisionReason: referral.managerDecisionReason,
+    matchingScore: referral.matchingScore,
     estimatedWaitTimeMinutes: referral.estimatedWaitTimeMinutes,
     requestedAt: referral.requestedAt,
     respondedAt: referral.respondedAt,
+    decisionAt: referral.decisionAt,
+    assignedAt: referral.assignedAt,
+    visitCreatedAt: referral.visitCreatedAt,
+    completedAt: referral.completedAt,
     notesFromSender: referral.notesFromSender,
-    notesFromReceiver: referral.notesFromReceiver
+    notesFromReceiver: referral.notesFromReceiver,
+    assignedDoctor: referral.assignedDoctor
+      ? {
+          id: referral.assignedDoctor.id,
+          fullName: referral.assignedDoctor.fullName
+        }
+      : null,
+    acceptedByManager: referral.acceptedByManager
+      ? {
+          id: referral.acceptedByManager.id,
+          fullName: referral.acceptedByManager.fullName
+        }
+      : null,
+    rejectedByManager: referral.rejectedByManager
+      ? {
+          id: referral.rejectedByManager.id,
+          fullName: referral.rejectedByManager.fullName
+        }
+      : null,
+    createdVisitId: referral.createdVisit?.id ?? null
   }));
 }
 

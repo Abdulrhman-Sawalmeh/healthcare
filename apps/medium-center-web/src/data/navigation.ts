@@ -18,7 +18,7 @@ const allCenterRoles: Role[] = [
 export const navigationItems: NavigationItem[] = [
   { to: "/ai-assistant", label: "المساعد الذكي", roles: ["PATIENT", ...allCenterRoles] },
   { to: "/", label: "لوحة المتابعة", roles: ["CENTRAL_ADMIN", ...allCenterRoles] },
-  { to: "/appointments", label: "حجز موعد", roles: ["PATIENT"] },
+  { to: "/appointments", label: "المواعيد", roles: ["PATIENT", "DOCTOR"] },
   { to: "/medical-record", label: "السجل الصحي", roles: ["PATIENT"] },
   { to: "/doctors", label: "الأطباء", roles: ["PATIENT", "CENTER_MANAGER"] },
   { to: "/messages", label: "المحادثة الطبية", roles: ["PATIENT", "DOCTOR"] },

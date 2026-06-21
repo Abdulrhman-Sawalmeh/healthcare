@@ -174,6 +174,8 @@ export interface CreatePatientResponse {
   portalAccount?: {
     loginIdentifier: string;
     deliveryMethod: "TWILIO" | "WEBHOOK" | "OUTBOX";
+    email: string | null;
+    emailDeliveryMethod: "BREVO_API" | "SMTP" | "WEBHOOK" | "OUTBOX" | "SKIPPED";
     accountStatus: "CREATED" | "RESET";
   };
 }
@@ -518,6 +520,7 @@ export interface NotificationRecord {
   title: string;
   body: string;
   type: string;
+  targetUrl?: string | null;
   isRead: boolean;
   createdAt: string;
 }

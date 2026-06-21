@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
+import { EmailDeliveryMethod, normalizeEmail, sendSystemEmail } from "./email-delivery";
 import { buildCenterEmailAddress } from "../utils/account-identifiers";
 
 const passwordLetters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -16,6 +17,7 @@ export interface EnsurePatientPortalAccountInput {
   centerId: number;
   fullName: string;
   nationalId: string;
+  email?: string;
   primaryPhone: string;
   dateOfBirth: Date;
   gender: Gender;
@@ -26,6 +28,8 @@ export interface EnsurePatientPortalAccountInput {
 export interface EnsurePatientPortalAccountResult {
   loginIdentifier: string;
   deliveryMethod: "TWILIO" | "WEBHOOK" | "OUTBOX";
+  email: string | null;
+  emailDeliveryMethod: EmailDeliveryMethod | "SKIPPED";
   accountStatus: "CREATED" | "RESET";
 }
 
@@ -202,6 +206,38 @@ async function sendPatientPasswordSms(input: {
   return "OUTBOX" as const;
 }
 
+async function sendPatientWelcomeEmail(input: {
+  email: string;
+  patientName: string;
+  centerName: string;
+  nationalId: string;
+  temporaryPassword: string;
+}) {
+  const subject = `مرحبا بك في ${input.centerName}`;
+  const text = [
+    `مرحبا ${input.patientName},`,
+    `تم إنشاء حسابك في ${input.centerName}.`,
+    `رقم الهوية: ${input.nationalId}`,
+    `كلمة السر: ${input.temporaryPassword}`,
+    "يمكنك تسجيل الدخول من بوابة المرضى باستخدام رقم الهوية أو البريد الإلكتروني."
+  ].join("\n");
+
+  return sendSystemEmail({
+    to: input.email,
+    subject,
+    text,
+    html: `
+      <div dir="rtl" style="font-family: Arial, sans-serif; line-height: 1.8">
+        <p>مرحبا ${input.patientName},</p>
+        <p>تم إنشاء حسابك في <strong>${input.centerName}</strong>.</p>
+        <p><strong>رقم الهوية:</strong> ${input.nationalId}</p>
+        <p><strong>كلمة السر:</strong> ${input.temporaryPassword}</p>
+        <p>يمكنك تسجيل الدخول من بوابة المرضى باستخدام رقم الهوية أو البريد الإلكتروني.</p>
+      </div>
+    `
+  });
+}
+
 export async function ensurePatientPortalAccount(
   input: EnsurePatientPortalAccountInput
 ): Promise<EnsurePatientPortalAccountResult> {
@@ -233,7 +269,8 @@ export async function ensurePatientPortalAccount(
   }
 
   const loginIdentifier = normalizedNationalId;
-  const patientEmail = buildCenterEmailAddress(loginIdentifier, center.centerName);
+  const requestedEmail = normalizeEmail(input.email);
+  const patientEmail = requestedEmail ?? buildCenterEmailAddress(loginIdentifier, center.centerName);
 
   const existingUser = await prisma.user.findFirst({
     where: {
@@ -251,13 +288,36 @@ export async function ensurePatientPortalAccount(
               centerId: legacyCenter.id
             }
           }
-        }
+        },
+        ...(requestedEmail
+          ? [
+              {
+                email: requestedEmail
+              }
+            ]
+          : [])
       ]
     },
     include: {
       patientProfile: true
     }
   });
+
+  if (requestedEmail) {
+    const emailOwner = await prisma.user.findFirst({
+      where: {
+        email: requestedEmail,
+        ...(existingUser ? { NOT: { id: existingUser.id } } : {})
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (emailOwner) {
+      throw new AppError("هذا البريد الإلكتروني مستخدم لحساب آخر.", 409);
+    }
+  }
 
   if (existingUser) {
     await prisma.user.update({
@@ -296,17 +356,30 @@ export async function ensurePatientPortalAccount(
       });
     }
 
-    const deliveryMethod = await sendPatientPasswordSms({
-      phone: input.primaryPhone,
-      patientName: input.fullName,
-      centerName: center.centerName,
-      nationalId: normalizedNationalId,
-      temporaryPassword
-    });
+    const [deliveryMethod, emailDeliveryMethod] = await Promise.all([
+      sendPatientPasswordSms({
+        phone: input.primaryPhone,
+        patientName: input.fullName,
+        centerName: center.centerName,
+        nationalId: normalizedNationalId,
+        temporaryPassword
+      }),
+      requestedEmail
+        ? sendPatientWelcomeEmail({
+            email: requestedEmail,
+            patientName: input.fullName,
+            centerName: center.centerName,
+            nationalId: normalizedNationalId,
+            temporaryPassword
+          })
+        : Promise.resolve("SKIPPED" as const)
+    ]);
 
     return {
       loginIdentifier,
       deliveryMethod,
+      email: requestedEmail ?? null,
+      emailDeliveryMethod,
       accountStatus: "RESET"
     };
   }
@@ -334,17 +407,30 @@ export async function ensurePatientPortalAccount(
     }
   });
 
-  const deliveryMethod = await sendPatientPasswordSms({
-    phone: input.primaryPhone,
-    patientName: input.fullName,
-    centerName: center.centerName,
-    nationalId: normalizedNationalId,
-    temporaryPassword
-  });
+  const [deliveryMethod, emailDeliveryMethod] = await Promise.all([
+    sendPatientPasswordSms({
+      phone: input.primaryPhone,
+      patientName: input.fullName,
+      centerName: center.centerName,
+      nationalId: normalizedNationalId,
+      temporaryPassword
+    }),
+    requestedEmail
+      ? sendPatientWelcomeEmail({
+          email: requestedEmail,
+          patientName: input.fullName,
+          centerName: center.centerName,
+          nationalId: normalizedNationalId,
+          temporaryPassword
+        })
+      : Promise.resolve("SKIPPED" as const)
+  ]);
 
   return {
     loginIdentifier,
     deliveryMethod,
+    email: requestedEmail ?? null,
+    emailDeliveryMethod,
     accountStatus: "CREATED"
   };
 }

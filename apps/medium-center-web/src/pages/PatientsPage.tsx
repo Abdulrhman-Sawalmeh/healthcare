@@ -16,6 +16,8 @@ type CreatePatientResponse = {
   portalAccount: {
     loginIdentifier: string;
     deliveryMethod: "TWILIO" | "WEBHOOK" | "OUTBOX";
+    email: string | null;
+    emailDeliveryMethod: "BREVO_API" | "SMTP" | "WEBHOOK" | "OUTBOX" | "SKIPPED";
     accountStatus: "CREATED" | "RESET";
   };
 };
@@ -62,6 +64,7 @@ export function PatientsPage() {
   const [form, setForm] = useState({
     fullName: "",
     nationalId: "",
+    email: "",
     dateOfBirth: "",
     gender: "MALE",
     primaryPhone: "",
@@ -196,12 +199,18 @@ export function PatientsPage() {
   async function handleCreatePatient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (!form.email.trim()) {
+      setError("أدخل البريد الإلكتروني للمريض حتى يتم إرسال رسالة الترحيب وكلمة السر.");
+      return;
+    }
+
     try {
       const payload = await apiRequest<CreatePatientResponse>("/center/patients", {
         method: "POST",
         body: JSON.stringify({
           fullName: form.fullName,
           nationalId: form.nationalId,
+          email: form.email.trim(),
           dateOfBirth: form.dateOfBirth,
           gender: form.gender,
           primaryPhone: form.primaryPhone,
@@ -216,6 +225,7 @@ export function PatientsPage() {
       setForm({
         fullName: "",
         nationalId: "",
+        email: "",
         dateOfBirth: "",
         gender: "MALE",
         primaryPhone: "",
@@ -226,10 +236,19 @@ export function PatientsPage() {
         chronicDiseases: ""
       });
 
-      setSuccessMessage(
+      const smsMessage =
         payload.portalAccount.deliveryMethod !== "OUTBOX"
-          ? `تم تجهيز حساب المريض، ويمكنه الدخول برقم الهوية ${payload.portalAccount.loginIdentifier}. أُرسلت كلمة المرور إلى هاتفه.`
-          : `تم تجهيز حساب المريض، ويمكنه الدخول برقم الهوية ${payload.portalAccount.loginIdentifier}. تم حفظ رسالة كلمة المرور في سجل الرسائل النصية المحلي.`
+          ? "أُرسلت كلمة المرور إلى هاتفه."
+          : "تم حفظ رسالة كلمة المرور في سجل الرسائل النصية المحلي.";
+      const emailMessage =
+        payload.portalAccount.emailDeliveryMethod === "SKIPPED"
+          ? "لم يتم إدخال بريد إلكتروني للمريض."
+          : payload.portalAccount.emailDeliveryMethod === "OUTBOX"
+            ? `تم حفظ رسالة البريد الإلكتروني في سجل البريد المحلي: ${payload.portalAccount.email}.`
+            : `أُرسلت رسالة الانضمام إلى بريد المريض: ${payload.portalAccount.email}.`;
+
+      setSuccessMessage(
+        `تم تجهيز حساب المريض، ويمكنه الدخول برقم الهوية ${payload.portalAccount.loginIdentifier}. ${smsMessage} ${emailMessage}`
       );
       setSearchResult(null);
       await loadPatients();
@@ -319,6 +338,7 @@ export function PatientsPage() {
     );
   }
 
+  const isDoctor = user?.role === "DOCTOR";
   const canCreateAccounts = user?.role === "RECEPTIONIST";
   const patientMatches = searchResult?.patientMatches ?? (searchResult?.patient ? [searchResult.patient] : []);
   const localMatches = searchResult?.localMatches ?? (searchResult?.localPatient ? [searchResult.localPatient] : []);
@@ -329,9 +349,10 @@ export function PatientsPage() {
       <PageHeader
         eyebrow="إدارة المرضى"
         title="ملفات المرضى المحليين"
-        subtitle="ابحث في السجل المحلي والموحد وأنشئ ملف مريض عند الحاجة."
+        subtitle={isDoctor ? "راجع ملفات المرضى المرتبطين بالمركز دون أدوات الاستقبال." : "ابحث في السجل المحلي والموحد وأنشئ ملف مريض عند الحاجة."}
         meta={`${localPatients.length} ملف`}
       />
+      {!isDoctor ? (
       <div className="split-grid">
         <SectionCard
           title="بحث الاستقبال"
@@ -394,6 +415,15 @@ export function PatientsPage() {
                 <input
                   value={form.nationalId}
                   onChange={(event) => setForm((current) => ({ ...current, nationalId: event.target.value }))}
+                />
+              </label>
+              <label className="field">
+                <span>البريد الإلكتروني</span>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                  placeholder="patient@example.com"
                 />
               </label>
               <label className="field">
@@ -485,6 +515,7 @@ export function PatientsPage() {
           </SectionCard>
         )}
       </div>
+      ) : null}
 
       {successMessage ? <EmptyState title="تم تجهيز حساب المريض" description={successMessage} /> : null}
       {error ? <ErrorState message={error} onRetry={() => retryLoadPatients(query)} /> : null}

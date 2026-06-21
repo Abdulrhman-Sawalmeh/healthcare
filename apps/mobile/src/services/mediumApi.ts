@@ -159,6 +159,7 @@ export const mediumApi = {
     dateOfBirth: string;
     gender: string;
     primaryPhone: string;
+    email: string;
     address: string;
     emergencyContact?: string;
     bloodType?: string;

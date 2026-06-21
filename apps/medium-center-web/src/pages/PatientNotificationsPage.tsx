@@ -42,7 +42,8 @@ export function PatientNotificationsPage() {
       workspace: user?.workspace,
       type: notification.type,
       title: notification.title,
-      body: notification.body
+      body: notification.body,
+      targetUrl: notification.targetUrl
     });
 
     if (!notification.isRead) {

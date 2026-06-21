@@ -9,6 +9,7 @@ type NotificationRouteInput = NotificationRouteContext & {
   type?: string | null;
   title?: string | null;
   body?: string | null;
+  targetUrl?: string | null;
 };
 
 function buildHaystack(parts: Array<string | null | undefined>) {
@@ -35,7 +36,19 @@ function resolveAppointmentsPath(context: NotificationRouteContext) {
 }
 
 function resolveReferralsPath(context: NotificationRouteContext) {
-  return context.role === "PATIENT" ? "/medical-record" : "/referrals";
+  if (context.role === "PATIENT") {
+    return "/medical-record";
+  }
+
+  if (context.role === "CENTER_MANAGER") {
+    return "/referrals?view=incoming";
+  }
+
+  if (context.role === "DOCTOR") {
+    return "/referrals?view=assigned";
+  }
+
+  return "/referrals";
 }
 
 function resolvePatientsPath(context: NotificationRouteContext) {
@@ -47,6 +60,10 @@ function resolveDoctorsPath(context: NotificationRouteContext) {
 }
 
 export function resolveNotificationPath(input: NotificationRouteInput) {
+  if (input.targetUrl?.startsWith("/")) {
+    return input.targetUrl;
+  }
+
   const haystack = buildHaystack([input.type, input.title, input.body]);
 
   if (includesAny(haystack, ["message", "chat", "رسالة", "محادثة"])) {

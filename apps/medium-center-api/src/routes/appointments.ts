@@ -1,5 +1,5 @@
 import { AppointmentStatus, AppointmentType, Prisma, UserRole } from "@prisma/client";
-import { Router } from "express";
+import { Request, Router } from "express";
 import { z } from "zod";
 
 import { prisma } from "../lib/prisma";
@@ -10,6 +10,7 @@ import {
   findAppointmentConflict,
   getAppointmentSuggestions
 } from "../services/appointment-suggestions";
+import { resolvePortalActor } from "../services/portal-identity";
 import { asyncHandler } from "../utils/async-handler";
 import { getSingleParam } from "../utils/request";
 import { mapAppointment } from "../utils/serializers";
@@ -45,6 +46,18 @@ const appointmentSuggestionQuerySchema = z.object({
 
 function isAlignedAppointmentSlot(date: Date) {
   return date.getSeconds() === 0 && date.getMilliseconds() === 0 && [0, 30].includes(date.getMinutes());
+}
+
+async function resolveDoctorProfileIdForRequest(req: Request) {
+  if (req.auth?.role !== UserRole.DOCTOR) {
+    return undefined;
+  }
+
+  if (req.auth.doctorProfileId) {
+    return req.auth.doctorProfileId;
+  }
+
+  return (await resolvePortalActor(req.auth)).doctorProfileId;
 }
 
 router.get(
@@ -89,7 +102,11 @@ router.get(
   authorize(UserRole.ADMIN, UserRole.DOCTOR, UserRole.PATIENT),
   asyncHandler(async (req, res) => {
     const queryCenterId = typeof req.query.centerId === "string" ? req.query.centerId : undefined;
-    const centerId = resolveCenterScope(req, queryCenterId);
+    const doctorProfileId =
+      req.auth?.role === UserRole.DOCTOR
+        ? requireProfileId(await resolveDoctorProfileIdForRequest(req), "Doctor profile is required.")
+        : undefined;
+    const centerId = doctorProfileId ? undefined : resolveCenterScope(req, queryCenterId);
     const status =
       typeof req.query.status === "string" && req.query.status in AppointmentStatus
         ? (req.query.status as AppointmentStatus)
@@ -110,7 +127,7 @@ router.get(
     }
 
     if (req.auth?.role === UserRole.DOCTOR) {
-      where.doctorId = requireProfileId(req.auth.doctorProfileId, "Doctor profile is required.");
+      where.doctorId = requireProfileId(doctorProfileId, "Doctor profile is required.");
     }
 
     const appointments = await prisma.appointment.findMany({
@@ -236,14 +253,14 @@ router.post(
       data: [
         {
           userId: appointment.patient.userId,
-          title: "تم تأكيد حجز الموعد",
-          body: `تم حجز موعدك مع ${appointment.doctor.user.fullName}.`,
+          title: "تم استلام حجز الموعد",
+          body: `تم حجز موعدك مع ${appointment.doctor.user.fullName}. سيتواصل معك الطبيب قريباً. [[target:/appointments?appointmentId=${appointment.id}]]`,
           type: "APPOINTMENT"
         },
         {
           userId: appointment.doctor.userId,
-          title: "موعد جديد بحاجة إلى متابعة",
-          body: `تم تسجيل موعد جديد للمريض ${appointment.patient.user.fullName}.`,
+          title: "حجز موعد جديد",
+          body: `حجز المريض ${appointment.patient.user.fullName} موعداً جديداً بانتظار تأكيدك. [[target:/appointments?appointmentId=${appointment.id}]]`,
           type: "APPOINTMENT"
         }
       ]
@@ -279,7 +296,7 @@ router.patch(
     }
 
     if (req.auth?.role === UserRole.DOCTOR) {
-      const doctorId = requireProfileId(req.auth.doctorProfileId, "Doctor profile is required.");
+      const doctorId = requireProfileId(await resolveDoctorProfileIdForRequest(req), "Doctor profile is required.");
       if (appointment.doctorId !== doctorId) {
         throw new AppError("You can only update appointments assigned to you.", 403);
       }
@@ -309,6 +326,23 @@ router.patch(
         }
       }
     });
+
+    if (
+      req.auth?.role === UserRole.DOCTOR &&
+      (payload.status === AppointmentStatus.CONFIRMED || payload.status === AppointmentStatus.CANCELLED)
+    ) {
+      await prisma.notification.create({
+        data: {
+          userId: updated.patient.userId,
+          title: payload.status === AppointmentStatus.CONFIRMED ? "تم تأكيد موعدك" : "تم رفض الموعد",
+          body:
+            payload.status === AppointmentStatus.CONFIRMED
+              ? `أكد الطبيب ${updated.doctor.user.fullName} موعدك بتاريخ ${updated.scheduledAt.toISOString()}. [[target:/appointments?appointmentId=${updated.id}]]`
+              : `تم رفض الموعد مع ${updated.doctor.user.fullName}. يمكنك اختيار موعد آخر من صفحة المواعيد. [[target:/appointments?appointmentId=${updated.id}]]`,
+          type: "APPOINTMENT"
+        }
+      });
+    }
 
     res.json(mapAppointment(updated));
   })

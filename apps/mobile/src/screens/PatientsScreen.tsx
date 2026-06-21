@@ -37,6 +37,7 @@ export function PatientsScreen() {
     dateOfBirth: "1990-01-01",
     gender: "MALE",
     primaryPhone: "",
+    email: "",
     address: "",
     emergencyContact: "",
     bloodType: "",
@@ -79,6 +80,7 @@ export function PatientsScreen() {
   useEffect(() => {
     if (!didRunInitialPatientFilter.current) {
       didRunInitialPatientFilter.current = true;
+      setError("أدخل الاسم، الهوية، الهاتف، البريد الإلكتروني، والعنوان قبل إنشاء الملف.");
       return;
     }
 
@@ -176,8 +178,8 @@ export function PatientsScreen() {
 
   async function createPatient() {
     if (!canCreate) return;
-    if (!form.fullName.trim() || !form.nationalId.trim() || !form.primaryPhone.trim() || !form.address.trim()) {
-      setError("أدخل الاسم، الهوية، الهاتف، والعنوان قبل إنشاء الملف.");
+    if (!form.fullName.trim() || !form.nationalId.trim() || !form.primaryPhone.trim() || !form.email.trim() || !form.address.trim()) {
+      setError("أدخل الاسم، الهوية، الهاتف، البريد الإلكتروني، والعنوان قبل إنشاء الملف.");
       return;
     }
 
@@ -192,6 +194,7 @@ export function PatientsScreen() {
         dateOfBirth: form.dateOfBirth,
         gender: form.gender,
         primaryPhone: form.primaryPhone.trim(),
+        email: form.email.trim(),
         address: form.address.trim(),
         emergencyContact: form.emergencyContact.trim() || undefined,
         bloodType: form.bloodType.trim() || undefined,
@@ -205,15 +208,22 @@ export function PatientsScreen() {
         dateOfBirth: "1990-01-01",
         gender: "MALE",
         primaryPhone: "",
+        email: "",
         address: "",
         emergencyContact: "",
         bloodType: "",
         allergies: "",
         chronicDiseases: ""
       });
+      const emailMessage =
+        payload.portalAccount?.emailDeliveryMethod === "OUTBOX"
+          ? "تم حفظ رسالة الترحيب في سجل البريد المحلي."
+          : payload.portalAccount?.emailDeliveryMethod
+            ? "تم إرسال رسالة الترحيب إلى بريد المريض."
+            : "";
       setMessage(
         payload.portalAccount
-          ? `تم إنشاء ملف المريض. يمكنه الدخول برقم الهوية: ${payload.portalAccount.loginIdentifier}.`
+          ? `تم إنشاء ملف المريض. يمكنه الدخول برقم الهوية: ${payload.portalAccount.loginIdentifier}. ${emailMessage}`
           : "تم إنشاء ملف المريض."
       );
       await loadPatients();
@@ -297,6 +307,7 @@ export function PatientsScreen() {
             ))}
           </ChipRow>
           <TextField label="الهاتف" onChangeText={(value) => setForm((current) => ({ ...current, primaryPhone: value }))} value={form.primaryPhone} />
+          <TextField keyboardType="email-address" label="البريد الإلكتروني" onChangeText={(value) => setForm((current) => ({ ...current, email: value }))} value={form.email} />
           <TextField label="العنوان" onChangeText={(value) => setForm((current) => ({ ...current, address: value }))} value={form.address} />
           <View style={styles.row}>
             <TextField label="جهة الطوارئ" onChangeText={(value) => setForm((current) => ({ ...current, emergencyContact: value }))} value={form.emergencyContact} style={styles.flex} />

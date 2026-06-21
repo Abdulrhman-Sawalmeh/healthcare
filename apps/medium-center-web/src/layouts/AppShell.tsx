@@ -24,6 +24,7 @@ type SidebarAlert = {
   createdAt: string;
   to: string;
   isRead?: boolean;
+  markReadPath?: string;
 };
 
 function BellIcon() {
@@ -127,17 +128,20 @@ export function AppShell() {
                 workspace: currentUser.workspace,
                 type: item.type,
                 title: item.title,
-                body: item.body
-              })
+                body: item.body,
+                targetUrl: item.targetUrl
+              }),
+              markReadPath: `/portal/notifications/${item.id}/read`
             }))
           );
           return;
         }
 
         if (currentUser.role === "DOCTOR" && currentUser.workspace === "center") {
-          const [centerPayloadResult, threadsResult] = await Promise.allSettled([
+          const [centerPayloadResult, threadsResult, notificationsResult] = await Promise.allSettled([
             apiRequest<CenterNotificationsBundle>("/center/notifications"),
-            apiRequest<PortalThreadRecord[]>("/portal/communications/threads")
+            apiRequest<PortalThreadRecord[]>("/portal/communications/threads"),
+            apiRequest<PortalNotificationRecord[]>("/portal/notifications")
           ]);
 
           if (!isActive) {
@@ -149,7 +153,25 @@ export function AppShell() {
           }
 
           const threads = threadsResult.status === "fulfilled" ? threadsResult.value : [];
+          const notifications = notificationsResult.status === "fulfilled" ? notificationsResult.value : [];
           const summary = summarizeUnreadMessages(threads, currentUser.role);
+          const personalAlerts: SidebarAlert[] = notifications.slice(0, 5).map((item) => ({
+            id: item.id,
+            title: item.title,
+            helper: item.body,
+            status: item.type,
+            createdAt: item.createdAt,
+            isRead: item.isRead,
+            to: resolveNotificationPath({
+              role: currentUser.role,
+              workspace: currentUser.workspace,
+              type: item.type,
+              title: item.title,
+              body: item.body,
+              targetUrl: item.targetUrl
+            }),
+            markReadPath: `/portal/notifications/${item.id}/read`
+          }));
           const centerAlerts: SidebarAlert[] = [
             ...(centerPayloadResult.status === "fulfilled"
               ? centerPayloadResult.value.alerts.map((alert) => ({
@@ -163,7 +185,8 @@ export function AppShell() {
                     workspace: currentUser.workspace,
                     type: alert.severity,
                     title: alert.title,
-                    body: alert.message
+                    body: alert.message,
+                    targetUrl: alert.targetUrl
                   })
                 }))
               : []),
@@ -186,7 +209,11 @@ export function AppShell() {
           ];
 
           setUnreadMessageCount(summary.unreadMessages);
-          setNotificationBadgeCount(centerAlerts.length + (summary.unreadMessages > 0 ? 1 : 0));
+          setNotificationBadgeCount(
+            notifications.filter((item) => !item.isRead).length +
+              centerAlerts.length +
+              (summary.unreadMessages > 0 ? 1 : 0)
+          );
           setAlerts(
             [
               ...(summary.unreadMessages > 0
@@ -201,6 +228,7 @@ export function AppShell() {
                     }
                   ]
                 : []),
+              ...personalAlerts,
               ...centerAlerts
             ].slice(0, 5)
           );
@@ -249,14 +277,15 @@ export function AppShell() {
               helper: alert.message,
               status: alert.severity,
               createdAt: alert.createdAt,
-              to: resolveNotificationPath({
-                role: currentUser.role,
-                workspace: currentUser.workspace,
-                type: alert.severity,
-                title: alert.title,
-                body: alert.message
-              })
-            })),
+                to: resolveNotificationPath({
+                  role: currentUser.role,
+                  workspace: currentUser.workspace,
+                  type: alert.severity,
+                  title: alert.title,
+                  body: alert.message,
+                  targetUrl: alert.targetUrl
+                })
+              })),
             ...centerPayload.outgoing.map((item) => ({
               id: `out-${item.id}`,
               title: toArabicLabel(item.notificationType),
@@ -351,9 +380,9 @@ export function AppShell() {
   const isPatientPortal = user.role === "PATIENT" || user.workspace === "legacy";
 
   async function openSidebarAlert(alert: SidebarAlert) {
-    if (isPatientPortal && !alert.isRead) {
+    if (alert.markReadPath && !alert.isRead) {
       try {
-        await apiRequest(`/portal/notifications/${alert.id}/read`, {
+        await apiRequest(alert.markReadPath, {
           method: "PATCH"
         });
         setAlerts((current) =>

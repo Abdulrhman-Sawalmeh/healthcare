@@ -76,7 +76,16 @@ const labelMap: Record<string, string> = {
   REFERRAL_REQUEST: "طلب إحالة",
   ALERT: "تنبيه نظامي",
   TO_CENTER: "من النظام المركزي إلى المركز",
-  FROM_CENTER: "من المركز إلى النظام المركزي"
+  FROM_CENTER: "من المركز إلى النظام المركزي",
+  REQUESTED: "طلب جديد",
+  AUTO_SELECTED: "اختيار آلي",
+  PENDING_RECEIVING_MANAGER: "بانتظار مدير المركز المستقبل",
+  RECEIVING_MANAGER_ACCEPTED: "قبله مدير المركز",
+  RECEIVING_MANAGER_REJECTED: "رفضه مدير المركز",
+  NO_CANDIDATE_REJECTED: "مرفوض لعدم توفر مركز مناسب",
+  ASSIGNED_TO_DOCTOR: "مسند لطبيب",
+  VISIT_CREATED: "تم إنشاء زيارة",
+  RETURNED_WITH_REASON: "مُعاد مع سبب"
 };
 
 function currentLocale() {

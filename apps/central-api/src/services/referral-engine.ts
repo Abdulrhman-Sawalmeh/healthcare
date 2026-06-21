@@ -2,6 +2,7 @@ import { NetworkReferralPriority, Prisma } from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
+import { createInternalNotification } from "./internal-notifications";
 
 export interface ReferralRequestInput {
   patientUnifiedId: string;
@@ -95,6 +96,7 @@ export async function resolveReferralRequest(fromCenterId: number, input: Referr
       requiredSpecialty: input.requiredSpecialty,
       priority: input.priority,
       reason: input.reason,
+      status: "REQUESTED",
       requiresOr: input.requiresOr ?? false,
       requiredMedicineIds,
       preferredRegion: input.preferredRegion,
@@ -190,7 +192,7 @@ export async function resolveReferralRequest(fromCenterId: number, input: Referr
     const rejectedReferral = await prisma.centralReferral.update({
       where: { id: referral.id },
       data: {
-        status: "REJECTED",
+        status: "NO_CANDIDATE_REJECTED",
         respondedAt: new Date(),
         rejectionReason:
           "لم يتوفر مركز متصل يطابق التخصص المطلوب ومعايير المسافة والتوافر والدواء المطلوب."
@@ -201,6 +203,32 @@ export async function resolveReferralRequest(fromCenterId: number, input: Referr
         patient: true
       }
     });
+
+    await Promise.all([
+      createInternalNotification({
+        centerId: fromCenterId,
+        type: "REFERRAL_NO_CANDIDATE_REJECTED",
+        title: "لم يتم العثور على مركز مناسب للإحالة",
+        message: `تعذر توجيه إحالة ${patient.fullName} إلى ${input.requiredSpecialty}.`,
+        severity: "WARNING"
+      }),
+      prisma.auditLog.create({
+        data: {
+          centerId: fromCenterId,
+          actorUserId: "system",
+          actorUsername: "central-referral-engine",
+          actorRole: "SYSTEM",
+          workspace: "central",
+          action: "REFERRAL_NO_CANDIDATE_REJECTED",
+          entityType: "CentralReferral",
+          entityId: String(rejectedReferral.id),
+          newValue: {
+            status: rejectedReferral.status,
+            requiredSpecialty: rejectedReferral.requiredSpecialty
+          }
+        }
+      })
+    ]);
 
     return {
       referral: rejectedReferral,
@@ -221,19 +249,54 @@ export async function resolveReferralRequest(fromCenterId: number, input: Referr
 
   const acceptedReferral = await prisma.centralReferral.update({
     where: { id: referral.id },
-    data: {
-      toCenterId: best.candidate.id,
-      status: "ACCEPTED",
-      respondedAt: new Date(),
-      selectedCenterReason,
-      estimatedWaitTimeMinutes: best.averageWaitTime
-    },
+      data: {
+        toCenterId: best.candidate.id,
+        status: "PENDING_RECEIVING_MANAGER",
+        respondedAt: new Date(),
+        selectedCenterReason,
+        estimatedWaitTimeMinutes: best.averageWaitTime,
+        matchingScore: best.score
+      },
     include: {
       fromCenter: true,
       toCenter: true,
       patient: true
     }
   });
+
+  await Promise.all([
+    createInternalNotification({
+      centerId: fromCenterId,
+      type: "REFERRAL_AUTO_SELECTED",
+      title: "تم اختيار مركز استقبال للإحالة",
+      message: `اختار المحرك ${best.candidate.centerName} لإحالة ${patient.fullName}. بانتظار قرار مدير المركز المستقبل.`,
+      severity: "INFO"
+    }),
+    createInternalNotification({
+      centerId: best.candidate.id,
+      type: "REFERRAL_PENDING_MANAGER_REVIEW",
+      title: "إحالة واردة بانتظار القرار",
+      message: `إحالة ${patient.fullName} من ${sourceCenter.centerName} تحتاج قبولاً أو رفضاً من مدير المركز.`,
+      severity: "INFO"
+    }),
+    prisma.auditLog.create({
+      data: {
+        centerId: fromCenterId,
+        actorUserId: "system",
+        actorUsername: "central-referral-engine",
+        actorRole: "SYSTEM",
+        workspace: "central",
+        action: "REFERRAL_AUTO_SELECTED",
+        entityType: "CentralReferral",
+        entityId: String(acceptedReferral.id),
+        newValue: {
+          status: acceptedReferral.status,
+          toCenterId: acceptedReferral.toCenterId,
+          matchingScore: best.score
+        }
+      }
+    })
+  ]);
 
   return {
     referral: acceptedReferral,
@@ -242,7 +305,7 @@ export async function resolveReferralRequest(fromCenterId: number, input: Referr
     score: best.score,
     responsePayload: {
       referral_id: acceptedReferral.id,
-      status: "accepted",
+      status: "pending_receiving_manager",
       to_center: {
         id: best.candidate.id,
         center_code: best.candidate.centerCode,

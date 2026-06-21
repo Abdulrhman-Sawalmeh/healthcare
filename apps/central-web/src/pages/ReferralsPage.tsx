@@ -8,6 +8,31 @@ import { useAuth } from "../context/AuthContext";
 import { formatDateTime, toArabicLabel } from "../lib/arabic";
 import { LocalPatientRecord, ReferralRecord } from "../types";
 
+const statusOptions = [
+  "",
+  "REQUESTED",
+  "AUTO_SELECTED",
+  "PENDING_RECEIVING_MANAGER",
+  "RECEIVING_MANAGER_ACCEPTED",
+  "RECEIVING_MANAGER_REJECTED",
+  "ASSIGNED_TO_DOCTOR",
+  "VISIT_CREATED",
+  "COMPLETED",
+  "NO_CANDIDATE_REJECTED"
+];
+
+function referralDetails(referral: ReferralRecord) {
+  return [
+    referral.selectedCenterReason,
+    referral.managerDecisionReason ? `قرار المدير: ${referral.managerDecisionReason}` : null,
+    referral.rejectionReason ? `سبب الرفض: ${referral.rejectionReason}` : null,
+    referral.matchingScore != null ? `درجة المطابقة: ${referral.matchingScore}` : null,
+    referral.estimatedWaitTimeMinutes != null ? `انتظار متوقع: ${referral.estimatedWaitTimeMinutes} دقيقة` : null,
+    referral.assignedDoctor ? `الطبيب المسند: ${referral.assignedDoctor.fullName}` : null,
+    referral.createdVisitId ? `زيارة رقم: ${referral.createdVisitId}` : null
+  ].filter(Boolean);
+}
+
 export function ReferralsPage() {
   const { user } = useAuth();
   const [referrals, setReferrals] = useState<ReferralRecord[]>([]);
@@ -209,6 +234,21 @@ export function ReferralsPage() {
       >
         {error ? <div className="error-banner">{error}</div> : null}
 
+        {user?.workspace === "central" ? (
+          <div className="chip-row">
+            {statusOptions.map((status) => (
+              <button
+                className={statusFilter === status ? "primary-button" : "ghost-button"}
+                key={status || "ALL"}
+                onClick={() => (status ? setSearchParams({ status }) : setSearchParams({}))}
+                type="button"
+              >
+                {status ? toArabicLabel(status) : "الكل"}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         {statusFilter ? (
           <div className="filter-summary">
             <div>
@@ -231,8 +271,8 @@ export function ReferralsPage() {
                   <th>المريض</th>
                   <th>المسار</th>
                   <th>الاحتياج السريري</th>
-                  <th>الحالة</th>
-                  <th>تاريخ الطلب</th>
+                  <th>الحالة والتفاصيل</th>
+                  <th>التوقيت</th>
                 </tr>
               </thead>
               <tbody>
@@ -249,11 +289,20 @@ export function ReferralsPage() {
                     <td>
                       <strong>{referral.requiredSpecialty}</strong>
                       <span>{referral.reason}</span>
+                      {referral.notesFromSender ? <span>{referral.notesFromSender}</span> : null}
                     </td>
                     <td>
                       <StatusBadge status={referral.status} />
+                      {referralDetails(referral).map((item) => (
+                        <span key={item}>{item}</span>
+                      ))}
                     </td>
-                    <td>{formatDateTime(referral.requestedAt)}</td>
+                    <td>
+                      <strong>{formatDateTime(referral.requestedAt)}</strong>
+                      {referral.decisionAt ? <span>قرار: {formatDateTime(referral.decisionAt)}</span> : null}
+                      {referral.assignedAt ? <span>إسناد: {formatDateTime(referral.assignedAt)}</span> : null}
+                      {referral.visitCreatedAt ? <span>زيارة: {formatDateTime(referral.visitCreatedAt)}</span> : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>
