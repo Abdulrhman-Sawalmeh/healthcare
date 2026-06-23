@@ -7,13 +7,33 @@ import { SectionCard } from "../components/SectionCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { isRouteEnabled } from "../config/system";
 import { useAuth } from "../context/AuthContext";
-import { formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
-import { CenterWorkspaceData, CentralDashboardData, Role } from "../types";
+import { cleanDemoText, formatCount, formatDateTime, joinMeta, safeDisplay, toArabicLabel } from "../lib/arabic";
+import { CentralDashboardData } from "../types";
+
+function buildPath(path: string, params: Record<string, string | number | undefined>) {
+  const searchParams = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") {
+      searchParams.set(key, String(value));
+    }
+  }
+
+  const query = searchParams.toString();
+  return query ? `${path}?${query}` : path;
+}
+
+function receivingCenterLabel(status: string, toCenter?: string | null) {
+  if (status === "NO_CANDIDATE_REJECTED") {
+    return "لا يوجد مركز مناسب";
+  }
+
+  return safeDisplay(toCenter, "لم يتم اختيار مركز مستقبل");
+}
 
 export function DashboardPage() {
   const { user } = useAuth();
   const [centralData, setCentralData] = useState<CentralDashboardData | null>(null);
-  const [centerData, setCenterData] = useState<CenterWorkspaceData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -22,17 +42,9 @@ export function DashboardPage() {
       return;
     }
 
-    const path = user.workspace === "central" ? "/central/dashboard" : "/center/dashboard";
-
-    apiRequest<CentralDashboardData | CenterWorkspaceData>(path)
+    apiRequest<CentralDashboardData>("/central/dashboard")
       .then((payload) => {
-        if (user.workspace === "central") {
-          setCentralData(payload as CentralDashboardData);
-          setCenterData(null);
-        } else {
-          setCenterData(payload as CenterWorkspaceData);
-          setCentralData(null);
-        }
+        setCentralData(payload);
         setError("");
       })
       .catch((cause: Error) => {
@@ -45,11 +57,8 @@ export function DashboardPage() {
 
   const centersRoute = isRouteEnabled("/centers") ? "/centers" : undefined;
   const patientsRoute = isRouteEnabled("/patients") ? "/patients" : undefined;
-  const visitsRoute = isRouteEnabled("/visits") ? "/visits" : undefined;
   const referralsRoute = isRouteEnabled("/referrals") ? "/referrals" : undefined;
   const notificationsRoute = isRouteEnabled("/notifications") ? "/notifications" : undefined;
-  const labRoute = isRouteEnabled("/lab") ? "/lab" : undefined;
-  const pharmacyRoute = isRouteEnabled("/pharmacy") ? "/pharmacy" : undefined;
   const reportsRoute = isRouteEnabled("/reports") ? "/reports" : undefined;
 
   function renderSectionAction(to: string | undefined, label: string) {
@@ -60,390 +69,151 @@ export function DashboardPage() {
     ) : null;
   }
 
-  function resolveTeamRoute(role: Role) {
-    switch (role) {
-      case "CENTER_MANAGER":
-        return referralsRoute ?? patientsRoute ?? visitsRoute ?? notificationsRoute;
-      case "DOCTOR":
-      case "NURSE":
-        return visitsRoute ?? patientsRoute ?? referralsRoute ?? notificationsRoute;
-      case "RECEPTIONIST":
-        return patientsRoute ?? visitsRoute ?? notificationsRoute;
-      case "LAB_TECH":
-        return labRoute ?? notificationsRoute ?? visitsRoute;
-      case "PHARMACIST":
-        return pharmacyRoute ?? notificationsRoute ?? patientsRoute;
-      default:
-        return notificationsRoute ?? patientsRoute ?? visitsRoute;
-    }
-  }
-
   if (loading) {
-    return <div className="empty-state">جارٍ تحميل لوحة المتابعة...</div>;
+    return <div className="empty-state">جاري تحميل لوحة المتابعة...</div>;
   }
 
   if (error) {
     return <div className="error-banner">{error}</div>;
   }
 
-  if (user?.workspace === "central" && centralData) {
-    const synchronizedVisitsRoute = patientsRoute ?? reportsRoute;
-
-    return (
-      <div className="page-stack">
-        <div className="hero-strip">
-          <div>
-            <h1>لوحة المتابعة</h1>
-          </div>
-         
-        </div>
-
-        <div className="metric-grid">
-          <MetricCard
-            label="المراكز المتصلة"
-            value={centralData.stats.connectedCenters}
-            helper="عدد المراكز المسموح لها حاليًا بالتكامل مع النظام المركزي."
-            to={centersRoute}
-            actionHint="اضغط لفتح صفحة المراكز."
-          />
-          <MetricCard
-            label="المراكز الموقوفة"
-            value={centralData.stats.suspendedCenters}
-            helper="مراكز تم تعليق اتصالها مؤقتًا من قبل الإدارة المركزية."
-            to={centersRoute}
-            actionHint="اضغط لفتح صفحة المراكز."
-          />
-          <MetricCard
-            label="المرضى الموحدون"
-            value={centralData.stats.unifiedPatients}
-            helper="عدد السجلات الصحية الموحدة المتاحة عبر جميع المراكز."
-            to={patientsRoute}
-            actionHint="اضغط لفتح صفحة المرضى."
-          />
-          <MetricCard
-            label="الإحالات المعلقة"
-            value={centralData.stats.pendingReferrals}
-            helper="طلبات الإحالة التي ما زالت بانتظار التوجيه أو الاستكمال."
-            to={referralsRoute}
-            actionHint="اضغط لفتح صفحة الإحالات."
-          />
-          <MetricCard
-            label="طابور مركزي معلق"
-            value={centralData.stats.pendingCentralNotifications}
-            helper="إشعارات ما زال على النظام المركزي معالجتها أو تسليمها."
-            to={notificationsRoute}
-            actionHint="اضغط لفتح صفحة الإشعارات."
-          />
-          <MetricCard
-            label="طوابير المراكز الصادرة"
-            value={centralData.stats.pendingOutgoingNotifications}
-            helper="إشعارات محلية لم تصل بعد إلى النظام المركزي."
-            to={notificationsRoute}
-            actionHint="اضغط لفتح صفحة الإشعارات."
-          />
-        </div>
-
-        <div className="split-grid">
-          <SectionCard
-            title="خريطة حمل المراكز"
-            subtitle="الوضع التشغيلي الحالي لكل مركز متصل."
-            action={renderSectionAction(centersRoute, "صفحة المراكز")}
-          >
-            <div className="stack-list">
-              {centralData.centers.map((center) =>
-                centersRoute ? (
-                  <Link key={center.id} className="stack-item interactive-card" to={centersRoute}>
-                    <div className="info-row">
-                      <div>
-                        <strong>{center.name}</strong>
-                        <p className="muted">{joinMeta([center.code, center.city, toArabicLabel(center.type)])}</p>
-                      </div>
-                      <StatusBadge status={center.isConnected ? "connected" : "suspended"} />
-                    </div>
-                    <div className="tile-stats">
-                      <span>{center.patientCount} مريضًا محليًا</span>
-                      <span>{center.localVisitCount} زيارة محلية</span>
-                      <span>{center.availableSpecialtySlots} طبيبًا متاحًا</span>
-                      <span>متوسط انتظار {center.averageWaitTime} دقيقة</span>
-                    </div>
-                    <p className="action-hint">اضغط للانتقال إلى صفحة المراكز.</p>
-                  </Link>
-                ) : (
-                  <article key={center.id} className="stack-item">
-                    <div className="info-row">
-                      <div>
-                        <strong>{center.name}</strong>
-                        <p className="muted">{joinMeta([center.code, center.city, toArabicLabel(center.type)])}</p>
-                      </div>
-                      <StatusBadge status={center.isConnected ? "connected" : "suspended"} />
-                    </div>
-                    <div className="tile-stats">
-                      <span>{center.patientCount} مريضًا محليًا</span>
-                      <span>{center.localVisitCount} زيارة محلية</span>
-                      <span>{center.availableSpecialtySlots} طبيبًا متاحًا</span>
-                      <span>متوسط انتظار {center.averageWaitTime} دقيقة</span>
-                    </div>
-                  </article>
-                )
-              )}
-            </div>
-          </SectionCard>
-
-          <SectionCard
-            title="مسار الإحالات"
-            subtitle="توزيع حالات الإحالات الطبية بين المراكز."
-            action={renderSectionAction(referralsRoute, "صفحة الإحالات")}
-          >
-            <div className="stack-list compact">
-              {centralData.referralPipeline.map((item) =>
-                referralsRoute ? (
-                  <Link key={item.status} className="stack-item interactive-card" to={referralsRoute}>
-                    <div className="info-row">
-                      <span>{toArabicLabel(item.status)}</span>
-                      <strong>{item.count}</strong>
-                    </div>
-                    <p className="action-hint">اضغط لفتح الإحالات بهذا التصنيف.</p>
-                  </Link>
-                ) : (
-                  <div key={item.status} className="info-row">
-                    <span>{toArabicLabel(item.status)}</span>
-                    <strong>{item.count}</strong>
-                  </div>
-                )
-              )}
-            </div>
-          </SectionCard>
-        </div>
-
-        <SectionCard
-          title="أحدث الإحالات"
-          subtitle="آخر طلبات الإحالة ونتائج التوجيه العلاجي."
-          action={renderSectionAction(referralsRoute, "فتح الإحالات")}
-        >
-          <div className="table-shell">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>المريض</th>
-                  <th>المسار</th>
-                  <th>التخصص</th>
-                  <th>الحالة</th>
-                  <th>تاريخ الطلب</th>
-                </tr>
-              </thead>
-              <tbody>
-                {centralData.recentReferrals.map((referral) => (
-                  <tr key={referral.id}>
-                    <td>
-                      <strong>{referral.patientName}</strong>
-                      <span>{referral.patientUnifiedId}</span>
-                    </td>
-                    <td>
-                      <strong>{referral.fromCenter}</strong>
-                      <span>{referral.toCenter}</span>
-                    </td>
-                    <td>
-                      <strong>{referral.requiredSpecialty}</strong>
-                      <span>{toArabicLabel(referral.priority)}</span>
-                    </td>
-                    <td>
-                      <StatusBadge status={referral.status} />
-                    </td>
-                    <td>{formatDateTime(referral.requestedAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          title="أحدث الزيارات المتزامنة"
-          subtitle="ملخصات الزيارات التي وصلت حديثًا من المراكز المرتبطة."
-          action={renderSectionAction(synchronizedVisitsRoute, "فتح المرضى")}
-        >
-          <div className="card-grid">
-            {centralData.recentVisits.map((visit) =>
-              synchronizedVisitsRoute ? (
-                <Link key={visit.id} className="profile-tile interactive-card" to={synchronizedVisitsRoute}>
-                  <p className="eyebrow">{visit.centerName}</p>
-                  <h3>{visit.patientName}</h3>
-                  <p>{visit.primaryDiagnosis}</p>
-                  <div className="tile-stats">
-                    <span>{toArabicLabel(visit.visitType)}</span>
-                    <span>{formatDateTime(visit.visitDate)}</span>
-                  </div>
-                  <p className="action-hint">اضغط لفتح السجلات المرتبطة.</p>
-                </Link>
-              ) : (
-                <article key={visit.id} className="profile-tile">
-                  <p className="eyebrow">{visit.centerName}</p>
-                  <h3>{visit.patientName}</h3>
-                  <p>{visit.primaryDiagnosis}</p>
-                  <div className="tile-stats">
-                    <span>{toArabicLabel(visit.visitType)}</span>
-                    <span>{formatDateTime(visit.visitDate)}</span>
-                  </div>
-                </article>
-              )
-            )}
-          </div>
-        </SectionCard>
-      </div>
-    );
-  }
-
-  if (!centerData) {
+  if (!centralData) {
     return <div className="empty-state">لا توجد بيانات متاحة لهذه الواجهة.</div>;
   }
 
-  const labOrInventoryRoute = user?.center?.hasLabModule
-    ? labRoute ?? notificationsRoute ?? visitsRoute
-    : pharmacyRoute ?? notificationsRoute ?? patientsRoute;
+  const pendingReferralsRoute = referralsRoute
+    ? buildPath(referralsRoute, { status: "PENDING_RECEIVING_MANAGER" })
+    : undefined;
 
   return (
     <div className="page-stack">
       <div className="hero-strip">
         <div>
-          <p className="eyebrow">{toArabicLabel(centerData.role)}</p>
-          <h1>{centerData.center.name}</h1>
+          <p className="eyebrow">Healthcare Ecosystem</p>
+          <h1>لوحة المتابعة المركزية</h1>
         </div>
         <p className="muted">
-          واجهة تشغيل محلية للمركز في {centerData.center.city}. تتغير المسارات داخلها بحسب الدور الوظيفي لتغطي
-          الاستقبال والعيادات والتمريض والمختبر والصيدلية.
+          مؤشرات تشغيلية مختصرة قابلة للنقر لفتح السجلات المرتبطة بالمراكز والمرضى والإحالات والإشعارات.
         </p>
       </div>
 
       <div className="metric-grid">
         <MetricCard
-          label="المرضى المحليون"
-          value={centerData.stats.localPatients}
-          helper="عدد المرضى المخزنين في قاعدة بيانات المركز المحلي."
+          label="المراكز المتصلة"
+          value={formatCount(centralData.stats.connectedCenters)}
+          helper="عدد المراكز المسموح لها حاليا بالتكامل مع النظام المركزي."
+          to={centersRoute}
+          actionHint="عرض التفاصيل"
+        />
+        <MetricCard
+          label="المراكز الموقوفة"
+          value={formatCount(centralData.stats.suspendedCenters)}
+          helper="مراكز تم تعليق اتصالها مؤقتا من قبل الإدارة المركزية."
+          to={centersRoute}
+          actionHint="فتح السجلات المرتبطة"
+        />
+        <MetricCard
+          label="المرضى المركزيون"
+          value={formatCount(centralData.stats.unifiedPatients)}
+          helper="عدد السجلات الصحية الموحدة المتاحة عبر جميع المراكز."
           to={patientsRoute}
-          actionHint="اضغط لفتح صفحة المرضى."
+          actionHint="فتح سجل المرضى"
         />
         <MetricCard
-          label="زيارات غير متزامنة"
-          value={centerData.stats.unsyncedVisits}
-          helper="زيارات بانتظار مزامنتها مع النظام المركزي."
-          to={visitsRoute}
-          actionHint="اضغط لفتح صفحة الزيارات."
+          label="الإحالات المعلقة"
+          value={formatCount(centralData.stats.pendingReferrals)}
+          helper="طلبات إحالة ما زالت بانتظار التوجيه أو قرار مدير المركز أو الاستكمال."
+          to={pendingReferralsRoute ?? referralsRoute}
+          actionHint="عرض الإحالات المعلقة"
         />
         <MetricCard
-          label="طابور وارد"
-          value={centerData.stats.incomingPending}
-          helper="إشعارات مركزية ما زالت بانتظار المعالجة داخل المركز."
+          label="إشعارات مركزية معلقة"
+          value={formatCount(centralData.stats.pendingCentralNotifications)}
+          helper="إشعارات ما زال على النظام المركزي معالجتها أو تسليمها."
           to={notificationsRoute}
-          actionHint="اضغط لفتح صفحة الإشعارات."
+          actionHint="فتح مركز الإشعارات"
         />
         <MetricCard
-          label="طابور صادر"
-          value={centerData.stats.outgoingPending}
-          helper="إشعارات محلية بانتظار الوصول إلى النظام المركزي."
+          label="طوابير المراكز الصادرة"
+          value={formatCount(centralData.stats.pendingOutgoingNotifications)}
+          helper="إشعارات محلية لم تصل بعد إلى النظام المركزي."
           to={notificationsRoute}
-          actionHint="اضغط لفتح صفحة الإشعارات."
-        />
-        <MetricCard
-          label="إحالات مفتوحة"
-          value={centerData.stats.openReferrals}
-          helper="إحالات مرتبطة بهذا المركز وما زالت تحتاج متابعة."
-          to={referralsRoute}
-          actionHint="اضغط لفتح صفحة الإحالات."
-        />
-        <MetricCard
-          label={user?.center?.hasLabModule ? "طلبات مختبر مفتوحة" : "أصناف منخفضة المخزون"}
-          value={user?.center?.hasLabModule ? centerData.stats.labOpenRequests : centerData.stats.lowStockItems}
-          helper={
-            user?.center?.hasLabModule
-              ? "طلبات فحوصات مخبرية لم تُستكمل بعد."
-              : "أصناف دوائية تحتاج إلى تزويد قريب."
-          }
-          to={labOrInventoryRoute}
-          actionHint="اضغط لفتح صفحة المتابعة المناسبة."
+          actionHint="فتح السجلات المرتبطة"
         />
       </div>
 
       <div className="split-grid">
         <SectionCard
-          title="آخر الزيارات"
-          subtitle="أحدث الزيارات المسجلة داخل المركز."
-          action={renderSectionAction(visitsRoute, "صفحة الزيارات")}
+          title="خريطة حمل المراكز"
+          subtitle="الوضع التشغيلي الحالي لكل مركز متصل."
+          action={renderSectionAction(centersRoute, "فتح المراكز")}
         >
           <div className="stack-list">
-            {centerData.recentVisits.map((visit) =>
-              visitsRoute ? (
-                <Link key={visit.id} className="stack-item interactive-card" to={visitsRoute}>
+            {centralData.centers.map((center) =>
+              centersRoute ? (
+                <Link
+                  key={center.id}
+                  className="stack-item interactive-card"
+                  to={buildPath(centersRoute, { centerId: center.id, focus: "load" })}
+                >
                   <div className="info-row">
                     <div>
-                      <strong>{visit.patientName}</strong>
-                      <p className="muted">{joinMeta([visit.doctorName, toArabicLabel(visit.visitType)])}</p>
+                      <strong>{center.name}</strong>
+                      <p className="muted">{joinMeta([center.code, center.city, toArabicLabel(center.type)])}</p>
                     </div>
-                    <StatusBadge status={visit.syncState} />
+                    <StatusBadge status={center.isConnected ? "connected" : "suspended"} />
                   </div>
                   <div className="tile-stats">
-                    <span>{visit.diagnosis}</span>
-                    <span>{visit.prescriptionCount} وصفات دوائية</span>
-                    <span>{formatDateTime(visit.visitDate)}</span>
+                    <span>{formatCount(center.patientCount)} مريض محلي</span>
+                    <span>{formatCount(center.localVisitCount)} زيارة محلية</span>
+                    <span>{formatCount(center.availableSpecialtySlots)} طبيب متاح</span>
+                    <span>متوسط انتظار {formatCount(center.averageWaitTime)} دقيقة</span>
                   </div>
-                  <p className="action-hint">اضغط لفتح صفحة الزيارات.</p>
+                  <p className="action-hint">عرض التفاصيل</p>
                 </Link>
               ) : (
-                <article key={visit.id} className="stack-item">
-                  <div className="info-row">
-                    <div>
-                      <strong>{visit.patientName}</strong>
-                      <p className="muted">{joinMeta([visit.doctorName, toArabicLabel(visit.visitType)])}</p>
-                    </div>
-                    <StatusBadge status={visit.syncState} />
-                  </div>
-                  <div className="tile-stats">
-                    <span>{visit.diagnosis}</span>
-                    <span>{visit.prescriptionCount} وصفات دوائية</span>
-                    <span>{formatDateTime(visit.visitDate)}</span>
-                  </div>
+                <article key={center.id} className="stack-item">
+                  <strong>{center.name}</strong>
+                  <p>{joinMeta([center.code, center.city, toArabicLabel(center.type)])}</p>
                 </article>
               )
             )}
           </div>
         </SectionCard>
 
-        <SectionCard title="فريق العمل حسب الدور" subtitle="يوفر النظام واجهات مختلفة لكل دور داخل المركز الصحي.">
+        <SectionCard
+          title="مسار الإحالات"
+          subtitle="توزيع حالات الإحالات الطبية بين المراكز."
+          action={renderSectionAction(referralsRoute, "فتح الإحالات")}
+        >
           <div className="stack-list compact">
-            {centerData.team.map((member) => {
-              const memberRoute = resolveTeamRoute(member.role);
-
-              if (memberRoute) {
-                return (
-                  <Link key={member.id} className="stack-item interactive-card" to={memberRoute}>
-                    <div className="info-row">
-                      <div>
-                        <strong>{member.fullName}</strong>
-                        <p className="muted">{toArabicLabel(member.role)}</p>
-                      </div>
-                      <StatusBadge status={member.isActive ? "active" : "inactive"} />
-                    </div>
-                    <p className="action-hint">اضغط لفتح المسار الأنسب لهذا الدور.</p>
-                  </Link>
-                );
-              }
-
-              return (
-                <div key={member.id} className="info-row">
-                  <div>
-                    <strong>{member.fullName}</strong>
-                    <p className="muted">{toArabicLabel(member.role)}</p>
+            {centralData.referralPipeline.map((item) =>
+              referralsRoute ? (
+                <Link
+                  key={item.status}
+                  className="stack-item interactive-card"
+                  to={buildPath(referralsRoute, { status: item.status })}
+                >
+                  <div className="info-row">
+                    <span>{toArabicLabel(item.status)}</span>
+                    <strong>{formatCount(item.count)}</strong>
                   </div>
-                  <StatusBadge status={member.isActive ? "active" : "inactive"} />
+                  <p className="action-hint">فتح الإحالات بهذا التصنيف</p>
+                </Link>
+              ) : (
+                <div key={item.status} className="info-row">
+                  <span>{toArabicLabel(item.status)}</span>
+                  <strong>{formatCount(item.count)}</strong>
                 </div>
-              );
-            })}
+              )
+            )}
           </div>
         </SectionCard>
       </div>
 
       <SectionCard
-        title="نشاط الإحالات"
-        subtitle="الإحالات الصادرة من هذا المركز أو الواردة إليه."
+        title="أحدث الإحالات"
+        subtitle="آخر طلبات الإحالة ونتائج التوجيه العلاجي."
         action={renderSectionAction(referralsRoute, "فتح الإحالات")}
       >
         <div className="table-shell">
@@ -455,28 +225,74 @@ export function DashboardPage() {
                 <th>التخصص</th>
                 <th>الحالة</th>
                 <th>تاريخ الطلب</th>
+                <th>الإجراء</th>
               </tr>
             </thead>
             <tbody>
-              {centerData.referrals.map((referral) => (
+              {centralData.recentReferrals.map((referral) => (
                 <tr key={referral.id}>
-                  <td>{referral.patientName}</td>
                   <td>
-                    <strong>{referral.fromCenter}</strong>
-                    <span>{referral.toCenter}</span>
+                    <strong>{safeDisplay(referral.patientName, "مريض غير متوفر")}</strong>
+                    <span>{safeDisplay(referral.patientUnifiedId, "لا يوجد رقم موحد")}</span>
                   </td>
                   <td>
-                    <strong>{referral.requiredSpecialty}</strong>
+                    <strong>{safeDisplay(referral.fromCenter)}</strong>
+                    <span>{receivingCenterLabel(referral.status, referral.toCenter)}</span>
+                  </td>
+                  <td>
+                    <strong>{safeDisplay(referral.requiredSpecialty)}</strong>
                     <span>{toArabicLabel(referral.priority)}</span>
                   </td>
                   <td>
                     <StatusBadge status={referral.status} />
                   </td>
                   <td>{formatDateTime(referral.requestedAt)}</td>
+                  <td>
+                    {referralsRoute ? (
+                      <Link className="ghost-button table-action-button" to={buildPath(referralsRoute, { referralId: referral.id })}>
+                        عرض التفاصيل
+                      </Link>
+                    ) : (
+                      "لا يوجد"
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="أحدث الزيارات المتزامنة"
+        subtitle="ملخصات الزيارات التي وصلت حديثا من المراكز المرتبطة."
+        action={renderSectionAction(patientsRoute ?? reportsRoute, "فتح السجلات المرتبطة")}
+      >
+        <div className="card-grid">
+          {centralData.recentVisits.map((visit) =>
+            patientsRoute ? (
+              <Link
+                key={visit.id}
+                className="profile-tile interactive-card"
+                to={buildPath(patientsRoute, { search: visit.patientName })}
+              >
+                <p className="eyebrow">{safeDisplay(visit.centerName)}</p>
+                <h3>{safeDisplay(visit.patientName)}</h3>
+                <p>{cleanDemoText(visit.primaryDiagnosis)}</p>
+                <div className="tile-stats">
+                  <span>{toArabicLabel(visit.visitType)}</span>
+                  <span>{formatDateTime(visit.visitDate)}</span>
+                </div>
+                <p className="action-hint">فتح السجلات المرتبطة</p>
+              </Link>
+            ) : (
+              <article key={visit.id} className="profile-tile">
+                <p className="eyebrow">{safeDisplay(visit.centerName)}</p>
+                <h3>{safeDisplay(visit.patientName)}</h3>
+                <p>{cleanDemoText(visit.primaryDiagnosis)}</p>
+              </article>
+            )
+          )}
         </div>
       </SectionCard>
     </div>

@@ -12,7 +12,7 @@ type ReferralView = "all" | "incoming" | "assigned";
 
 const defaultReferralForm = {
   localPatientId: "",
-  requiredSpecialty: "أمراض القلب",
+  requiredSpecialty: "",
   priority: "URGENT",
   reason: "",
   requiresOr: false,
@@ -35,7 +35,7 @@ const centralStatusFilters = [
   "NO_CANDIDATE_REJECTED"
 ];
 
-const reviewStatuses = new Set(["AUTO_SELECTED", "PENDING_RECEIVING_MANAGER", "ACCEPTED"]);
+const reviewStatuses = new Set(["AUTO_SELECTED", "PENDING_RECEIVING_MANAGER"]);
 
 function getReferralMeta(referral: ReferralRecord) {
   return [
@@ -71,13 +71,16 @@ export function ReferralsPage() {
   const statusFilter = searchParams.get("status") ?? "";
   const viewParam = searchParams.get("view");
   const selectedReferralId = Number(searchParams.get("referralId") ?? 0);
-  const canRequest = user?.workspace === "center" && (user.role === "CENTER_MANAGER" || user.role === "DOCTOR");
+  const canRequest = user?.workspace === "center" && user.role === "DOCTOR";
   const canReviewIncoming = user?.workspace === "center" && user.role === "CENTER_MANAGER";
   const canSeeAssigned = user?.workspace === "center" && user.role === "DOCTOR";
+  const showAllReferralLog = user?.role !== "DOCTOR";
 
   async function loadData() {
     setLoading(true);
+
     try {
+      setError("");
       const nextReferrals = await apiRequest<ReferralRecord[]>(
         user?.workspace === "central" ? "/central/referrals" : "/center/referrals"
       );
@@ -102,15 +105,26 @@ export function ReferralsPage() {
         );
       }
 
+      if (canRequest || canReviewIncoming) {
+        requests.push(
+          apiRequest<CenterDoctorsBundle>("/center/doctors").then((payload) => {
+            setDoctorBundle(payload);
+            setForm((current) =>
+              current.requiredSpecialty
+                ? current
+                : {
+                    ...current,
+                    requiredSpecialty: payload.specialtyOptions[0] ?? ""
+                  }
+            );
+          })
+        );
+      }
+
       if (canReviewIncoming) {
         requests.push(
           apiRequest<ReferralRecord[]>("/center/referrals/incoming").then((payload) => {
             setIncomingReferrals(payload);
-          })
-        );
-        requests.push(
-          apiRequest<CenterDoctorsBundle>("/center/doctors").then((payload) => {
-            setDoctorBundle(payload);
           })
         );
       }
@@ -139,8 +153,29 @@ export function ReferralsPage() {
       setActiveView("incoming");
     } else if (viewParam === "assigned" && canSeeAssigned) {
       setActiveView("assigned");
+    } else if (canSeeAssigned) {
+      setActiveView("assigned");
+    } else if (!showAllReferralLog && activeView === "all") {
+      setActiveView("assigned");
     }
-  }, [canReviewIncoming, canSeeAssigned, viewParam]);
+  }, [activeView, canReviewIncoming, canSeeAssigned, showAllReferralLog, viewParam]);
+
+  useEffect(() => {
+    if (!selectedReferralId || loading) {
+      return;
+    }
+
+    const element = document.getElementById(`referral-${selectedReferralId}`);
+    if (!element) {
+      return;
+    }
+
+    element.scrollIntoView({ block: "center", behavior: "smooth" });
+    element.classList.add("target-highlight");
+    const timeout = window.setTimeout(() => element.classList.remove("target-highlight"), 2200);
+
+    return () => window.clearTimeout(timeout);
+  }, [loading, selectedReferralId]);
 
   useEffect(() => {
     if (selectedReferralId > 0 || viewParam !== "incoming" || incomingReferrals.length !== 1) {
@@ -158,16 +193,19 @@ export function ReferralsPage() {
         ? incomingReferrals
         : activeView === "assigned"
           ? assignedReferrals
-          : referrals;
+          : showAllReferralLog
+            ? referrals
+            : assignedReferrals;
 
     if (!statusFilter) {
       return source;
     }
 
     return source.filter((referral) => referral.status === statusFilter);
-  }, [activeView, assignedReferrals, incomingReferrals, referrals, statusFilter]);
+  }, [activeView, assignedReferrals, incomingReferrals, referrals, showAllReferralLog, statusFilter]);
 
   const doctorOptions = doctorBundle?.doctors.filter((doctor) => doctor.isActive) ?? [];
+  const specialtyOptions = doctorBundle?.specialtyOptions ?? [];
   const selectedReferral = useMemo(
     () =>
       [...incomingReferrals, ...assignedReferrals, ...referrals].find(
@@ -204,7 +242,40 @@ export function ReferralsPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (!form.localPatientId) {
+      setError("اختر المريض قبل إرسال طلب الإحالة.");
+      return;
+    }
+
+    if (!form.requiredSpecialty.trim()) {
+      setError("اختر التخصص المطلوب من القائمة المرجعية.");
+      return;
+    }
+
     try {
+      if (form.reason.trim().length < 5) {
+        setError("اكتب سبب الإحالة بشكل واضح قبل الإرسال.");
+        return;
+      }
+
+      const maxDistanceKm = Number(form.maxDistanceKm);
+
+      if (!Number.isFinite(maxDistanceKm) || maxDistanceKm <= 0) {
+        setError("أدخل مسافة قصوى صحيحة بالكيلومتر.");
+        return;
+      }
+
+      const requiredMedicineIds = form.requiredMedicineIds
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .map(Number);
+
+      if (requiredMedicineIds.some((medicineId) => !Number.isInteger(medicineId) || medicineId <= 0)) {
+        setError("معرفات الأدوية يجب أن تكون أرقامًا صحيحة مفصولة بفواصل.");
+        return;
+      }
+
       await apiRequest("/center/referrals/request", {
         method: "POST",
         body: JSON.stringify({
@@ -213,19 +284,18 @@ export function ReferralsPage() {
           priority: form.priority,
           reason: form.reason,
           requiresOr: form.requiresOr,
-          requiredMedicineIds: form.requiredMedicineIds
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean)
-            .map(Number),
+          requiredMedicineIds,
           preferredRegion: form.preferredRegion || undefined,
-          maxDistanceKm: Number(form.maxDistanceKm),
+          maxDistanceKm,
           notesFromSender: form.notesFromSender || undefined,
           processNow: true
         })
       });
 
-      setForm(defaultReferralForm);
+      setForm({
+        ...defaultReferralForm,
+        requiredSpecialty: specialtyOptions[0] ?? ""
+      });
       await refreshAfterAction("تم إرسال طلب الإحالة إلى المحرك المركزي.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر إرسال طلب الإحالة.");
@@ -575,13 +645,20 @@ export function ReferralsPage() {
             </label>
             <label className="field">
               <span>التخصص المطلوب</span>
-              <input
+              <select
                 required
                 value={form.requiredSpecialty}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, requiredSpecialty: event.target.value }))
                 }
-              />
+              >
+                <option value="">اختر التخصص</option>
+                {specialtyOptions.map((specialty) => (
+                  <option key={specialty} value={specialty}>
+                    {specialty}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="field">
               <span>درجة الاستعجال</span>
@@ -656,7 +733,7 @@ export function ReferralsPage() {
         {error ? <div className="error-banner">{error}</div> : null}
         {successMessage ? <div className="success-banner">{successMessage}</div> : null}
 
-        <div className="toolbar">
+        <div className={showAllReferralLog ? "toolbar" : "toolbar doctor-referral-toolbar"}>
           <button className={activeView === "all" ? "primary-button" : "ghost-button"} onClick={() => setActiveView("all")} type="button">
             {user?.workspace === "central" ? "كل إحالات الشبكة" : "سجل المركز"}
           </button>
@@ -720,7 +797,7 @@ export function ReferralsPage() {
                   const doctorActions = renderDoctorActions(referral);
 
                   return (
-                    <tr key={`${activeView}-${referral.id}`}>
+                    <tr id={`referral-${referral.id}`} key={`${activeView}-${referral.id}`}>
                       <td>
                         <strong>{referral.patientName ?? "مريض"}</strong>
                         <span>{referral.patientUnifiedId ?? "سجل إحالة محلي"}</span>

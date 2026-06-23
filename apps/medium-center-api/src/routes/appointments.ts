@@ -10,6 +10,7 @@ import {
   findAppointmentConflict,
   getAppointmentSuggestions
 } from "../services/appointment-suggestions";
+import { resolvePortalLocalPatient } from "../services/patient-care-workflow";
 import { resolvePortalActor } from "../services/portal-identity";
 import { asyncHandler } from "../utils/async-handler";
 import { getSingleParam } from "../utils/request";
@@ -58,6 +59,28 @@ async function resolveDoctorProfileIdForRequest(req: Request) {
   }
 
   return (await resolvePortalActor(req.auth)).doctorProfileId;
+}
+
+const appointmentNotificationDateFormatter = new Intl.DateTimeFormat("ar", {
+  dateStyle: "medium",
+  timeStyle: "short"
+});
+
+function formatAppointmentNotificationDate(date: Date) {
+  return appointmentNotificationDateFormatter.format(date);
+}
+
+async function mapAppointmentWithLocalPatient(appointment: Parameters<typeof mapAppointment>[0]) {
+  const mapped = mapAppointment(appointment);
+  const scope = await resolvePortalLocalPatient(appointment.patientId);
+
+  return {
+    ...mapped,
+    patient: {
+      ...mapped.patient,
+      localPatientId: scope?.localPatient?.id ?? null
+    }
+  };
 }
 
 router.get(
@@ -152,7 +175,7 @@ router.get(
       }
     });
 
-    res.json(appointments.map(mapAppointment));
+    res.json(await Promise.all(appointments.map(mapAppointmentWithLocalPatient)));
   })
 );
 
@@ -266,7 +289,7 @@ router.post(
       ]
     });
 
-    res.status(201).json(mapAppointment(appointment));
+    res.status(201).json(await mapAppointmentWithLocalPatient(appointment));
   })
 );
 
@@ -337,14 +360,14 @@ router.patch(
           title: payload.status === AppointmentStatus.CONFIRMED ? "تم تأكيد موعدك" : "تم رفض الموعد",
           body:
             payload.status === AppointmentStatus.CONFIRMED
-              ? `أكد الطبيب ${updated.doctor.user.fullName} موعدك بتاريخ ${updated.scheduledAt.toISOString()}. [[target:/appointments?appointmentId=${updated.id}]]`
+              ? `أكد الطبيب ${updated.doctor.user.fullName} موعدك بتاريخ ${formatAppointmentNotificationDate(updated.scheduledAt)}. [[target:/appointments?appointmentId=${updated.id}]]`
               : `تم رفض الموعد مع ${updated.doctor.user.fullName}. يمكنك اختيار موعد آخر من صفحة المواعيد. [[target:/appointments?appointmentId=${updated.id}]]`,
           type: "APPOINTMENT"
         }
       });
     }
 
-    res.json(mapAppointment(updated));
+    res.json(await mapAppointmentWithLocalPatient(updated));
   })
 );
 

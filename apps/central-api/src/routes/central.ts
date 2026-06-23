@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { prisma } from "../lib/prisma";
 import { authorize, authorizeWorkspace, authenticate } from "../middleware/auth";
+import { AppError } from "../middleware/error";
 import { recordAuditLog } from "../services/audit-log";
 import { getCentralAnalyticsDashboard } from "../services/central-analytics";
 import {
@@ -35,6 +36,11 @@ const analyticsQuerySchema = z.object({
   centerId: z.coerce.number().int().positive().optional(),
   departmentId: z.string().min(1).optional(),
   doctorId: z.string().min(1).optional()
+});
+
+const reportsQuerySchema = z.object({
+  startDate: z.coerce.date().optional(),
+  endDate: z.coerce.date().optional()
 });
 
 router.get(
@@ -183,6 +189,28 @@ const specialtySchema = z.object({
   description: z.string().optional()
 });
 
+function normalizeArabicName(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+async function ensureUniqueSpecialtyName(specialtyName: string, excludeId?: number) {
+  const normalizedName = normalizeArabicName(specialtyName);
+  const specialties = await prisma.masterSpecialty.findMany({
+    select: {
+      id: true,
+      specialtyName: true
+    }
+  });
+  const duplicate = specialties.find(
+    (specialty) =>
+      specialty.id !== excludeId && normalizeArabicName(specialty.specialtyName) === normalizedName
+  );
+
+  if (duplicate) {
+    throw new AppError("هذا التخصص موجود بالفعل. لا يمكن إنشاء تخصص مكرر.", 409);
+  }
+}
+
 async function broadcastMasterDataSync(entity: string) {
   const centers = await prisma.centralCenter.findMany({
     where: {
@@ -252,8 +280,8 @@ router.put(
       where: { id: Number(req.params.centerId) },
       data: {
         ...payload,
-        apiEndpoint: payload.apiEndpoint || null,
-        apiKey: payload.apiKey || null,
+        apiEndpoint: payload.apiEndpoint ? payload.apiEndpoint : undefined,
+        apiKey: payload.apiKey ? payload.apiKey : undefined,
         connectionSuspendedAt: payload.isConnected ? null : new Date(),
         suspensionReason: payload.isConnected ? null : "Connection disabled from center record editing."
       }
@@ -267,8 +295,35 @@ router.put(
 router.delete(
   "/centers/:centerId",
   asyncHandler(async (req, res) => {
+    const centerId = Number(req.params.centerId);
+    const center = await prisma.centralCenter.findUnique({
+      where: { id: centerId },
+      include: {
+        _count: {
+          select: {
+            localPatients: true,
+            localVisits: true,
+            referralsFrom: true,
+            referralsTo: true,
+            notificationsToCenter: true,
+            notificationsToCentral: true
+          }
+        }
+      }
+    });
+
+    if (!center) {
+      throw new AppError("تعذر العثور على المركز المطلوب.", 404);
+    }
+
+    const relatedCount = Object.values(center._count).reduce((sum, value) => sum + value, 0);
+
+    if (relatedCount > 0) {
+      throw new AppError("لا يمكن حذف مركز مرتبط بسجلات مرضى أو زيارات أو إحالات أو إشعارات. استخدم التعطيل بدلا من الحذف.", 409);
+    }
+
     await prisma.centralCenter.delete({
-      where: { id: Number(req.params.centerId) }
+      where: { id: centerId }
     });
 
     res.json({ success: true });
@@ -352,8 +407,17 @@ router.put(
 router.delete(
   "/master-data/medicines/:id",
   asyncHandler(async (req, res) => {
+    const medicineId = Number(req.params.id);
+    const availabilityCount = await prisma.centerMedicineAvailability.count({
+      where: { medicineId }
+    });
+
+    if (availabilityCount > 0) {
+      throw new AppError("لا يمكن حذف دواء مستخدم في توفر الأدوية داخل المراكز. أوقف استخدامه تشغيليا بدلا من الحذف.", 409);
+    }
+
     await prisma.masterMedicine.delete({
-      where: { id: Number(req.params.id) }
+      where: { id: medicineId }
     });
 
     await broadcastMasterDataSync("medicines");
@@ -409,6 +473,7 @@ router.post(
   "/master-data/specialties",
   asyncHandler(async (req, res) => {
     const payload = specialtySchema.parse(req.body);
+    await ensureUniqueSpecialtyName(payload.specialtyName);
     const specialty = await prisma.masterSpecialty.create({
       data: payload
     });
@@ -422,8 +487,10 @@ router.put(
   "/master-data/specialties/:id",
   asyncHandler(async (req, res) => {
     const payload = specialtySchema.parse(req.body);
+    const specialtyId = Number(req.params.id);
+    await ensureUniqueSpecialtyName(payload.specialtyName, specialtyId);
     const specialty = await prisma.masterSpecialty.update({
-      where: { id: Number(req.params.id) },
+      where: { id: specialtyId },
       data: payload
     });
 
@@ -435,8 +502,27 @@ router.put(
 router.delete(
   "/master-data/specialties/:id",
   asyncHandler(async (req, res) => {
+    const specialtyId = Number(req.params.id);
+    const specialty = await prisma.masterSpecialty.findUnique({
+      where: { id: specialtyId }
+    });
+
+    if (!specialty) {
+      throw new AppError("تعذر العثور على التخصص المطلوب.", 404);
+    }
+
+    const [referralCount, doctorAvailabilityCount, centerCount] = await Promise.all([
+      prisma.centralReferral.count({ where: { requiredSpecialty: specialty.specialtyName } }),
+      prisma.centerDoctorAvailability.count({ where: { specialty: specialty.specialtyName } }),
+      prisma.centralCenter.count({ where: { specialties: { has: specialty.specialtyName } } })
+    ]);
+
+    if (referralCount + doctorAvailabilityCount + centerCount > 0) {
+      throw new AppError("لا يمكن حذف تخصص مستخدم في الإحالات أو توفر الأطباء أو بيانات المراكز.", 409);
+    }
+
     await prisma.masterSpecialty.delete({
-      where: { id: Number(req.params.id) }
+      where: { id: specialtyId }
     });
 
     await broadcastMasterDataSync("specialties");
@@ -446,8 +532,9 @@ router.delete(
 
 router.get(
   "/reports",
-  asyncHandler(async (_req, res) => {
-    res.json(await getReportsSummary());
+  asyncHandler(async (req, res) => {
+    const filters = reportsQuerySchema.parse(req.query);
+    res.json(await getReportsSummary(filters));
   })
 );
 

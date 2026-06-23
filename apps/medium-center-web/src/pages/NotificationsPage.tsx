@@ -13,11 +13,33 @@ function isActivationKey(event: KeyboardEvent<HTMLElement>) {
   return event.key === "Enter" || event.key === " ";
 }
 
+type CenterNotificationFilter = "ALL" | "APPOINTMENT" | "MESSAGE" | "REFERRAL" | "LAB" | "ERROR";
+
+const centerNotificationFilters: Array<{ value: CenterNotificationFilter; label: string }> = [
+  { value: "ALL", label: "الكل" },
+  { value: "APPOINTMENT", label: "المواعيد" },
+  { value: "MESSAGE", label: "الرسائل" },
+  { value: "REFERRAL", label: "الإحالات" },
+  { value: "LAB", label: "المختبر" },
+  { value: "ERROR", label: "الأخطاء" }
+];
+
+function matchesCenterFilter(value: CenterNotificationFilter, source: string) {
+  const haystack = source.toLowerCase();
+
+  if (value === "ALL") return true;
+  if (value === "ERROR") return ["error", "failed", "warning", "خطأ", "فشل", "تحذير"].some((term) => haystack.includes(term));
+  if (value === "LAB") return ["lab", "result", "مختبر", "نتيجة"].some((term) => haystack.includes(term));
+
+  return haystack.includes(value.toLowerCase());
+}
+
 export function NotificationsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [centralBundle, setCentralBundle] = useState<CentralNotificationsBundle | null>(null);
   const [centerBundle, setCenterBundle] = useState<CenterNotificationsBundle | null>(null);
+  const [centerFilter, setCenterFilter] = useState<CenterNotificationFilter>("ALL");
   const [error, setError] = useState("");
   const [processing, setProcessing] = useState(false);
 
@@ -237,6 +259,19 @@ export function NotificationsPage() {
     return <div className="empty-state">جارٍ تحميل الإشعارات...</div>;
   }
 
+  const filteredCenterIncoming = centerBundle.incoming.filter((item) =>
+    matchesCenterFilter(centerFilter, `${item.notificationType} ${item.responseStatus ?? ""} ${item.responseError ?? ""}`)
+  );
+  const filteredCenterOutgoing = centerBundle.outgoing.filter((item) =>
+    matchesCenterFilter(centerFilter, `${item.notificationType} ${item.status} ${item.lastError ?? ""}`)
+  );
+  const filteredCenterAlerts = centerBundle.alerts.filter((alert) =>
+    matchesCenterFilter(centerFilter, `${alert.severity} ${alert.title} ${alert.message}`)
+  );
+  const filteredCenterLogs = centerBundle.logs.filter((log) =>
+    matchesCenterFilter(centerFilter, `${log.severity} ${log.message}`)
+  );
+
   return (
     <div className="page-stack">
       <SectionCard
@@ -251,12 +286,24 @@ export function NotificationsPage() {
         }
       >
         {error ? <div className="error-banner">{error}</div> : null}
+        <div className="chip-row">
+          {centerNotificationFilters.map((filter) => (
+            <button
+              className={centerFilter === filter.value ? "primary-button" : "ghost-button"}
+              key={filter.value}
+              type="button"
+              onClick={() => setCenterFilter(filter.value)}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
 
         <div className="split-grid">
           <div className="section-card inset-card">
             <h3>وارد من النظام المركزي</h3>
             <div className="stack-list">
-              {centerBundle.incoming.map((item) => {
+              {filteredCenterIncoming.map((item) => {
                 const path = resolveNotificationPath({
                   role: user?.role,
                   workspace: user?.workspace,
@@ -283,7 +330,7 @@ export function NotificationsPage() {
           <div className="section-card inset-card">
             <h3>صادر إلى النظام المركزي</h3>
             <div className="stack-list">
-              {centerBundle.outgoing.map((item) => {
+              {filteredCenterOutgoing.map((item) => {
                 const path = resolveNotificationPath({
                   role: user?.role,
                   workspace: user?.workspace,
@@ -323,7 +370,7 @@ export function NotificationsPage() {
       <div className="split-grid">
         <SectionCard title="تنبيهات النظام" subtitle="تنبيهات وتحذيرات يراجعها مدير المركز.">
           <div className="stack-list">
-            {centerBundle.alerts.map((alert) => {
+            {filteredCenterAlerts.map((alert) => {
               const path = resolveNotificationPath({
                 role: user?.role,
                 workspace: user?.workspace,
@@ -350,7 +397,7 @@ export function NotificationsPage() {
 
         <SectionCard title="سجل المعالجة" subtitle="آخر الإجراءات التي نُفذت على طوابير الإشعارات داخل المركز.">
           <div className="stack-list">
-            {centerBundle.logs.map((log) => {
+            {filteredCenterLogs.map((log) => {
               const path = resolveNotificationPath({
                 role: user?.role,
                 workspace: user?.workspace,

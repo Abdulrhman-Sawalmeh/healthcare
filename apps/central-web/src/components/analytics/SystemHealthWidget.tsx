@@ -1,5 +1,5 @@
 import { CentralAnalyticsDashboardData } from "../../types";
-import { formatDateTime } from "../../lib/arabic";
+import { cleanDemoText, formatCount, formatDateTime } from "../../lib/arabic";
 import { StatusBadge } from "../StatusBadge";
 import { AnalyticsEmptyState } from "./AnalyticsStates";
 
@@ -23,19 +23,19 @@ export function SystemHealthWidget({ health }: SystemHealthWidgetProps) {
             <dl>
               <div>
                 <dt>مزامنة معلقة</dt>
-                <dd>{center.pendingSyncCount}</dd>
+                <dd>{formatCount(center.pendingSyncCount)}</dd>
               </div>
               <div>
                 <dt>فشل مزامنة</dt>
-                <dd>{center.failedSyncCount}</dd>
+                <dd>{formatCount(center.failedSyncCount)}</dd>
               </div>
               <div>
                 <dt>حمل الطابور</dt>
-                <dd>{center.queueLoad ?? "-"}</dd>
+                <dd>{center.queueLoad ?? "لا يوجد"}</dd>
               </div>
               <div>
                 <dt>آخر مزامنة</dt>
-                <dd>{center.lastSyncAt ? formatDateTime(center.lastSyncAt) : "-"}</dd>
+                <dd>{center.lastSyncAt ? formatDateTime(center.lastSyncAt) : "غير متوفر"}</dd>
               </div>
             </dl>
           </article>
@@ -55,7 +55,7 @@ export function SystemHealthWidget({ health }: SystemHealthWidgetProps) {
                     <strong>{error.centerName}</strong>
                     <StatusBadge status={error.severity} />
                   </div>
-                  <p>{error.message}</p>
+                  <p>{cleanDemoText(error.message)}</p>
                   <span className="muted">{formatDateTime(error.createdAt)}</span>
                 </article>
               ))}
@@ -75,7 +75,7 @@ export function SystemHealthWidget({ health }: SystemHealthWidgetProps) {
                     <strong>{alert.title}</strong>
                     <StatusBadge status={alert.isResolved ? "completed" : alert.severity} />
                   </div>
-                  <p>{alert.message}</p>
+                  <p>{cleanDemoText(alert.message)}</p>
                   <span className="muted">
                     {alert.centerName} - {formatDateTime(alert.createdAt)}
                   </span>

@@ -657,9 +657,17 @@ export interface CentralNotificationsBundle {
   outgoing: Array<{
     id: number;
     notificationType: string;
+    payload?: Record<string, unknown>;
     status: string;
     createdAt: string;
     sentAt?: string | null;
+    acknowledgedAt?: string | null;
+    completedAt?: string | null;
+    responsePayload?: Record<string, unknown> | null;
+    responseError?: string | null;
+    retryCount?: number;
+    maxRetries?: number;
+    nextRetryAt?: string | null;
     targetCenter: {
       centerName: string;
       centerCode: string;
@@ -668,8 +676,11 @@ export interface CentralNotificationsBundle {
   incoming: Array<{
     id: number;
     notificationType: string;
+    payload?: Record<string, unknown>;
     status: string;
     receivedAt: string;
+    processedAt?: string | null;
+    responseSent?: boolean;
     fromCenter: {
       centerName: string;
       centerCode: string;
@@ -680,6 +691,8 @@ export interface CentralNotificationsBundle {
     id: number;
     direction: string;
     notificationType: string;
+    requestPayload?: Record<string, unknown> | null;
+    responsePayload?: Record<string, unknown> | null;
     status: string;
     createdAt: string;
     center?: {

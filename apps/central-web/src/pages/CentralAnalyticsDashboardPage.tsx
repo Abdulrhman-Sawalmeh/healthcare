@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -32,7 +32,7 @@ import { SystemHealthWidget } from "../components/analytics/SystemHealthWidget";
 import { TopListTable } from "../components/analytics/TopListTable";
 import { StatusBadge } from "../components/StatusBadge";
 import { PageHeader } from "../components/UiStates";
-import { formatDate, formatDateTime, toArabicLabel } from "../lib/arabic";
+import { cleanDemoText, formatDate, formatDateTime, toArabicLabel } from "../lib/arabic";
 import { AnalyticsCountItem, CentralAnalyticsDashboardData } from "../types";
 
 const chartColors = ["#2563eb", "#0f766e", "#f59e0b", "#dc2626", "#7c3aed", "#0891b2", "#64748b"];
@@ -112,7 +112,7 @@ function buildAnalyticsPath(filters: AnalyticsFilterState) {
 
 function formatValue(value: number | null | undefined, suffix = "") {
   if (value === null || value === undefined) {
-    return "-";
+    return "لا يوجد";
   }
 
   return `${new Intl.NumberFormat("ar-EG").format(value)}${suffix}`;
@@ -197,10 +197,6 @@ function VisitsLineChart({ data }: { data: CentralAnalyticsDashboardData["visits
   );
 }
 
-function unavailable(message: string) {
-  return <AnalyticsEmptyState title="المؤشر غير متاح" message={message} />;
-}
-
 function InlineMetric({
   label,
   value,
@@ -215,6 +211,28 @@ function InlineMetric({
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function AnalyticsSection({
+  title,
+  summary,
+  defaultOpen = false,
+  children
+}: {
+  title: string;
+  summary: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <details className="analytics-collapsible" open={defaultOpen}>
+      <summary>
+        <span>{title}</span>
+        <small className="muted">{summary}</small>
+      </summary>
+      <div className="analytics-collapsible-body">{children}</div>
+    </details>
   );
 }
 
@@ -257,10 +275,6 @@ export function CentralAnalyticsDashboardPage() {
     setAppliedFilters(filters);
   }
 
-  function updateFilters(nextFilters: AnalyticsFilterState) {
-    setFilters(nextFilters);
-  }
-
   if (loading && !data) {
     return <AnalyticsLoadingState />;
   }
@@ -270,7 +284,7 @@ export function CentralAnalyticsDashboardPage() {
   }
 
   if (!data) {
-    return <AnalyticsEmptyState message="لا توجد بيانات تحليلات متاحة حاليًا." />;
+    return <AnalyticsEmptyState message="لا توجد بيانات تحليلات متاحة حاليا." />;
   }
 
   const appointmentStatusChart = countItemsToChart(data.appointments.statusBreakdown);
@@ -280,17 +294,28 @@ export function CentralAnalyticsDashboardPage() {
     { key: "COMPLETED", count: data.lab.completed },
     { key: "CANCELLED", count: data.lab.cancelled }
   ]);
+  const unavailableIndicators = [
+    data.visits.localVsReferred.message,
+    data.visits.averageVisitDuration.message,
+    data.visits.cancelledVisits.message,
+    data.referrals.byDoctor.message,
+    data.queue.longestWaitingPatient.message,
+    data.queue.bottleneckStage.message,
+    data.queue.patientsByStage.message,
+    data.queue.averageTimeByStage.message,
+    ...data.limitations
+  ].map((item) => cleanDemoText(item));
 
   return (
     <div className="page-stack analytics-page">
       <PageHeader
         eyebrow="النظام المركزي"
         title="لوحة التحليلات"
-        subtitle="مراقبة تشغيلية مجمعة للشبكة الصحية مع مقارنة بين المركز الصحي المتوسط والمركز الصحي الصغير."
+        subtitle="تحليلات تشغيلية مجمعة للشبكة الصحية مع أقسام قابلة للفتح حسب الحاجة."
         meta={`آخر تحديث: ${formatDateTime(data.generatedAt)}`}
       />
 
-      <AnalyticsFilters value={filters} metadata={data.filters} onChange={updateFilters} onApply={applyFilters} />
+      <AnalyticsFilters value={filters} metadata={data.filters} onChange={setFilters} onApply={applyFilters} />
 
       {error ? <div className="error-banner">{error}</div> : null}
 
@@ -307,12 +332,8 @@ export function CentralAnalyticsDashboardPage() {
       </div>
 
       <section className="analytics-kpi-grid" aria-label="المؤشرات العامة">
-        <AnalyticsCard
-          label="إجمالي المرضى"
-          value={formatValue(data.overview.totalPatients)}
-          helper={`${formatValue(data.overview.totalLocalPatientRecords)} سجل محلي`}
-          tone="success"
-        />
+        <AnalyticsCard label="عدد المرضى المركزيين" value={formatValue(data.overview.totalPatients)} tone="success" />
+        <AnalyticsCard label="عدد السجلات المحلية المتزامنة" value={formatValue(data.overview.totalLocalPatientRecords)} />
         <AnalyticsCard label="إجمالي الزيارات" value={formatValue(data.overview.totalVisits)} />
         <AnalyticsCard label="زيارات اليوم" value={formatValue(data.overview.todaysVisits)} />
         <AnalyticsCard label="المراكز النشطة" value={formatValue(data.overview.activeCenters)} tone="success" />
@@ -322,154 +343,126 @@ export function CentralAnalyticsDashboardPage() {
         <AnalyticsCard
           label="متوسط الانتظار"
           value={formatValue(data.overview.averageWaitingTime, " د")}
-          helper="من snapshots الحمل المتاحة"
+          helper="من لقطات الحالة المتاحة"
         />
         <AnalyticsCard label="مرضى في الطابور" value={formatValue(data.overview.patientsCurrentlyInQueue)} />
-        <AnalyticsCard label="مواعيد اليوم" value={formatValue(data.overview.appointmentsToday)} />
       </section>
 
-      <AnalyticsChartCard
-        title="مقارنة المراكز"
-        subtitle="مقارنة تشغيلية بين المركز المتوسط والصغير حسب الزيارات، المرضى، الإحالات، والحمل الحالي."
-      >
-        <CenterComparisonCard centers={data.centerComparison} />
+      <AnalyticsChartCard title="صحة النظام والمزامنة" subtitle="قسم بارز للعرض التجريبي: حالة الاتصال، فشل المزامنة، والتنبيهات المهمة.">
+        <SystemHealthWidget health={data.systemHealth} />
       </AnalyticsChartCard>
 
-      <div className="analytics-section-grid">
-        <AnalyticsChartCard title="الزيارات خلال آخر 7 أيام" subtitle="اتجاه الزيارات المسجلة محليًا.">
-          <div className="analytics-chart-height">
-            <VisitsLineChart data={data.visits.perDayLast7} />
-          </div>
-        </AnalyticsChartCard>
+      <AnalyticsSection
+        title="نظرة عامة"
+        summary={`معدل قبول الإحالات: ${formatRate(data.referrals.acceptanceRate)}`}
+        defaultOpen
+      >
+        <div className="analytics-mini-grid">
+          <InlineMetric label="إجمالي الإحالات" value={formatValue(data.referrals.total)} />
+          <InlineMetric label="مكتملة" value={formatValue(data.referrals.completed)} tone="success" />
+          <InlineMetric label="مرفوضة" value={formatValue(data.referrals.rejected)} tone="warning" />
+        </div>
+      </AnalyticsSection>
 
-        <AnalyticsChartCard title="الزيارات الشهرية" subtitle="آخر ستة أشهر ضمن البيانات المتاحة.">
-          <div className="analytics-chart-height">
-            <SimpleBarChart
-              items={data.visits.perMonth.map((item) => ({ name: item.month, count: item.count }))}
-              color="#0f766e"
-            />
-          </div>
-        </AnalyticsChartCard>
+      <AnalyticsSection title="المراكز" summary="مقارنة تشغيلية حسب الزيارات، المرضى، الإحالات، والحمل الحالي.">
+        <CenterComparisonCard centers={data.centerComparison} />
+      </AnalyticsSection>
 
-        <AnalyticsChartCard title="اكتمال الزيارات" subtitle="يعتمد على حالة المزامنة لأنها حالة الاكتمال المتاحة مركزيًا.">
-          <div className="analytics-chart-height">
-            <SimplePieChart items={data.visits.completedVsIncomplete} />
-          </div>
-        </AnalyticsChartCard>
+      <AnalyticsSection title="الزيارات" summary="اتجاهات الزيارات واكتمالها وأسبابها الأكثر تكرارا.">
+        <div className="analytics-section-grid">
+          <AnalyticsChartCard title="الزيارات خلال آخر 7 أيام">
+            <div className="analytics-chart-height">
+              <VisitsLineChart data={data.visits.perDayLast7} />
+            </div>
+          </AnalyticsChartCard>
+          <AnalyticsChartCard title="الزيارات الشهرية">
+            <div className="analytics-chart-height">
+              <SimpleBarChart
+                items={data.visits.perMonth.map((item) => ({ name: item.month, count: item.count }))}
+                color="#0f766e"
+              />
+            </div>
+          </AnalyticsChartCard>
+          <AnalyticsChartCard title="اكتمال الزيارات">
+            <div className="analytics-chart-height">
+              <SimplePieChart items={data.visits.completedVsIncomplete} />
+            </div>
+          </AnalyticsChartCard>
+          <AnalyticsChartCard title="أسباب الزيارات الأكثر تكرارا">
+            <TopListTable items={data.visits.mostCommonReasons} label="السبب" />
+          </AnalyticsChartCard>
+        </div>
+      </AnalyticsSection>
 
-        <AnalyticsChartCard title="أسباب الزيارات الأكثر تكرارًا" subtitle="من حقل التشخيص في الزيارات المحلية.">
-          <TopListTable items={data.visits.mostCommonReasons} label="السبب" />
-        </AnalyticsChartCard>
-      </div>
+      <AnalyticsSection title="الإحالات" summary="الحالات، الأولويات، وأسباب الإحالة دون إظهار ملاحظات طبية حساسة.">
+        <div className="analytics-section-grid">
+          <AnalyticsChartCard title="الإحالات حسب الحالة">
+            <div className="analytics-chart-height">
+              <SimplePieChart items={data.referrals.statusBreakdown} />
+            </div>
+          </AnalyticsChartCard>
+          <AnalyticsChartCard title="أولوية الإحالات" subtitle="عادي / عاجل / طارئ">
+            <div className="analytics-chart-height">
+              <SimpleBarChart items={countItemsToChart(data.referrals.priorityBreakdown)} color="#f59e0b" />
+            </div>
+          </AnalyticsChartCard>
+          <AnalyticsChartCard title="أكثر أسباب الإحالة">
+            <TopListTable items={data.referrals.mostCommonReasons} label="سبب الإحالة" />
+          </AnalyticsChartCard>
+          <AnalyticsChartCard title="المسار من الصغير إلى المتوسط">
+            <div className="analytics-mini-summary">
+              <strong>{formatValue(data.referrals.smallToMedium)}</strong>
+              <span>إحالة من المركز الصغير إلى المركز المتوسط</span>
+            </div>
+          </AnalyticsChartCard>
+        </div>
+      </AnalyticsSection>
 
-      <div className="analytics-section-grid">
-        <AnalyticsChartCard title="تحليلات الإحالات" subtitle={`معدل قبول الإحالات: ${formatRate(data.referrals.acceptanceRate)}`}>
-          <div className="analytics-chart-height">
-            <SimplePieChart items={data.referrals.statusBreakdown} />
-          </div>
-        </AnalyticsChartCard>
+      <AnalyticsSection title="الطابور والانتظار" summary="حالة الطابور الحالية ومتوسطات الانتظار من لقطات الحالة.">
+        <div className="analytics-mini-grid">
+          <InlineMetric label="ينتظرون الآن" value={formatValue(data.queue.currentWaiting)} tone="warning" />
+          <InlineMetric label="متوسط الانتظار" value={formatValue(data.queue.averageWaitingTime, " د")} />
+          <InlineMetric label="زيارات مكتملة اليوم" value={formatValue(data.queue.completedVisitsToday)} tone="success" />
+        </div>
+      </AnalyticsSection>
 
-        <AnalyticsChartCard title="أولوية الإحالات" subtitle="توزيع normal / urgent / emergency حسب البيانات المتاحة.">
-          <div className="analytics-chart-height">
-            <SimpleBarChart items={countItemsToChart(data.referrals.priorityBreakdown)} color="#f59e0b" />
-          </div>
-        </AnalyticsChartCard>
+      <AnalyticsSection title="المختبر" summary="حالات طلبات المختبر والفحوصات الأكثر طلبا.">
+        <div className="analytics-section-grid">
+          <AnalyticsChartCard title="طلبات المختبر حسب الحالة" subtitle={`متوسط الإكمال: ${formatValue(data.lab.averageCompletionMinutes, " د")}`}>
+            <div className="analytics-chart-height">
+              <SimpleBarChart items={labStatusChart} color="#0891b2" />
+            </div>
+          </AnalyticsChartCard>
+          <AnalyticsChartCard title="أكثر الفحوصات طلبا">
+            <TopListTable items={data.lab.mostRequestedTests} label="الفحص" />
+          </AnalyticsChartCard>
+          <AnalyticsChartCard title="حمل المختبر اليومي">
+            <div className="analytics-chart-height">
+              <VisitsLineChart data={data.lab.workloadByDay} />
+            </div>
+          </AnalyticsChartCard>
+        </div>
+      </AnalyticsSection>
 
-        <AnalyticsChartCard title="أكثر أسباب الإحالة" subtitle="لا يتم عرض ملاحظات طبية حساسة؛ فقط السبب المجمع.">
-          <TopListTable items={data.referrals.mostCommonReasons} label="سبب الإحالة" />
-        </AnalyticsChartCard>
+      <AnalyticsSection title="الصيدلية والوصفات" summary="إجمالي الوصفات، الصرف، والأدوية الأكثر وصفا.">
+        <div className="analytics-section-grid">
+          <AnalyticsChartCard title="ملخص الوصفات">
+            <div className="analytics-mini-grid">
+              <InlineMetric label="إجمالي الوصفات" value={formatValue(data.pharmacy.totalPrescriptions)} />
+              <InlineMetric label="بانتظار الصرف" value={formatValue(data.pharmacy.pendingPrescriptions)} tone="warning" />
+              <InlineMetric label="مصروفة" value={formatValue(data.pharmacy.dispensedPrescriptions)} tone="success" />
+            </div>
+          </AnalyticsChartCard>
+          <AnalyticsChartCard title="أكثر الأدوية وصفا">
+            <TopListTable items={data.pharmacy.mostPrescribedMedicines} label="الدواء" />
+          </AnalyticsChartCard>
+          <AnalyticsChartCard title="الوصفات حسب الطبيب">
+            <TopListTable items={data.pharmacy.prescriptionsByDoctor} label="الطبيب" valueLabel="وصفات" />
+          </AnalyticsChartCard>
+        </div>
+      </AnalyticsSection>
 
-        <AnalyticsChartCard title="المسار من الصغير إلى المتوسط" subtitle="عدد الإحالات من C001 إلى M002 عندما تتوفر الأكواد.">
-          <div className="analytics-mini-summary">
-            <strong>{formatValue(data.referrals.smallToMedium)}</strong>
-            <span>إحالة من المركز الصغير إلى المركز المتوسط</span>
-          </div>
-        </AnalyticsChartCard>
-      </div>
-
-      <div className="analytics-section-grid">
-        <AnalyticsChartCard title="حالات المواعيد" subtitle="يعتمد على نموذج المواعيد المركزي القديم المرتبط بالأقسام والأطباء.">
-          <div className="analytics-chart-height">
-            {appointmentStatusChart.length === 0 ? (
-              <AnalyticsEmptyState message="لا توجد مواعيد مطابقة للفلاتر الحالية." />
-            ) : (
-              <SimpleBarChart items={appointmentStatusChart} color="#7c3aed" />
-            )}
-          </div>
-        </AnalyticsChartCard>
-
-        <AnalyticsChartCard title="المواعيد حسب التاريخ" subtitle="عدد المواعيد المجدولة لكل يوم ضمن الفترة.">
-          <div className="analytics-chart-height">
-            <VisitsLineChart data={data.appointments.byDate} />
-          </div>
-        </AnalyticsChartCard>
-
-        <AnalyticsChartCard title="المواعيد حسب الطبيب" subtitle="قائمة مجمعة بدون بيانات مرضى.">
-          <TopListTable items={data.appointments.byDoctor} label="الطبيب" valueLabel="مواعيد" />
-        </AnalyticsChartCard>
-
-        <AnalyticsChartCard title="مؤشرات غير متاحة للزيارات" subtitle="لا يتم استنتاج بيانات غير موجودة.">
-          <div className="analytics-unavailable-list">
-            {unavailable(data.visits.localVsReferred.message)}
-            {unavailable(data.visits.averageVisitDuration.message)}
-            {unavailable(data.visits.cancelledVisits.message)}
-          </div>
-        </AnalyticsChartCard>
-      </div>
-
-      <div className="analytics-section-grid">
-        <AnalyticsChartCard title="الطابور والانتظار" subtitle="يعتمد على snapshots الحمل الحالية لكل مركز.">
-          <div className="analytics-mini-grid">
-            <InlineMetric label="ينتظرون الآن" value={formatValue(data.queue.currentWaiting)} tone="warning" />
-            <InlineMetric label="متوسط الانتظار" value={formatValue(data.queue.averageWaitingTime, " د")} />
-            <InlineMetric label="زيارات مكتملة اليوم" value={formatValue(data.queue.completedVisitsToday)} />
-          </div>
-        </AnalyticsChartCard>
-
-        <AnalyticsChartCard title="مراحل الطابور" subtitle="حالة نقص بيانات صريحة بدل أرقام افتراضية.">
-          <div className="analytics-unavailable-list">
-            {unavailable(data.queue.patientsByStage.message)}
-            {unavailable(data.queue.bottleneckStage.message)}
-            {unavailable(data.queue.averageTimeByStage.message)}
-          </div>
-        </AnalyticsChartCard>
-
-        <AnalyticsChartCard title="طلبات المختبر" subtitle={`متوسط إكمال المختبر: ${formatValue(data.lab.averageCompletionMinutes, " د")}`}>
-          <div className="analytics-chart-height">
-            <SimpleBarChart items={labStatusChart} color="#0891b2" />
-          </div>
-        </AnalyticsChartCard>
-
-        <AnalyticsChartCard title="أكثر الفحوصات طلبًا" subtitle="تجميع حسب اسم الفحص فقط.">
-          <TopListTable items={data.lab.mostRequestedTests} label="الفحص" />
-        </AnalyticsChartCard>
-      </div>
-
-      <div className="analytics-section-grid">
-        <AnalyticsChartCard title="حمل المختبر اليومي" subtitle="طلبات المختبر حسب تاريخ الطلب.">
-          <div className="analytics-chart-height">
-            <VisitsLineChart data={data.lab.workloadByDay} />
-          </div>
-        </AnalyticsChartCard>
-
-        <AnalyticsChartCard title="الصيدلية والوصفات" subtitle="إجمالي الوصفات وصرفها ضمن الفترة.">
-          <div className="analytics-mini-grid">
-            <InlineMetric label="إجمالي الوصفات" value={formatValue(data.pharmacy.totalPrescriptions)} />
-            <InlineMetric label="بانتظار الصرف" value={formatValue(data.pharmacy.pendingPrescriptions)} tone="warning" />
-            <InlineMetric label="مصروفة" value={formatValue(data.pharmacy.dispensedPrescriptions)} tone="success" />
-          </div>
-        </AnalyticsChartCard>
-
-        <AnalyticsChartCard title="أكثر الأدوية وصفًا" subtitle="لا يتضمن أي بيانات شخصية للمرضى.">
-          <TopListTable items={data.pharmacy.mostPrescribedMedicines} label="الدواء" />
-        </AnalyticsChartCard>
-
-        <AnalyticsChartCard title="الوصفات حسب الطبيب" subtitle="تجميع عبء الصيدلية حسب الطبيب عندما يكون مرتبطًا بالزيارة.">
-          <TopListTable items={data.pharmacy.prescriptionsByDoctor} label="الطبيب" valueLabel="وصفات" />
-        </AnalyticsChartCard>
-      </div>
-
-      <AnalyticsChartCard title="عبء الأطباء والطاقم" subtitle="زيارات وفحوصات ووصفات مجمعة بدون إظهار بيانات مرضى.">
+      <AnalyticsSection title="الأطباء" summary="عبء الأطباء والطاقم دون بيانات مرضى شخصية.">
         {data.staffWorkload.length === 0 ? (
           <AnalyticsEmptyState message="لا توجد بيانات عبء أطباء مطابقة للفلاتر الحالية." />
         ) : (
@@ -490,34 +483,52 @@ export function CentralAnalyticsDashboardPage() {
                 {data.staffWorkload.map((doctor) => (
                   <tr key={doctor.doctorId}>
                     <td>{doctor.doctorName}</td>
-                    <td>{doctor.visits}</td>
-                    <td>{doctor.completedVisits}</td>
-                    <td>{doctor.labRequests}</td>
-                    <td>{doctor.prescriptions}</td>
-                    <td>{doctor.appointments ?? "غير متاح"}</td>
-                    <td>{doctor.referrals ?? "غير متاح"}</td>
+                    <td>{formatValue(doctor.visits)}</td>
+                    <td>{formatValue(doctor.completedVisits)}</td>
+                    <td>{formatValue(doctor.labRequests)}</td>
+                    <td>{formatValue(doctor.prescriptions)}</td>
+                    <td>{formatValue(doctor.appointments)}</td>
+                    <td>{formatValue(doctor.referrals)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
-      </AnalyticsChartCard>
+      </AnalyticsSection>
 
-      <AnalyticsChartCard title="صحة النظام والمزامنة" subtitle="آخر حالة اتصال ومزامنة وتنبيهات على مستوى المراكز.">
-        <SystemHealthWidget health={data.systemHealth} />
-      </AnalyticsChartCard>
-
-      <AnalyticsChartCard title="حدود البيانات الحالية" subtitle="هذه المؤشرات موثقة حتى لا يتم تقديم أرقام غير حقيقية.">
+      <AnalyticsSection title="مؤشرات غير متاحة حاليا" summary="تم تجميعها هنا بدلا من تكرار صناديق كثيرة داخل الصفحة.">
         <div className="limitations-list">
-          {data.limitations.map((item) => (
+          {Array.from(new Set(unavailableIndicators)).map((item) => (
             <div className="info-row" key={item}>
               <span>{item}</span>
               <StatusBadge status="warning" />
             </div>
           ))}
         </div>
-      </AnalyticsChartCard>
+      </AnalyticsSection>
+
+      <AnalyticsSection title="المواعيد" summary="حالات المواعيد والتوزيع حسب التاريخ والطبيب.">
+        <div className="analytics-section-grid">
+          <AnalyticsChartCard title="حالات المواعيد">
+            <div className="analytics-chart-height">
+              {appointmentStatusChart.length === 0 ? (
+                <AnalyticsEmptyState message="لا توجد مواعيد مطابقة للفلاتر الحالية." />
+              ) : (
+                <SimpleBarChart items={appointmentStatusChart} color="#7c3aed" />
+              )}
+            </div>
+          </AnalyticsChartCard>
+          <AnalyticsChartCard title="المواعيد حسب التاريخ">
+            <div className="analytics-chart-height">
+              <VisitsLineChart data={data.appointments.byDate} />
+            </div>
+          </AnalyticsChartCard>
+          <AnalyticsChartCard title="المواعيد حسب الطبيب">
+            <TopListTable items={data.appointments.byDoctor} label="الطبيب" valueLabel="مواعيد" />
+          </AnalyticsChartCard>
+        </div>
+      </AnalyticsSection>
     </div>
   );
 }

@@ -3,6 +3,8 @@ import { Link, useParams } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
+import { StatusBadge } from "../components/StatusBadge";
+import { EmptyState, LoadingState, PageHeader } from "../components/UiStates";
 import { useAuth } from "../context/AuthContext";
 import { formatDate, formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
 import {
@@ -10,15 +12,13 @@ import {
   FollowUpReminderStatus,
   MedicationRefillRequestRecord,
   PatientTimelineBundle,
+  PatientTimelineEvent,
   PatientTimelineEventType
 } from "../types";
 
 type TimelineFilter = "all" | PatientTimelineEventType;
 
-const eventConfig: Record<
-  PatientTimelineEventType,
-  { label: string; marker: string; tone: string }
-> = {
+const eventConfig: Record<PatientTimelineEventType, { label: string; marker: string; tone: string }> = {
   refill_request: { label: "تجديد دواء", marker: "د", tone: "prescription" },
   follow_up: { label: "متابعة", marker: "م", tone: "appointment" },
   appointment: { label: "موعد", marker: "م", tone: "appointment" },
@@ -58,12 +58,16 @@ function nextPharmacyStatus(status: string) {
 
 function nextPharmacyLabel(status: string) {
   const next = nextPharmacyStatus(status);
-
   return next ? refillStatusLabel(next) : null;
 }
 
 function isReminderOverdue(reminder: FollowUpReminderRecord) {
   return reminder.status === "PENDING" && new Date(reminder.dueDate).getTime() < Date.now();
+}
+
+function referralIdFromEvent(event: PatientTimelineEvent) {
+  const match = event.id.match(/referral(?:-[a-z]+)*-(\d+)$/);
+  return match?.[1] ?? null;
 }
 
 export function PatientTimelinePage() {
@@ -82,14 +86,13 @@ export function PatientTimelinePage() {
     notes: ""
   });
 
-  const canReviewRefills = user?.role === "CENTER_MANAGER" || user?.role === "DOCTOR";
-  const canUpdatePharmacy = user?.role === "CENTER_MANAGER" || user?.role === "PHARMACIST";
-  const canManageReminders = user?.role === "CENTER_MANAGER" || user?.role === "DOCTOR";
+  const canReviewRefills = user?.role === "DOCTOR";
+  const canUpdatePharmacy = user?.role === "PHARMACIST";
+  const canManageReminders = user?.role === "DOCTOR";
+  const isManager = user?.role === "CENTER_MANAGER";
 
   const refreshTimeline = useCallback(async () => {
-    if (!patientId) {
-      return;
-    }
+    if (!patientId) return;
 
     const payload = await apiRequest<PatientTimelineBundle>(`/patients/${patientId}/timeline`);
     setBundle(payload);
@@ -109,22 +112,14 @@ export function PatientTimelinePage() {
       try {
         const payload = await apiRequest<PatientTimelineBundle>(`/patients/${patientId}/timeline`);
 
-        if (!isActive) {
-          return;
-        }
+        if (!isActive) return;
 
         setBundle(payload);
         setError("");
       } catch (cause) {
-        if (!isActive) {
-          return;
-        }
-
-        setError(cause instanceof Error ? cause.message : "تعذر تحميل السجل الزمني للمريض.");
+        if (isActive) setError(cause instanceof Error ? cause.message : "تعذر تحميل السجل الزمني للمريض.");
       } finally {
-        if (isActive) {
-          setLoading(false);
-        }
+        if (isActive) setLoading(false);
       }
     }
 
@@ -139,9 +134,7 @@ export function PatientTimelinePage() {
     const rejectionReason =
       decision === "REJECT" ? window.prompt("اكتب سبب رفض طلب تجديد الدواء")?.trim() : undefined;
 
-    if (decision === "REJECT" && !rejectionReason) {
-      return;
-    }
+    if (decision === "REJECT" && !rejectionReason) return;
 
     setBusyId(`refill-review-${request.id}-${decision}`);
     setActionError("");
@@ -155,7 +148,7 @@ export function PatientTimelinePage() {
           ...(rejectionReason ? { rejectionReason } : {})
         })
       });
-      setActionMessage(decision === "APPROVE" ? "تمت الموافقة على طلب التجديد." : "تم رفض طلب التجديد.");
+      setActionMessage(decision === "APPROVE" ? "تمت موافقة الطبيب على طلب التجديد." : "تم رفض طلب التجديد.");
       await refreshTimeline();
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : "تعذر تحديث طلب تجديد الدواء.");
@@ -166,10 +159,7 @@ export function PatientTimelinePage() {
 
   async function advanceRefillStatus(request: MedicationRefillRequestRecord) {
     const nextStatus = nextPharmacyStatus(request.status);
-
-    if (!nextStatus) {
-      return;
-    }
+    if (!nextStatus) return;
 
     setBusyId(`refill-status-${request.id}`);
     setActionError("");
@@ -178,9 +168,7 @@ export function PatientTimelinePage() {
     try {
       await apiRequest(`/center/refill-requests/${request.id}/status`, {
         method: "PATCH",
-        body: JSON.stringify({
-          status: nextStatus
-        })
+        body: JSON.stringify({ status: nextStatus })
       });
       setActionMessage("تم تحديث حالة التجديد في الصيدلية.");
       await refreshTimeline();
@@ -243,7 +231,7 @@ export function PatientTimelinePage() {
   }
 
   if (loading) {
-    return <div className="empty-state">جارٍ تحميل السجل الزمني للمريض...</div>;
+    return <LoadingState text="جاري تحميل السجل الزمني للمريض..." />;
   }
 
   if (error || !bundle) {
@@ -258,11 +246,7 @@ export function PatientTimelinePage() {
   }
 
   const filterOptions: Array<{ value: TimelineFilter; label: string; count: number }> = [
-    {
-      value: "all",
-      label: "الكل",
-      count: bundle.events.length
-    },
+    { value: "all", label: "الكل", count: bundle.events.length },
     ...Object.entries(eventConfig).map(([value, config]) => ({
       value: value as PatientTimelineEventType,
       label: config.label,
@@ -271,31 +255,33 @@ export function PatientTimelinePage() {
   ];
 
   const filteredEvents =
-    activeFilter === "all"
-      ? bundle.events
-      : bundle.events.filter((event) => event.type === activeFilter);
+    activeFilter === "all" ? bundle.events : bundle.events.filter((event) => event.type === activeFilter);
   const refillRequests = bundle.refillRequests ?? [];
   const followUpReminders = bundle.followUpReminders ?? [];
 
   return (
     <div className="page-stack">
-      <div className="profile-toolbar">
-        <Link className="action-hint" to={`/patients/${bundle.patient.id}`}>
-          العودة إلى ملف المريض
-        </Link>
-        <Link className="ghost-button" to="/patients">
-          قائمة المرضى
-        </Link>
-      </div>
+      <PageHeader
+        eyebrow="السجل الزمني الطبي"
+        title={bundle.patient.fullName}
+        subtitle={joinMeta([bundle.patient.unifiedId ?? "سجل محلي", bundle.patient.nationalId ?? "بدون هوية"])}
+        actions={
+          <div className="button-row">
+            <Link className="ghost-button" to={`/patients/${bundle.patient.id}`}>
+              ملف المريض
+            </Link>
+            <Link className="ghost-button" to="/patients">
+              قائمة المرضى
+            </Link>
+          </div>
+        }
+      />
 
-      <SectionCard
-        title="السجل الزمني الطبي"
-        subtitle={joinMeta([
-          bundle.patient.fullName,
-          bundle.patient.unifiedId ?? "سجل محلي",
-          bundle.patient.nationalId ?? "بدون هوية"
-        ])}
-      >
+      {isManager ? (
+        <div className="inline-note">مدير المركز يتابع الأحداث والحالات. إنشاء تذكيرات المتابعة والقرارات الطبية متاح للطبيب فقط.</div>
+      ) : null}
+
+      <SectionCard title="ملخص المريض" subtitle="معلومات سريعة قبل قراءة الأحداث التفصيلية.">
         <div className="detail-grid">
           <div className="detail-field">
             <span>الهاتف</span>
@@ -311,7 +297,7 @@ export function PatientTimelinePage() {
           </div>
           <div className="detail-field">
             <span>آخر حدث</span>
-            <strong>{bundle.patient.lastEventAt ? formatDateTime(bundle.patient.lastEventAt) : "-"}</strong>
+            <strong>{bundle.patient.lastEventAt ? formatDateTime(bundle.patient.lastEventAt) : "غير متاح"}</strong>
           </div>
         </div>
 
@@ -329,7 +315,7 @@ export function PatientTimelinePage() {
 
       <SectionCard
         title="تجديد الأدوية وتذكيرات المتابعة"
-        subtitle="إدارة طلبات التجديد الحالية وإنشاء تذكير متابعة يظهر للمريض في السجل الطبي."
+        subtitle="الطبيب يراجع التجديدات ويضع التذكيرات، والصيدلية تتابع التجهيز والتسليم."
       >
         <div className="split-grid">
           <div className="stack-list">
@@ -345,17 +331,10 @@ export function PatientTimelinePage() {
                 <article key={request.id} className="stack-item">
                   <div className="progress-row">
                     <strong>{request.medicineName}</strong>
-                    <span className={request.status === "REJECTED" ? "status-badge danger" : "status-badge success"}>
-                      {refillStatusLabel(request.status)}
-                    </span>
+                    <StatusBadge status={request.status} />
                   </div>
                   <p className="muted">
-                    {joinMeta([
-                      request.dosage,
-                      request.duration,
-                      request.doctorName ?? "بدون طبيب",
-                      formatDateTime(request.requestedAt)
-                    ])}
+                    {joinMeta([request.dosage, request.duration, request.doctorName ?? "بدون طبيب", formatDateTime(request.requestedAt)])}
                   </p>
                   {request.rejectionReason ? <p className="muted">سبب الرفض: {request.rejectionReason}</p> : null}
                   <div className="chip-row">
@@ -394,7 +373,7 @@ export function PatientTimelinePage() {
               );
             })}
 
-            {refillRequests.length === 0 ? <div className="empty-state compact">لا توجد طلبات تجديد دواء لهذا المريض.</div> : null}
+            {refillRequests.length === 0 ? <EmptyState title="لا توجد طلبات تجديد دواء" /> : null}
           </div>
 
           <div className="stack-list">
@@ -407,11 +386,7 @@ export function PatientTimelinePage() {
               <form className="form-grid" onSubmit={createReminder}>
                 <label className="field">
                   <span>تاريخ المتابعة</span>
-                  <input
-                    onChange={(event) => setReminderForm((current) => ({ ...current, dueDate: event.target.value }))}
-                    type="date"
-                    value={reminderForm.dueDate}
-                  />
+                  <input onChange={(event) => setReminderForm((current) => ({ ...current, dueDate: event.target.value }))} type="date" value={reminderForm.dueDate} />
                 </label>
                 <label className="field">
                   <span>سبب المتابعة</span>
@@ -433,7 +408,9 @@ export function PatientTimelinePage() {
                   إنشاء تذكير
                 </button>
               </form>
-            ) : null}
+            ) : (
+              <div className="inline-note">إنشاء تذكير متابعة طبي متاح للطبيب فقط.</div>
+            )}
 
             {followUpReminders.map((reminder) => (
               <article key={reminder.id} className="stack-item">
@@ -443,26 +420,14 @@ export function PatientTimelinePage() {
                     {isReminderOverdue(reminder) ? "متأخر" : followUpLabels[reminder.status]}
                   </span>
                 </div>
-                <p className="muted">
-                  {joinMeta([reminder.doctorName, formatDateTime(reminder.dueDate), reminder.visitSummary])}
-                </p>
+                <p className="muted">{joinMeta([reminder.doctorName, formatDateTime(reminder.dueDate), reminder.visitSummary])}</p>
                 {reminder.notes ? <p className="muted">{reminder.notes}</p> : null}
                 {canManageReminders && reminder.status === "PENDING" ? (
                   <div className="chip-row">
-                    <button
-                      className="primary-button"
-                      disabled={busyId === `reminder-${reminder.id}-DONE`}
-                      onClick={() => void updateReminderStatus(reminder, "DONE")}
-                      type="button"
-                    >
+                    <button className="primary-button" disabled={busyId === `reminder-${reminder.id}-DONE`} onClick={() => void updateReminderStatus(reminder, "DONE")} type="button">
                       تم
                     </button>
-                    <button
-                      className="ghost-button"
-                      disabled={busyId === `reminder-${reminder.id}-CANCELLED`}
-                      onClick={() => void updateReminderStatus(reminder, "CANCELLED")}
-                      type="button"
-                    >
+                    <button className="ghost-button" disabled={busyId === `reminder-${reminder.id}-CANCELLED`} onClick={() => void updateReminderStatus(reminder, "CANCELLED")} type="button">
                       إلغاء
                     </button>
                   </div>
@@ -470,12 +435,12 @@ export function PatientTimelinePage() {
               </article>
             ))}
 
-            {followUpReminders.length === 0 ? <div className="empty-state compact">لا توجد تذكيرات متابعة لهذا المريض.</div> : null}
+            {followUpReminders.length === 0 ? <EmptyState title="لا توجد تذكيرات متابعة" /> : null}
           </div>
         </div>
       </SectionCard>
 
-      <SectionCard title="الأحداث الطبية" subtitle="مرتبة من الأحدث إلى الأقدم مع إمكانية الفلترة حسب نوع الحدث.">
+      <SectionCard title="الأحداث الطبية" subtitle="مرتبة من الأحدث إلى الأقدم مع فلاتر حسب نوع الحدث.">
         <div className="timeline-filters">
           {filterOptions.map((option) => (
             <button
@@ -491,15 +456,14 @@ export function PatientTimelinePage() {
         </div>
 
         <p className="muted">
-          {activeFilter === "all"
-            ? `إجمالي الأحداث الظاهرة: ${filteredEvents.length}`
-            : `الأحداث الظاهرة بعد الفلترة: ${filteredEvents.length}`}
+          {activeFilter === "all" ? `إجمالي الأحداث الظاهرة: ${filteredEvents.length}` : `الأحداث الظاهرة بعد الفلترة: ${filteredEvents.length}`}
         </p>
 
         {filteredEvents.length > 0 ? (
           <div className="timeline-shell">
             {filteredEvents.map((event) => {
               const config = eventConfig[event.type];
+              const referralId = referralIdFromEvent(event);
 
               return (
                 <article key={event.id} className="timeline-item">
@@ -516,19 +480,23 @@ export function PatientTimelinePage() {
                     <div className="timeline-meta">
                       <span>سجلها: {event.createdBy}</span>
                       {event.status ? <span>{toArabicLabel(event.status)}</span> : null}
-                      <span>{event.sourceTable}</span>
+                      <span>{toArabicLabel(event.sourceTable)}</span>
                     </div>
+                    {referralId ? (
+                      <Link className="action-hint" to={`/referrals?referralId=${referralId}`}>
+                        فتح تفاصيل الإحالة
+                      </Link>
+                    ) : null}
                   </div>
                 </article>
               );
             })}
           </div>
         ) : (
-          <div className="empty-state compact">
-            {bundle.events.length === 0
-              ? "لا توجد أحداث طبية لعرضها في السجل الزمني حتى الآن."
-              : "لا توجد أحداث تطابق نوع الفلتر المختار."}
-          </div>
+          <EmptyState
+            title={bundle.events.length === 0 ? "لا توجد أحداث طبية" : "لا توجد أحداث مطابقة"}
+            description={bundle.events.length === 0 ? "لم يسجل أي حدث لهذا المريض حتى الآن." : "غيّر نوع الفلتر لعرض أحداث أخرى."}
+          />
         )}
       </SectionCard>
     </div>

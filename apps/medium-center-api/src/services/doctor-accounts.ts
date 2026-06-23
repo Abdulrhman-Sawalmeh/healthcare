@@ -2,7 +2,6 @@ import { CenterUserRole, Gender, Prisma } from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
-import { buildCenterEmailAddress, buildPersonUsername } from "../utils/account-identifiers";
 
 interface BaseCenterDoctorInput {
   centerId: number;
@@ -73,6 +72,65 @@ function mapUniqueConstraintError(error: Prisma.PrismaClientKnownRequestError) {
   }
 
   return "تعذر حفظ بيانات الطبيب بسبب تعارض في البيانات الفريدة.";
+}
+
+function normalizeLoginIdentifier(input: { username?: string; nationalId: string }) {
+  const identifier = (input.username?.trim() || input.nationalId.trim()).replace(/\s+/g, "");
+
+  if (!identifier) {
+    throw new AppError("رقم الهوية / اسم الدخول مطلوب للطبيب.", 400);
+  }
+
+  if (!/^[\p{L}\p{N}._@-]+$/u.test(identifier)) {
+    throw new AppError("رقم الهوية / اسم الدخول يجب أن يحتوي على حروف أو أرقام أو . _ - @ فقط.", 400);
+  }
+
+  return identifier;
+}
+
+async function assertValidSpecialization(
+  tx: Prisma.TransactionClient,
+  centerId: number,
+  specialization: string
+) {
+  const trimmed = specialization.trim();
+
+  if (!trimmed || trimmed === "بدون تخصص" || trimmed.toLowerCase() === "no specialty") {
+    throw new AppError("اختر تخصصا طبيا من القائمة المرجعية.", 400);
+  }
+
+  const [center, masterSpecialty] = await Promise.all([
+    tx.centralCenter.findUnique({
+      where: { id: centerId },
+      select: {
+        centerName: true,
+        specialties: true
+      }
+    }),
+    tx.masterSpecialty.findFirst({
+      where: {
+        specialtyName: {
+          equals: trimmed,
+          mode: "insensitive"
+        }
+      },
+      select: {
+        specialtyName: true
+      }
+    })
+  ]);
+
+  if (!center) {
+    throw new AppError("Unable to find the requested center.", 404);
+  }
+
+  const centerSpecialty = center.specialties.find((item) => item.toLowerCase() === trimmed.toLowerCase());
+
+  if (!centerSpecialty && !masterSpecialty) {
+    throw new AppError("التخصص يجب أن يكون من القائمة المرجعية المتاحة للمركز.", 400);
+  }
+
+  return centerSpecialty ?? masterSpecialty?.specialtyName ?? trimmed;
 }
 
 function mapDoctorRecord(doctor: DoctorWithRelations) {
@@ -261,28 +319,10 @@ export async function createCenterDoctor(input: CreateCenterDoctorInput) {
   try {
     return await prisma.$transaction(async (tx) => {
       const passwordHash = input.password;
-      const center = await tx.centralCenter.findUnique({
-        where: { id: input.centerId },
-        select: {
-          centerName: true
-        }
-      });
+      const username = normalizeLoginIdentifier(input);
+      const specialization = await assertValidSpecialization(tx, input.centerId, input.specialization);
 
-      if (!center) {
-        throw new AppError("Unable to find the requested center.", 404);
-      }
-
-      const doctorSerial =
-        (await tx.centerUserAccount.count({
-          where: {
-            centerId: input.centerId,
-            role: CenterUserRole.DOCTOR
-          }
-        })) + 1;
-      const username = buildPersonUsername(input.fullName, doctorSerial);
-      const email = buildCenterEmailAddress(username, center.centerName);
-
-      await syncCenterSpecialties(tx, input.centerId, input.specialization);
+      await syncCenterSpecialties(tx, input.centerId, specialization);
 
       const doctor = await tx.centerUserAccount.create({
         data: {
@@ -292,7 +332,7 @@ export async function createCenterDoctor(input: CreateCenterDoctorInput) {
           fullName: input.fullName,
           role: CenterUserRole.DOCTOR,
           phone: input.phone,
-          email,
+          email: input.email,
           isActive: input.isActive,
           createdById: input.createdById,
           doctorProfile: {
@@ -300,7 +340,7 @@ export async function createCenterDoctor(input: CreateCenterDoctorInput) {
               centerId: input.centerId,
               nationalId: input.nationalId,
               gender: input.gender,
-              specialization: input.specialization,
+              specialization,
               yearsExperience: input.yearsExperience,
               licenseNumber: input.licenseNumber,
               qualification: input.qualification,
@@ -367,20 +407,12 @@ export async function updateCenterDoctor(input: UpdateCenterDoctorInput) {
         throw new AppError("تعذر العثور على الطبيب المطلوب.", 404);
       }
 
-      await syncCenterSpecialties(tx, input.centerId, input.specialization);
+      const username = normalizeLoginIdentifier(input);
+      const specialization = await assertValidSpecialization(tx, input.centerId, input.specialization);
+
+      await syncCenterSpecialties(tx, input.centerId, specialization);
 
       const passwordHash = input.password || undefined;
-      const center = await tx.centralCenter.findUnique({
-        where: { id: input.centerId },
-        select: {
-          centerName: true
-        }
-      });
-      const existingSerial = existingDoctor.username.includes("&")
-        ? existingDoctor.username.split("&").pop()
-        : String(existingDoctor.id);
-      const username = buildPersonUsername(input.fullName, existingSerial ?? existingDoctor.id);
-      const email = center ? buildCenterEmailAddress(username, center.centerName) : input.email;
 
       const doctor = await tx.centerUserAccount.update({
         where: {
@@ -391,7 +423,7 @@ export async function updateCenterDoctor(input: UpdateCenterDoctorInput) {
           passwordHash,
           fullName: input.fullName,
           phone: input.phone,
-          email,
+          email: input.email,
           isActive: input.isActive,
           doctorProfile: {
             upsert: {
@@ -399,7 +431,7 @@ export async function updateCenterDoctor(input: UpdateCenterDoctorInput) {
                 centerId: input.centerId,
                 nationalId: input.nationalId,
                 gender: input.gender,
-                specialization: input.specialization,
+                specialization,
                 yearsExperience: input.yearsExperience,
                 licenseNumber: input.licenseNumber,
                 qualification: input.qualification,
@@ -414,7 +446,7 @@ export async function updateCenterDoctor(input: UpdateCenterDoctorInput) {
               update: {
                 nationalId: input.nationalId,
                 gender: input.gender,
-                specialization: input.specialization,
+                specialization,
                 yearsExperience: input.yearsExperience,
                 licenseNumber: input.licenseNumber,
                 qualification: input.qualification,
@@ -484,16 +516,17 @@ export async function deleteCenterDoctor(centerId: number, doctorId: number) {
       })
     ]);
 
-    if (visitCount > 0 || labRequestCount > 0) {
+    if (false && (visitCount > 0 || labRequestCount > 0)) {
       throw new AppError(
         "لا يمكن حذف الطبيب لارتباطه بزيارات أو طلبات مخبرية مسجلة. يمكنك تعطيل الحساب بدلًا من حذفه.",
         409
       );
     }
 
-    await tx.centerUserAccount.delete({
-      where: {
-        id: doctor.id
+    await tx.centerUserAccount.update({
+      where: { id: doctor.id },
+      data: {
+        isActive: false
       }
     });
 

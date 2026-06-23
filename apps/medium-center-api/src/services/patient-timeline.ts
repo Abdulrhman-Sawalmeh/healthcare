@@ -43,11 +43,15 @@ const visitTypeLabels: Record<string, string> = {
 };
 
 const referralStatusLabels: Record<string, string> = {
-  PENDING: "قيد المراجعة",
-  ACCEPTED: "مقبولة",
-  REJECTED: "مرفوضة",
+  AUTO_SELECTED: "اختيار آلي",
+  PENDING_RECEIVING_MANAGER: "بانتظار قرار المدير",
+  RECEIVING_MANAGER_ACCEPTED: "قبله المدير",
+  RECEIVING_MANAGER_REJECTED: "رفضه المدير",
+  ASSIGNED_TO_DOCTOR: "مسند إلى طبيب",
+  VISIT_CREATED: "تم فتح زيارة",
   COMPLETED: "مكتملة",
-  CANCELLED: "ملغاة"
+  NO_CANDIDATE_REJECTED: "لا توجد جهة مناسبة",
+  RETURNED_WITH_REASON: "معادة بسبب"
 };
 
 const labStatusLabels: Record<string, string> = {
@@ -135,10 +139,30 @@ export async function getPatientTimelineForCenter(centerId: number, patientId: n
         }
       },
       labRequests: {
-        include: {
-          center: true,
-          doctor: true,
-          test: true
+        select: {
+          id: true,
+          requestDate: true,
+          status: true,
+          resultValue: true,
+          resultDate: true,
+          center: {
+            select: {
+              id: true,
+              centerName: true
+            }
+          },
+          doctor: {
+            select: {
+              id: true,
+              fullName: true
+            }
+          },
+          test: {
+            select: {
+              testName: true,
+              category: true
+            }
+          }
         },
         orderBy: {
           requestDate: "desc"
@@ -281,7 +305,9 @@ export async function getPatientTimelineForCenter(centerId: number, patientId: n
           ]) || "تم إنشاء إحالة جديدة للمريض.",
         date: requestedAt,
         createdBy: referral.fromCenter.centerName,
-        sourceTable: "CentralReferral"
+        sourceTable: "CentralReferral",
+        status: referral.status,
+        source: "CentralReferral"
       },
       ...(referral.notesFromSender
         ? [

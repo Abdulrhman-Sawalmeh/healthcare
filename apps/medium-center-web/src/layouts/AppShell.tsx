@@ -318,9 +318,15 @@ export function AppShell() {
     const intervalId = window.setInterval(() => {
       void loadAlerts();
     }, 30000);
+    const handleNotificationsUpdated = () => {
+      void loadAlerts();
+    };
+
+    window.addEventListener("healthcare-notifications-updated", handleNotificationsUpdated);
 
     return () => {
       isActive = false;
+      window.removeEventListener("healthcare-notifications-updated", handleNotificationsUpdated);
       window.clearInterval(intervalId);
     };
   }, [user]);
@@ -369,13 +375,34 @@ export function AppShell() {
     );
   }
 
-  const visibleNavigation = navigationItems.filter(
-    (item) => item.roles.includes(user.role) && systemConfig.allowedRoutes.includes(item.to)
-  );
+  const labNavigationOrder = ["/", "/lab", "/visit-workflow", "/notifications"];
+  const visibleNavigation = navigationItems
+    .filter((item) => item.roles.includes(user.role) && systemConfig.allowedRoutes.includes(item.to))
+    .filter((item) => user.role !== "LAB_TECH" || labNavigationOrder.includes(item.to))
+    .sort((first, second) =>
+      user.role === "LAB_TECH"
+        ? labNavigationOrder.indexOf(first.to) - labNavigationOrder.indexOf(second.to)
+        : 0
+    );
+  const displayNavigation = visibleNavigation.map((item) => {
+    if (item.to === "/" && user.role === "LAB_TECH") {
+      return { ...item, label: "لوحة المختبر" };
+    }
+
+    if (item.to === "/visit-workflow" && user.role === "LAB_TECH") {
+      return { ...item, label: "ملفات الزيارات" };
+    }
+
+    return (
+    item.to === "/visit-workflow" && user.role === "RECEPTIONIST"
+      ? { ...item, label: "تسجيل الوصول وملفات الزيارة" }
+      : item
+    );
+  });
   const currentNavigationItem =
-    visibleNavigation
+    displayNavigation
       .filter((item) => item.to === "/" ? location.pathname === "/" : location.pathname.startsWith(item.to))
-      .sort((a, b) => b.to.length - a.to.length)[0] ?? visibleNavigation[0];
+      .sort((a, b) => b.to.length - a.to.length)[0] ?? displayNavigation[0];
   const isNestedPage = Boolean(currentNavigationItem && location.pathname !== currentNavigationItem.to);
   const isPatientPortal = user.role === "PATIENT" || user.workspace === "legacy";
 
@@ -389,6 +416,7 @@ export function AppShell() {
           current.map((item) => (item.id === alert.id ? { ...item, isRead: true } : item))
         );
         setNotificationBadgeCount((current) => Math.max(0, current - 1));
+        window.dispatchEvent(new Event("healthcare-notifications-updated"));
       } catch {
         // Navigation should still work even if marking the notification as read fails.
       }
@@ -423,7 +451,7 @@ export function AppShell() {
         </div>
 
         <nav className="sidebar-nav">
-          {visibleNavigation.map((item) => (
+          {displayNavigation.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

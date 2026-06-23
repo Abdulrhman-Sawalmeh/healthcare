@@ -266,8 +266,8 @@ export function VisitsPage() {
   const [overrideReason, setOverrideReason] = useState("");
   const [pendingVisitPayload, setPendingVisitPayload] = useState<Record<string, unknown> | null>(null);
 
-  const canCreateVisit = user?.role === "CENTER_MANAGER" || user?.role === "DOCTOR" || user?.role === "NURSE";
-  const canAuthorReports = user?.role === "CENTER_MANAGER" || user?.role === "DOCTOR";
+  const canCreateVisit = user?.role === "DOCTOR";
+  const canAuthorReports = user?.role === "DOCTOR";
 
   async function loadPage() {
     const [visitsPayload, patientsPayload, workspacePayload] = await Promise.all([
@@ -1052,7 +1052,7 @@ export function VisitsPage() {
                   </div>
                 </form>
               ) : (
-                <div className="empty-state compact">يمكن للطبيب أو مدير المركز فقط إنشاء تقارير النتائج.</div>
+                <div className="empty-state compact">إنشاء تقارير النتائج متاح للطبيب فقط. يستطيع مدير المركز المتابعة والاطلاع.</div>
               )}
 
               <div className="stack-list">

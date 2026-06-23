@@ -4,13 +4,23 @@ import { useNavigate } from "react-router-dom";
 import { ApiError, apiRequest } from "../api/client";
 import { DemoAccount, systemConfig } from "../config/system";
 import { useAuth } from "../context/AuthContext";
-import { useLanguage } from "../context/LanguageContext";
+import { toArabicLabel } from "../lib/arabic";
 
 const accountArabicLabels: Record<string, string> = {
   CENTER_MANAGER: "مدير المركز",
   DOCTOR: "طبيب",
   PATIENT: "مريض",
-  RECEPTIONIST: "موظف الاستقبال"
+  RECEPTIONIST: "موظف استقبال",
+  NURSE: "ممرض",
+  PHARMACIST: "صيدلي",
+  LAB_TECH: "فني مختبر",
+  "مدير المركز": "مدير المركز",
+  "طبيب": "طبيب",
+  "مريض": "مريض",
+  "موظف استقبال": "موظف استقبال",
+  "ممرض": "ممرض",
+  "صيدلي": "صيدلي",
+  "فني مختبر": "فني مختبر"
 };
 
 type ResetStep = "login" | "request" | "verify" | "reset";
@@ -21,10 +31,13 @@ interface PasswordResetVerifyResponse {
   resetTokenExpiresAt: string;
 }
 
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const { t } = useLanguage();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -40,7 +53,7 @@ export function LoginPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
 
   useEffect(() => {
-    document.title = "المركز الصحي المتوسط";
+    document.title = systemConfig.loginTitle;
   }, []);
 
   useEffect(() => {
@@ -54,18 +67,23 @@ export function LoginPage() {
   }, []);
 
   async function handleLogin() {
+    if (!identifier.trim() || !password) {
+      setError("أدخل رقم الهوية / اسم الدخول وكلمة المرور.");
+      return;
+    }
+
     setSubmitting(true);
     setError("");
     setNotice("");
 
     try {
-      await login(identifier, password);
+      await login(identifier.trim(), password);
       navigate("/", { replace: true });
     } catch (cause) {
       setError(
         cause instanceof ApiError && cause.status !== 401
           ? cause.message
-          : "بيانات الدخول غير صحيحة أو لا تنتمي لهذا النظام."
+          : "بيانات الدخول غير صحيحة أو لا تنتمي إلى هذا النظام."
       );
     } finally {
       setSubmitting(false);
@@ -73,8 +91,10 @@ export function LoginPage() {
   }
 
   async function handlePasswordResetRequest() {
-    if (!resetEmail.trim()) {
-      setError("أدخل البريد الإلكتروني أولا.");
+    const email = resetEmail.trim();
+
+    if (!isValidEmail(email)) {
+      setError("أدخل بريدا إلكترونيا صحيحا مرتبطا بالحساب.");
       return;
     }
 
@@ -85,9 +105,7 @@ export function LoginPage() {
     try {
       await apiRequest("/auth/password-reset/request", {
         method: "POST",
-        body: JSON.stringify({
-          email: resetEmail.trim()
-        })
+        body: JSON.stringify({ email })
       });
       setResetStep("verify");
       setNotice("إذا كان البريد مرتبطا بحساب فعال، تم إرسال كود التحقق إليه.");
@@ -118,7 +136,7 @@ export function LoginPage() {
       });
       setResetToken(payload.resetToken);
       setResetStep("reset");
-      setNotice("تم التحقق من الرمز. يمكنك الآن تعيين كلمة سر جديدة.");
+      setNotice("تم التحقق من الرمز. يمكنك الآن تعيين كلمة مرور جديدة.");
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : "رمز التحقق غير صحيح.");
     } finally {
@@ -134,12 +152,12 @@ export function LoginPage() {
     }
 
     if (newPassword.length < 8) {
-      setError("كلمة السر الجديدة يجب ألا تقل عن 8 خانات.");
+      setError("كلمة المرور الجديدة يجب ألا تقل عن 8 خانات.");
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      setError("تأكيد كلمة السر غير مطابق.");
+      setError("تأكيد كلمة المرور غير مطابق.");
       return;
     }
 
@@ -162,9 +180,9 @@ export function LoginPage() {
       setNewPassword("");
       setConfirmPassword("");
       setResetStep("login");
-      setNotice("تم تغيير كلمة السر بنجاح. يمكنك تسجيل الدخول الآن.");
+      setNotice("تم تغيير كلمة المرور بنجاح. يمكنك تسجيل الدخول الآن.");
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : "تعذر تغيير كلمة السر.");
+      setError(cause instanceof ApiError ? cause.message : "تعذر تغيير كلمة المرور.");
     } finally {
       setSubmitting(false);
     }
@@ -226,35 +244,36 @@ export function LoginPage() {
     resetStep === "login"
       ? "بيانات الحساب"
       : resetStep === "request"
-        ? "استعادة كلمة السر"
+        ? "استعادة كلمة المرور"
         : resetStep === "verify"
           ? "تحقق من بريدك الإلكتروني"
-          : "إعادة تعيين كلمة السر";
+          : "إعادة تعيين كلمة المرور";
 
   return (
     <div className="login-shell">
       <div className="login-panel hero">
         <div className="login-brand-panel" data-localized="true">
-          <p>بوابة المركز</p>
-          <h1>المركز الصحي المتوسط</h1>
+          <p>{systemConfig.loginEyebrow}</p>
+          <h1>{systemConfig.name}</h1>
         </div>
       </div>
 
       <form className="login-panel form-panel" autoComplete="off" data-localized="true" onSubmit={handleSubmit}>
         <div>
-          <p className="eyebrow">{resetStep === "login" ? "تسجيل الدخول" : "استعادة كلمة السر"}</p>
+          <p className="eyebrow">{resetStep === "login" ? systemConfig.loginEyebrow : "استعادة كلمة المرور"}</p>
           <h2>{heading}</h2>
+          {resetStep === "login" ? <p className="muted login-subtitle">{systemConfig.loginDescription}</p> : null}
         </div>
 
         {resetStep === "login" ? (
           <>
             <label className="field">
-              <span>اسم المستخدم أو رقم الهوية أو البريد الإلكتروني</span>
+              <span>رقم الهوية / اسم الدخول / البريد الإلكتروني</span>
               <input
                 value={identifier}
                 onChange={(event) => setIdentifier(event.target.value)}
-                autoComplete="off"
-                placeholder="اسم المستخدم"
+                autoComplete="username"
+                placeholder="رقم الهوية أو اسم الدخول"
                 type="text"
               />
             </label>
@@ -265,7 +284,7 @@ export function LoginPage() {
                 <input
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  autoComplete="new-password"
+                  autoComplete="current-password"
                   placeholder="كلمة المرور"
                   type={showPassword ? "text" : "password"}
                 />
@@ -281,7 +300,7 @@ export function LoginPage() {
             </label>
 
             <button className="ghost-button" type="button" onClick={startPasswordReset}>
-              هل نسيت كلمة السر؟
+              هل نسيت كلمة المرور؟
             </button>
           </>
         ) : resetStep === "request" ? (
@@ -291,7 +310,7 @@ export function LoginPage() {
               value={resetEmail}
               onChange={(event) => setResetEmail(event.target.value)}
               autoComplete="email"
-              placeholder="patient@example.com"
+              placeholder="doctor@example.com"
               type="email"
             />
           </label>
@@ -322,7 +341,7 @@ export function LoginPage() {
               <input
                 value={newPassword}
                 onChange={(event) => setNewPassword(event.target.value)}
-                placeholder="إعادة تعيين كلمة السر"
+                placeholder="كلمة مرور جديدة"
                 type="password"
               />
             </label>
@@ -331,7 +350,7 @@ export function LoginPage() {
               <input
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
-                placeholder="تأكيد كلمة السر"
+                placeholder="تأكيد كلمة المرور"
                 type="password"
               />
             </label>
@@ -340,11 +359,11 @@ export function LoginPage() {
 
         {resetStep === "login" ? (
           <div className="demo-login-panel">
-            <span>{t("تعبئة حساب تجريبي", "Demo account autofill")}</span>
+            <span>تعبئة حساب تجريبي</span>
             <div className="demo-account-list">
               {demoAccounts.map((account) => (
                 <button key={account.identifier} className="demo-account-button" type="button" onClick={() => fillAccount(account)}>
-                  {accountArabicLabels[account.roleLabel] ?? account.roleLabel}
+                  {accountArabicLabels[account.roleLabel] ?? toArabicLabel(account.roleLabel)}
                 </button>
               ))}
             </div>
@@ -363,7 +382,7 @@ export function LoginPage() {
                 ? "إرسال كود التحقق"
                 : resetStep === "verify"
                   ? "تحقق من الرمز"
-                  : "إعادة تعيين كلمة السر"}
+                  : "إعادة تعيين كلمة المرور"}
         </button>
         {resetStep !== "login" ? (
           <button className="ghost-button" type="button" onClick={backToLogin}>

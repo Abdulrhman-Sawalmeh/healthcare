@@ -186,6 +186,25 @@ function mapLocalResultReport(
         specialization: string;
       } | null;
     };
+    labRequest?: {
+      id: number;
+      status: string;
+      priority?: string | null;
+      requestDate: Date;
+      resultDate: Date | null;
+      resultValue: string | null;
+      resultNotes: string | null;
+      unit: string | null;
+      normalRange: string | null;
+      abnormalFlag: string | null;
+      reportUrl: string | null;
+      imageUrl: string | null;
+      patientNotes: string | null;
+      test: {
+        testName: string;
+        category: string;
+      };
+    } | null;
   },
   patient: {
     id: string;
@@ -228,7 +247,26 @@ function mapLocalResultReport(
             mimeType: report.attachmentMimeType,
             contentBase64: includeAttachmentData ? report.attachmentBase64 : null
           }
-        : null
+        : null,
+    labRequest: report.labRequest
+      ? {
+          id: report.labRequest.id,
+          status: report.labRequest.status,
+          priority: report.labRequest.priority ?? null,
+          requestedAt: report.labRequest.requestDate,
+          resultedAt: report.labRequest.resultDate,
+          resultValue: report.labRequest.resultValue,
+          resultNotes: report.labRequest.resultNotes,
+          unit: report.labRequest.unit,
+          normalRange: report.labRequest.normalRange,
+          abnormalFlag: report.labRequest.abnormalFlag,
+          reportUrl: report.labRequest.reportUrl,
+          imageUrl: report.labRequest.imageUrl,
+          patientNotes: report.labRequest.patientNotes,
+          testName: report.labRequest.test.testName,
+          category: report.labRequest.test.category
+        }
+      : null
   };
 }
 

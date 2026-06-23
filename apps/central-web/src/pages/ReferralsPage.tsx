@@ -1,15 +1,13 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
 import { StatusBadge } from "../components/StatusBadge";
-import { useAuth } from "../context/AuthContext";
-import { formatDateTime, toArabicLabel } from "../lib/arabic";
-import { LocalPatientRecord, ReferralRecord } from "../types";
+import { cleanDemoText, formatCount, formatDateTime, safeDisplay, toArabicLabel } from "../lib/arabic";
+import { ReferralRecord } from "../types";
 
-const statusOptions = [
-  "",
+const preferredStatusOrder = [
   "REQUESTED",
   "AUTO_SELECTED",
   "PENDING_RECEIVING_MANAGER",
@@ -21,233 +19,221 @@ const statusOptions = [
   "NO_CANDIDATE_REJECTED"
 ];
 
-function referralDetails(referral: ReferralRecord) {
-  return [
-    referral.selectedCenterReason,
-    referral.managerDecisionReason ? `قرار المدير: ${referral.managerDecisionReason}` : null,
-    referral.rejectionReason ? `سبب الرفض: ${referral.rejectionReason}` : null,
-    referral.matchingScore != null ? `درجة المطابقة: ${referral.matchingScore}` : null,
-    referral.estimatedWaitTimeMinutes != null ? `انتظار متوقع: ${referral.estimatedWaitTimeMinutes} دقيقة` : null,
-    referral.assignedDoctor ? `الطبيب المسند: ${referral.assignedDoctor.fullName}` : null,
-    referral.createdVisitId ? `زيارة رقم: ${referral.createdVisitId}` : null
-  ].filter(Boolean);
+function buildPathParams(current: URLSearchParams, next: Record<string, string | number | undefined>) {
+  const params = new URLSearchParams(current);
+
+  for (const [key, value] of Object.entries(next)) {
+    if (value === undefined || value === "") {
+      params.delete(key);
+    } else {
+      params.set(key, String(value));
+    }
+  }
+
+  return params;
+}
+
+function isNoCandidate(referral: ReferralRecord) {
+  return referral.status === "NO_CANDIDATE_REJECTED" || !referral.toCenterId;
+}
+
+function receivingCenterLabel(referral: ReferralRecord) {
+  if (referral.status === "NO_CANDIDATE_REJECTED") {
+    return "لا يوجد مركز مناسب";
+  }
+
+  if (!referral.toCenterId) {
+    return "لم يتم اختيار مركز مستقبل";
+  }
+
+  return safeDisplay(referral.toCenter);
+}
+
+function DetailField({ label, value }: { label: string; value?: string | number | null }) {
+  return (
+    <div className="detail-field">
+      <span>{label}</span>
+      <strong>{cleanDemoText(value == null ? null : String(value))}</strong>
+    </div>
+  );
 }
 
 export function ReferralsPage() {
-  const { user } = useAuth();
   const [referrals, setReferrals] = useState<ReferralRecord[]>([]);
-  const [patients, setPatients] = useState<LocalPatientRecord[]>([]);
   const [error, setError] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
-  const [form, setForm] = useState({
-    localPatientId: "",
-    requiredSpecialty: "أمراض القلب",
-    priority: "URGENT",
-    reason: "",
-    requiresOr: false,
-    requiredMedicineIds: "",
-    preferredRegion: "",
-    maxDistanceKm: "120",
-    notesFromSender: ""
-  });
+  const [fromCenterFilter, setFromCenterFilter] = useState("");
+  const [toCenterFilter, setToCenterFilter] = useState("");
+  const [specialtyFilter, setSpecialtyFilter] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
+  const [patientFilter, setPatientFilter] = useState("");
 
   const statusFilter = searchParams.get("status") ?? "";
+  const selectedReferralId = Number(searchParams.get("referralId") ?? "");
 
   async function loadData() {
-    const referralPath = user?.workspace === "central" ? "/central/referrals" : "/center/referrals";
-    const requests = [apiRequest<ReferralRecord[]>(referralPath)];
-
-    if (user?.workspace === "center") {
-      requests.push(apiRequest<LocalPatientRecord[]>("/center/patients") as unknown as Promise<ReferralRecord[]>);
-    }
-
-    const [referralsPayload, patientsPayload] = await Promise.all(requests);
-    setReferrals(referralsPayload);
-    if (user?.workspace === "center") {
-      setPatients((patientsPayload as unknown as LocalPatientRecord[]) ?? []);
-    }
+    const payload = await apiRequest<ReferralRecord[]>("/central/referrals");
+    setReferrals(payload);
   }
 
   useEffect(() => {
     loadData().catch((cause: Error) => setError(cause.message));
-  }, [user]);
+  }, []);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  const statusCounts = useMemo(() => {
+    return referrals.reduce<Record<string, number>>((accumulator, referral) => {
+      accumulator[referral.status] = (accumulator[referral.status] ?? 0) + 1;
+      return accumulator;
+    }, {});
+  }, [referrals]);
 
-    try {
-      await apiRequest("/center/referrals/request", {
-        method: "POST",
-        body: JSON.stringify({
-          localPatientId: Number(form.localPatientId),
-          requiredSpecialty: form.requiredSpecialty,
-          priority: form.priority,
-          reason: form.reason,
-          requiresOr: form.requiresOr,
-          requiredMedicineIds: form.requiredMedicineIds
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean)
-            .map(Number),
-          preferredRegion: form.preferredRegion || undefined,
-          maxDistanceKm: Number(form.maxDistanceKm),
-          notesFromSender: form.notesFromSender || undefined,
-          processNow: true
-        })
-      });
+  const statusOptions = useMemo(() => {
+    const available = Object.keys(statusCounts);
+    return preferredStatusOrder.filter((status) => available.includes(status)).concat(
+      available.filter((status) => !preferredStatusOrder.includes(status))
+    );
+  }, [statusCounts]);
 
-      setForm({
-        localPatientId: "",
-        requiredSpecialty: "أمراض القلب",
-        priority: "URGENT",
-        reason: "",
-        requiresOr: false,
-        requiredMedicineIds: "",
-        preferredRegion: "",
-        maxDistanceKm: "120",
-        notesFromSender: ""
-      });
-
-      await loadData();
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذر إرسال طلب الإحالة.");
-    }
-  }
+  const fromCenters = useMemo(
+    () => Array.from(new Set(referrals.map((referral) => referral.fromCenter))).sort((a, b) => a.localeCompare(b, "ar")),
+    [referrals]
+  );
+  const toCenters = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          referrals
+            .filter((referral) => referral.toCenterId)
+            .map((referral) => referral.toCenter)
+        )
+      ).sort((a, b) => a.localeCompare(b, "ar")),
+    [referrals]
+  );
+  const specialties = useMemo(
+    () => Array.from(new Set(referrals.map((referral) => referral.requiredSpecialty))).sort((a, b) => a.localeCompare(b, "ar")),
+    [referrals]
+  );
 
   const filteredReferrals = useMemo(() => {
-    if (!statusFilter) {
-      return referrals;
-    }
+    return referrals.filter((referral) => {
+      if (statusFilter && referral.status !== statusFilter) {
+        return false;
+      }
 
-    return referrals.filter((referral) => referral.status === statusFilter);
-  }, [referrals, statusFilter]);
+      if (fromCenterFilter && referral.fromCenter !== fromCenterFilter) {
+        return false;
+      }
 
-  const canRequest = user?.workspace === "center" && (user.role === "CENTER_MANAGER" || user.role === "DOCTOR");
+      if (toCenterFilter && referral.toCenter !== toCenterFilter) {
+        return false;
+      }
+
+      if (specialtyFilter && referral.requiredSpecialty !== specialtyFilter) {
+        return false;
+      }
+
+      if (dateFilter && referral.requestedAt.slice(0, 10) !== dateFilter) {
+        return false;
+      }
+
+      if (patientFilter.trim()) {
+        const term = patientFilter.trim().toLowerCase();
+        const haystack = `${referral.patientName ?? ""} ${referral.patientUnifiedId ?? ""}`.toLowerCase();
+        if (!haystack.includes(term)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [dateFilter, fromCenterFilter, patientFilter, referrals, specialtyFilter, statusFilter, toCenterFilter]);
+
+  const selectedReferral = referrals.find((referral) => referral.id === selectedReferralId) ?? null;
+
+  function openDetails(referralId: number) {
+    setSearchParams(buildPathParams(searchParams, { referralId }));
+  }
+
+  function closeDetails() {
+    setSearchParams(buildPathParams(searchParams, { referralId: undefined }));
+  }
 
   return (
     <div className="page-stack">
-      {canRequest ? (
-        <SectionCard
-          title="إنشاء إحالة ذكية"
-          subtitle="يختار المحرك المركزي أفضل جهة استقبال بناءً على التخصص والمسافة والضغط التشغيلي ومدة الانتظار وتوفر غرفة العمليات والأدوية المطلوبة."
-        >
-          <form className="form-grid" onSubmit={handleSubmit}>
-            <label className="field">
-              <span>المريض</span>
-              <select
-                value={form.localPatientId}
-                onChange={(event) => setForm((current) => ({ ...current, localPatientId: event.target.value }))}
-              >
-                <option value="">اختر المريض</option>
-                {patients.map((patient) => (
-                  <option key={patient.id} value={patient.id}>
-                    {patient.fullName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>التخصص المطلوب</span>
-              <input
-                value={form.requiredSpecialty}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, requiredSpecialty: event.target.value }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>درجة الاستعجال</span>
-              <select
-                value={form.priority}
-                onChange={(event) => setForm((current) => ({ ...current, priority: event.target.value }))}
-              >
-                <option value="NORMAL">{toArabicLabel("NORMAL")}</option>
-                <option value="URGENT">{toArabicLabel("URGENT")}</option>
-                <option value="EMERGENCY">{toArabicLabel("EMERGENCY")}</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>أقصى مسافة بالكيلومتر</span>
-              <input
-                value={form.maxDistanceKm}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, maxDistanceKm: event.target.value }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>المنطقة المفضلة</span>
-              <input
-                value={form.preferredRegion}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, preferredRegion: event.target.value }))
-                }
-              />
-            </label>
-            <label className="field checkbox-field">
-              <input
-                checked={form.requiresOr}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, requiresOr: event.target.checked }))
-                }
-                type="checkbox"
-              />
-              <span>تتطلب غرفة عمليات</span>
-            </label>
-            <label className="field field-span-2">
-              <span>سبب الإحالة</span>
-              <textarea
-                value={form.reason}
-                onChange={(event) => setForm((current) => ({ ...current, reason: event.target.value }))}
-              />
-            </label>
-            <label className="field field-span-2">
-              <span>معرفات الأدوية المطلوبة</span>
-              <input
-                value={form.requiredMedicineIds}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, requiredMedicineIds: event.target.value }))
-                }
-                placeholder="مثال: 1,2"
-              />
-            </label>
-            <label className="field field-span-2">
-              <span>ملاحظات سريرية إضافية</span>
-              <textarea
-                value={form.notesFromSender}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, notesFromSender: event.target.value }))
-                }
-              />
-            </label>
-            <button className="primary-button field-span-2" type="submit">
-              إرسال طلب الإحالة
-            </button>
-          </form>
-        </SectionCard>
-      ) : null}
-
       <SectionCard
-        title={user?.workspace === "central" ? "متابعة الإحالات على مستوى الشبكة" : "سجل الإحالات في المركز"}
-        subtitle="عرض الإحالات المقبولة والمعلقة والمرفوضة والمكتملة ضمن الشبكة الصحية."
+        title="متابعة الإحالات على مستوى الشبكة"
+        subtitle="عرض الإحالات المقبولة والمعلقة والمرفوضة والمكتملة دون إظهار التفاصيل الطويلة داخل الجدول."
       >
         {error ? <div className="error-banner">{error}</div> : null}
 
-        {user?.workspace === "central" ? (
-          <div className="chip-row">
-            {statusOptions.map((status) => (
-              <button
-                className={statusFilter === status ? "primary-button" : "ghost-button"}
-                key={status || "ALL"}
-                onClick={() => (status ? setSearchParams({ status }) : setSearchParams({}))}
-                type="button"
-              >
-                {status ? toArabicLabel(status) : "الكل"}
-              </button>
-            ))}
-          </div>
-        ) : null}
+        <div className="chip-row">
+          <button
+            className={statusFilter === "" ? "primary-button" : "ghost-button"}
+            onClick={() => setSearchParams(buildPathParams(searchParams, { status: undefined }))}
+            type="button"
+          >
+            الكل ({formatCount(referrals.length)})
+          </button>
+          {statusOptions.map((status) => (
+            <button
+              className={statusFilter === status ? "primary-button" : "ghost-button"}
+              key={status}
+              onClick={() => setSearchParams(buildPathParams(searchParams, { status }))}
+              type="button"
+            >
+              {toArabicLabel(status)} ({formatCount(statusCounts[status] ?? 0)})
+            </button>
+          ))}
+        </div>
+
+        <div className="filter-grid">
+          <label className="field">
+            <span>المركز المرسل</span>
+            <select value={fromCenterFilter} onChange={(event) => setFromCenterFilter(event.target.value)}>
+              <option value="">كل المراكز</option>
+              {fromCenters.map((center) => (
+                <option key={center} value={center}>
+                  {center}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>المركز المستقبل</span>
+            <select value={toCenterFilter} onChange={(event) => setToCenterFilter(event.target.value)}>
+              <option value="">كل المراكز</option>
+              {toCenters.map((center) => (
+                <option key={center} value={center}>
+                  {center}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>التخصص</span>
+            <select value={specialtyFilter} onChange={(event) => setSpecialtyFilter(event.target.value)}>
+              <option value="">كل التخصصات</option>
+              {specialties.map((specialty) => (
+                <option key={specialty} value={specialty}>
+                  {specialty}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>تاريخ الطلب</span>
+            <input value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} type="date" />
+          </label>
+          <label className="field field-span-full">
+            <span>اسم المريض أو الرقم الموحد</span>
+            <input
+              className="toolbar-input"
+              value={patientFilter}
+              onChange={(event) => setPatientFilter(event.target.value)}
+              placeholder="ابحث باسم المريض أو الرقم الموحد"
+            />
+          </label>
+        </div>
 
         {statusFilter ? (
           <div className="filter-summary">
@@ -271,37 +257,38 @@ export function ReferralsPage() {
                   <th>المريض</th>
                   <th>المسار</th>
                   <th>الاحتياج السريري</th>
-                  <th>الحالة والتفاصيل</th>
+                  <th>الحالة</th>
                   <th>التوقيت</th>
+                  <th>الإجراء</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredReferrals.map((referral) => (
                   <tr key={referral.id}>
                     <td>
-                      <strong>{referral.patientName ?? "مريض"}</strong>
-                      <span>{referral.patientUnifiedId ?? "سجل إحالة محلي"}</span>
+                      <strong>{safeDisplay(referral.patientName, "مريض")}</strong>
+                      <span>{safeDisplay(referral.patientUnifiedId, "سجل إحالة محلي")}</span>
                     </td>
                     <td>
-                      <strong>{referral.fromCenter}</strong>
-                      <span>{referral.toCenter}</span>
+                      <strong>{safeDisplay(referral.fromCenter)}</strong>
+                      <span>{receivingCenterLabel(referral)}</span>
                     </td>
                     <td>
-                      <strong>{referral.requiredSpecialty}</strong>
-                      <span>{referral.reason}</span>
-                      {referral.notesFromSender ? <span>{referral.notesFromSender}</span> : null}
+                      <strong>{safeDisplay(referral.requiredSpecialty)}</strong>
+                      <span>{cleanDemoText(referral.reason)}</span>
                     </td>
                     <td>
                       <StatusBadge status={referral.status} />
-                      {referralDetails(referral).map((item) => (
-                        <span key={item}>{item}</span>
-                      ))}
                     </td>
                     <td>
                       <strong>{formatDateTime(referral.requestedAt)}</strong>
                       {referral.decisionAt ? <span>قرار: {formatDateTime(referral.decisionAt)}</span> : null}
-                      {referral.assignedAt ? <span>إسناد: {formatDateTime(referral.assignedAt)}</span> : null}
                       {referral.visitCreatedAt ? <span>زيارة: {formatDateTime(referral.visitCreatedAt)}</span> : null}
+                    </td>
+                    <td>
+                      <button className="ghost-button table-action-button" type="button" onClick={() => openDetails(referral.id)}>
+                        عرض التفاصيل
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -310,6 +297,71 @@ export function ReferralsPage() {
           </div>
         )}
       </SectionCard>
+
+      {selectedReferral ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="referral-details-title">
+          <div className="modal-card">
+            <div className="modal-header">
+              <div>
+                <p className="eyebrow">إحالة #{selectedReferral.id}</p>
+                <h2 id="referral-details-title">تفاصيل الإحالة</h2>
+              </div>
+              <button className="ghost-button modal-close-button" type="button" onClick={closeDetails}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body" onWheel={(event) => event.stopPropagation()}>
+              <div className="details-list">
+                <DetailField label="المريض" value={selectedReferral.patientName} />
+                <DetailField label="الرقم الموحد" value={selectedReferral.patientUnifiedId} />
+                <DetailField label="المركز المرسل" value={selectedReferral.fromCenter} />
+                <DetailField label="المركز المستقبل" value={receivingCenterLabel(selectedReferral)} />
+                <DetailField label="التخصص المطلوب" value={selectedReferral.requiredSpecialty} />
+                <DetailField label="الأولوية" value={toArabicLabel(selectedReferral.priority)} />
+                <DetailField label="الحالة" value={toArabicLabel(selectedReferral.status)} />
+                <DetailField label="تاريخ الطلب" value={formatDateTime(selectedReferral.requestedAt)} />
+              </div>
+
+              <div className="details-list">
+                <DetailField label="سبب الإحالة / الاحتياج السريري" value={selectedReferral.reason} />
+                <DetailField
+                  label={isNoCandidate(selectedReferral) ? "سبب عدم اختيار مركز" : "تفاصيل الاختيار التلقائي"}
+                  value={selectedReferral.rejectionReason ?? selectedReferral.selectedCenterReason}
+                />
+                <DetailField label="قرار المدير" value={selectedReferral.managerDecisionReason} />
+                <DetailField
+                  label="مدير المركز الذي قبل"
+                  value={selectedReferral.acceptedByManager?.fullName}
+                />
+                <DetailField
+                  label="مدير المركز الذي رفض"
+                  value={selectedReferral.rejectedByManager?.fullName}
+                />
+                <DetailField label="الطبيب المسند" value={selectedReferral.assignedDoctor?.fullName} />
+                <DetailField label="الزيارة المرتبطة" value={selectedReferral.createdVisitId ? `زيارة #${selectedReferral.createdVisitId}` : null} />
+                <DetailField label="درجة المطابقة" value={selectedReferral.matchingScore} />
+                <DetailField
+                  label="زمن الانتظار المتوقع"
+                  value={
+                    selectedReferral.estimatedWaitTimeMinutes != null
+                      ? `${selectedReferral.estimatedWaitTimeMinutes} دقيقة`
+                      : null
+                  }
+                />
+                <DetailField label="ملاحظات المرسل" value={selectedReferral.notesFromSender} />
+                <DetailField label="ملاحظات المستقبل" value={selectedReferral.notesFromReceiver} />
+              </div>
+
+              <div className="details-list">
+                <DetailField label="وقت الرد" value={selectedReferral.respondedAt ? formatDateTime(selectedReferral.respondedAt) : null} />
+                <DetailField label="وقت القرار" value={selectedReferral.decisionAt ? formatDateTime(selectedReferral.decisionAt) : null} />
+                <DetailField label="وقت الإسناد" value={selectedReferral.assignedAt ? formatDateTime(selectedReferral.assignedAt) : null} />
+                <DetailField label="وقت إنشاء الزيارة" value={selectedReferral.visitCreatedAt ? formatDateTime(selectedReferral.visitCreatedAt) : null} />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { CenterUserRole } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
 
-const hiddenCenterRoles: CenterUserRole[] = ["LAB_TECH", "PHARMACIST", "NURSE"];
+const hiddenCenterRoles: CenterUserRole[] = [];
 
 export async function getCentralDashboardData() {
   const [
@@ -647,6 +647,11 @@ export async function getCenterPatients(centerId: number, search?: string) {
     },
     include: {
       unifiedPatient: true,
+      _count: {
+        select: {
+          visits: true
+        }
+      },
       visits: {
         orderBy: {
           visitDate: "desc"
@@ -678,7 +683,8 @@ export async function getCenterPatients(centerId: number, search?: string) {
     chronicDiseases: patient.chronicDiseases,
     allergies: patient.allergies,
     createdLocally: patient.createdLocally,
-    visitCount: patient.visits.length,
+    visitCount: patient._count.visits,
+    lastVisitAt: patient.visits[0]?.visitDate ?? null,
     billingStatus: patient.invoices[0]?.status ?? "UNPAID",
     recentVisits: patient.visits.map((visit) => ({
       id: visit.id,
@@ -794,9 +800,51 @@ export async function getCenterLabData(centerId: number) {
     prisma.labRequestLocal.findMany({
       where: { centerId },
       include: {
-        patient: true,
-        doctor: true,
-        test: true
+        patient: {
+          include: {
+            unifiedPatient: {
+              select: {
+                nationalId: true
+              }
+            }
+          }
+        },
+        doctor: {
+          select: {
+            id: true,
+            fullName: true,
+            doctorProfile: {
+              select: {
+                specialization: true
+              }
+            }
+          }
+        },
+        completedBy: {
+          select: {
+            id: true,
+            fullName: true
+          }
+        },
+        visit: {
+          select: {
+            id: true,
+            visitDate: true,
+            diagnosis: true,
+            workflowStatus: true
+          }
+        },
+        test: true,
+        resultReport: {
+          select: {
+            id: true,
+            title: true,
+            reportUrl: true,
+            shareWithPatient: true,
+            createdAt: true,
+            updatedAt: true
+          }
+        }
       },
       orderBy: {
         requestDate: "desc"
@@ -810,15 +858,45 @@ export async function getCenterLabData(centerId: number) {
       id: request.id,
       patientId: request.patientId,
       doctorId: request.doctorId,
+      visitId: request.visitId,
       testId: request.testId,
       patientName: request.patient.fullName,
+      patientNumber: request.patient.unifiedId ?? String(request.patient.id),
+      patientNationalId: request.patient.unifiedPatient?.nationalId ?? null,
       doctorName: request.doctor.fullName,
+      doctorSpecialization: request.doctor.doctorProfile?.specialization ?? null,
       testName: request.test.testName,
       category: request.test.category,
+      normalRangeCatalog: request.test.normalRange,
+      price: request.test.price,
       status: request.status,
+      priority: request.priority,
+      reason: request.reason,
+      clinicalNotes: request.clinicalNotes,
+      sampleType: request.sampleType,
+      fastingRequired: request.fastingRequired,
+      externalTest: request.externalTest,
       requestDate: request.requestDate,
       resultValue: request.resultValue,
-      resultDate: request.resultDate
+      resultNotes: request.resultNotes,
+      unit: request.unit,
+      normalRange: request.normalRange,
+      abnormalFlag: request.abnormalFlag,
+      criticalNote: request.criticalNote,
+      reportUrl: request.reportUrl,
+      imageUrl: request.imageUrl,
+      doctorNotes: request.doctorNotes,
+      patientNotes: request.patientNotes,
+      correctionReason: request.correctionReason,
+      resultFileName: request.resultFileName,
+      resultMimeType: request.resultMimeType,
+      resultDate: request.resultDate,
+      sentToDoctorAt: request.sentToDoctorAt,
+      publishedToPatientAt: request.publishedToPatientAt,
+      completedById: request.completedById,
+      completedByName: request.completedBy?.fullName ?? null,
+      visit: request.visit,
+      resultReport: request.resultReport
     }))
   };
 }

@@ -290,6 +290,7 @@ export interface LocalPatientRecord {
   allergies: string[];
   createdLocally: boolean;
   visitCount: number;
+  lastVisitAt?: string | null;
   billingStatus: string;
   recentVisits: Array<{
     id: number;
@@ -614,15 +615,57 @@ export interface LabBundle {
     id: number;
     patientId: number;
     doctorId: number;
+    visitId?: number | null;
     testId: number;
     patientName: string;
+    patientNumber?: string | null;
+    patientNationalId?: string | null;
     doctorName: string;
+    doctorSpecialization?: string | null;
     testName: string;
     category: string;
+    normalRangeCatalog?: string | null;
+    price?: number;
     status: string;
+    priority?: string | null;
+    reason?: string | null;
+    clinicalNotes?: string | null;
+    sampleType?: string | null;
+    fastingRequired?: boolean;
+    externalTest?: boolean;
     requestDate: string;
     resultValue?: string | null;
+    resultNotes?: string | null;
+    unit?: string | null;
+    normalRange?: string | null;
+    abnormalFlag?: string | null;
+    criticalNote?: string | null;
+    reportUrl?: string | null;
+    imageUrl?: string | null;
+    doctorNotes?: string | null;
+    patientNotes?: string | null;
+    correctionReason?: string | null;
+    resultFileName?: string | null;
+    resultMimeType?: string | null;
     resultDate?: string | null;
+    sentToDoctorAt?: string | null;
+    publishedToPatientAt?: string | null;
+    completedById?: number | null;
+    completedByName?: string | null;
+    visit?: {
+      id: number;
+      visitDate?: string | null;
+      diagnosis?: string | null;
+      workflowStatus?: string | null;
+    } | null;
+    resultReport?: {
+      id: number;
+      title: string;
+      reportUrl?: string | null;
+      shareWithPatient: boolean;
+      createdAt: string;
+      updatedAt: string;
+    } | null;
   }>;
 }
 
@@ -806,6 +849,7 @@ export interface PortalAppointmentRecord {
   };
   patient: {
     id: string;
+    localPatientId?: number | null;
     fullName: string;
     medicalRecordNumber: string;
   };
@@ -836,6 +880,23 @@ export interface PortalClinicalReportRecord {
   recommendations?: string | null;
   recommendedFollowUp?: string | null;
   attachment?: PortalReportAttachment | null;
+  labRequest?: {
+    id: number;
+    status: string;
+    priority?: string | null;
+    requestedAt?: string | null;
+    resultedAt?: string | null;
+    resultValue?: string | null;
+    resultNotes?: string | null;
+    unit?: string | null;
+    normalRange?: string | null;
+    abnormalFlag?: string | null;
+    reportUrl?: string | null;
+    imageUrl?: string | null;
+    patientNotes?: string | null;
+    testName?: string | null;
+    category?: string | null;
+  } | null;
   center: {
     id: string;
     name: string;

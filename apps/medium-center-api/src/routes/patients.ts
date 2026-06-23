@@ -251,7 +251,7 @@ router.get(
 router.get(
   "/:patientId/lab-trends",
   authenticate,
-  authorize("CENTER_MANAGER", "DOCTOR", "NURSE", "LAB_TECH", UserRole.PATIENT),
+  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE", "LAB_TECH", UserRole.PATIENT),
   asyncHandler(async (req, res) => {
     const patientId = parsePatientId(req.params.patientId);
     const access = await resolvePatientAccess(req, patientId, "LAB_RESULTS");

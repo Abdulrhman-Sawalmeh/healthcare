@@ -221,7 +221,7 @@ export function PatientMessagesPage() {
       setThreads(sortedThreads);
       setDoctors(doctorsPayload);
       setPatientOptions(patientOptionsPayload);
-      setPatientSubscriptionActive(isDoctorView || (summaryPayload?.stats.activeSubscriptions ?? 0) > 0);
+      setPatientSubscriptionActive(true);
       setSelectedThreadId((currentThreadId) =>
         currentThreadId && sortedThreads.some((thread) => thread.id === currentThreadId)
           ? currentThreadId
@@ -540,7 +540,7 @@ export function PatientMessagesPage() {
           <p className="muted">
             {isDoctorView
               ? t("اختر أي مريض من القائمة، راجع آخر الرسائل، ورد من نفس الصفحة.", "Choose any patient conversation, review the latest messages, and reply from the same page.")
-              : t("اختر محادثة مفتوحة أو ابدأ محادثة جديدة مع طبيبك عند تفعيل الاشتراك.", "Choose an open conversation or start a new one with your doctor when your subscription is active.")}
+              : t("اختر محادثة مفتوحة أو ابدأ محادثة جديدة مع طبيبك لمتابعة الرعاية الصحية.", "Choose an open conversation or start a new one with your doctor for care follow-up.")}
           </p>
         </div>
         <div className="tile-stats">
@@ -556,14 +556,14 @@ export function PatientMessagesPage() {
         <section className="section-card">
           <div className="section-header">
             <div>
-              <p className="eyebrow">{t("الاشتراك مطلوب", "Subscription required")}</p>
-              <h3>{t("فعّل دعم المتابعة للتواصل مع طبيبك", "Activate follow-up support to contact your doctor")}</h3>
+              <p className="eyebrow">{t("المحادثة الطبية", "Medical messaging")}</p>
+              <h3>{t("تواصل مع طبيبك لمتابعة الرعاية الصحية", "Contact your doctor for care follow-up")}</h3>
             </div>
           </div>
           <p className="muted">
             {t(
-              "يمكنك الاستمرار في عرض السجل الصحي والوصفات. التواصل مع الطبيب متاح ضمن الاشتراك للمتابعة والتذكيرات.",
-              "You can still view health history and prescriptions. Doctor messaging is included with the subscription for follow-up and reminders."
+              "يمكنك عرض السجل الصحي والوصفات ومتابعة رسائل الطبيب من نفس الواجهة.",
+              "You can view health history, prescriptions, and doctor messages from the same workspace."
             )}
           </p>
         </section>

@@ -24,7 +24,7 @@ export const navigationItems: NavigationItem[] = [
   { to: "/lab", label: "المختبر", roles: ["CENTER_MANAGER", "DOCTOR", "LAB_TECH"] },
   { to: "/pharmacy", label: "الصيدلية", roles: ["CENTER_MANAGER", "PHARMACIST"] },
   { to: "/master-data", label: "البيانات المرجعية", roles: ["CENTRAL_ADMIN"] },
-  { to: "/analytics", label: "لوحة التحليلات", roles: ["CENTRAL_ADMIN"] },
+  { to: "/analytics", label: "التحليلات", roles: ["CENTRAL_ADMIN"] },
   { to: "/reports", label: "التقارير", roles: ["CENTRAL_ADMIN"] },
   { to: "/audit-logs", label: "سجل التدقيق", roles: ["CENTRAL_ADMIN"] },
   { to: "/notifications", label: "الإشعارات", roles: ["CENTRAL_ADMIN", ...allCenterRoles] }

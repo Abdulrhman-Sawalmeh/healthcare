@@ -1,11 +1,20 @@
-import { FormEvent, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
-import { useAuth } from "../context/AuthContext";
-import { formatDate, formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
+import { cleanDemoText, formatCount, formatDate, formatDateTime, joinMeta, safeDisplay, toArabicLabel } from "../lib/arabic";
 import { PatientTimelineBundle, PatientTimelineEvent, PatientTimelineEventType } from "../types";
+
+type PatientTab =
+  | "basic"
+  | "visits"
+  | "referrals"
+  | "diagnoses"
+  | "prescriptions"
+  | "conditions"
+  | "files"
+  | "timeline";
 
 const eventConfig: Record<
   PatientTimelineEventType,
@@ -19,28 +28,20 @@ const eventConfig: Record<
   note: { label: "ملاحظة", marker: "ن", tone: "note" }
 };
 
-const defaultForm = {
-  fullName: "",
-  nationalId: "",
-  dateOfBirth: "",
-  gender: "MALE",
-  primaryPhone: "",
-  address: "",
-  emergencyContact: "",
-  bloodType: "",
-  allergies: "",
-  chronicDiseases: ""
-};
+const tabs: Array<{ value: PatientTab; label: string }> = [
+  { value: "basic", label: "البيانات الأساسية" },
+  { value: "visits", label: "الزيارات" },
+  { value: "referrals", label: "الإحالات" },
+  { value: "diagnoses", label: "التشخيصات" },
+  { value: "prescriptions", label: "الأدوية والوصفات" },
+  { value: "conditions", label: "الحساسية والأمراض المزمنة" },
+  { value: "files", label: "الملفات/التقارير" },
+  { value: "timeline", label: "السجل الزمني" }
+];
 
 function renderList(value: string[]) {
-  return value.length > 0 ? value.join("، ") : "لا توجد بيانات مسجلة";
-}
-
-function splitCsv(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const cleanValues = value.filter((item) => !/^[?\s]+$/.test(item.trim()));
+  return cleanValues.length > 0 ? cleanValues.join("، ") : "لا توجد بيانات مسجلة";
 }
 
 function EventPreview({ event }: { event: PatientTimelineEvent }) {
@@ -52,35 +53,39 @@ function EventPreview({ event }: { event: PatientTimelineEvent }) {
         <div className={`timeline-mini-icon ${config.tone}`}>{config.marker}</div>
         <div>
           <p className="eyebrow">{config.label}</p>
-          <h4>{event.title}</h4>
+          <h4>{safeDisplay(event.title)}</h4>
         </div>
       </div>
-      <p>{event.description}</p>
+      <p>{cleanDemoText(event.description)}</p>
       <div className="timeline-meta">
         <span>{formatDateTime(event.date)}</span>
-        <span>{event.createdBy}</span>
-        <span>{event.sourceTable}</span>
+        <span>{safeDisplay(event.createdBy)}</span>
+        <span>{safeDisplay(event.sourceTable)}</span>
       </div>
     </article>
   );
 }
 
+function EventList({ events, emptyText }: { events: PatientTimelineEvent[]; emptyText: string }) {
+  if (events.length === 0) {
+    return <div className="empty-state compact">{emptyText}</div>;
+  }
+
+  return (
+    <div className="stack-list">
+      {events.map((event) => (
+        <EventPreview key={event.id} event={event} />
+      ))}
+    </div>
+  );
+}
+
 export function PatientProfilePage() {
-  const { user } = useAuth();
   const { patientId } = useParams();
-  const navigate = useNavigate();
   const [bundle, setBundle] = useState<PatientTimelineBundle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-  const [isEditing, setIsEditing] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [form, setForm] = useState(defaultForm);
-
-  const canManage =
-    user?.workspace === "center" &&
-    (user.role === "CENTER_MANAGER" || user.role === "RECEPTIONIST" || user.role === "NURSE");
+  const [activeTab, setActiveTab] = useState<PatientTab>("basic");
 
   useEffect(() => {
     let isActive = true;
@@ -100,18 +105,6 @@ export function PatientProfilePage() {
         }
 
         setBundle(payload);
-        setForm({
-          fullName: payload.patient.fullName,
-          nationalId: payload.patient.nationalId ?? "",
-          dateOfBirth: payload.patient.dateOfBirth.slice(0, 10),
-          gender: payload.patient.gender,
-          primaryPhone: payload.patient.phone,
-          address: payload.patient.address,
-          emergencyContact: payload.patient.emergencyContact ?? "",
-          bloodType: payload.patient.bloodType ?? "",
-          allergies: payload.patient.allergies.join(", "),
-          chronicDiseases: payload.patient.chronicDiseases.join(", ")
-        });
         setError("");
       } catch (cause) {
         if (!isActive) {
@@ -133,84 +126,20 @@ export function PatientProfilePage() {
     };
   }, [patientId]);
 
-  async function reloadProfile() {
-    if (!patientId) {
-      return;
-    }
-
-    const payload = await apiRequest<PatientTimelineBundle>(`/patients/${patientId}/timeline`);
-    setBundle(payload);
-    setForm({
-      fullName: payload.patient.fullName,
-      nationalId: payload.patient.nationalId ?? "",
-      dateOfBirth: payload.patient.dateOfBirth.slice(0, 10),
-      gender: payload.patient.gender,
-      primaryPhone: payload.patient.phone,
-      address: payload.patient.address,
-      emergencyContact: payload.patient.emergencyContact ?? "",
-      bloodType: payload.patient.bloodType ?? "",
-      allergies: payload.patient.allergies.join(", "),
-      chronicDiseases: payload.patient.chronicDiseases.join(", ")
-    });
-  }
-
-  async function handleUpdate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!bundle) {
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-      await apiRequest(`/center/patients/${bundle.patient.id}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          fullName: form.fullName,
-          nationalId: form.nationalId || undefined,
-          dateOfBirth: form.dateOfBirth,
-          gender: form.gender,
-          primaryPhone: form.primaryPhone,
-          address: form.address,
-          emergencyContact: form.emergencyContact || undefined,
-          bloodType: form.bloodType || undefined,
-          allergies: splitCsv(form.allergies),
-          chronicDiseases: splitCsv(form.chronicDiseases)
-        })
-      });
-
-      await reloadProfile();
-      setIsEditing(false);
-      setSuccessMessage("تم تحديث بيانات المريض بنجاح.");
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذر تحديث بيانات المريض.");
-      setSuccessMessage("");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleDelete() {
-    if (!bundle || !window.confirm("هل تريد حذف ملف هذا المريض المحلي؟")) {
-      return;
-    }
-
-    try {
-      setIsDeleting(true);
-      await apiRequest(`/center/patients/${bundle.patient.id}`, {
-        method: "DELETE"
-      });
-      navigate("/patients");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذر حذف ملف المريض.");
-      setSuccessMessage("");
-      setIsDeleting(false);
-    }
-  }
+  const groupedEvents = useMemo(() => {
+    const events = bundle?.events ?? [];
+    return {
+      visits: events.filter((event) => event.type === "appointment" || event.type === "diagnosis"),
+      referrals: events.filter((event) => event.type === "referral"),
+      diagnoses: events.filter((event) => event.type === "diagnosis"),
+      prescriptions: events.filter((event) => event.type === "prescription"),
+      files: events.filter((event) => event.type === "lab_result"),
+      timeline: events
+    };
+  }, [bundle]);
 
   if (loading) {
-    return <div className="empty-state">جارٍ تحميل ملف المريض...</div>;
+    return <div className="empty-state">جاري تحميل ملف المريض...</div>;
   }
 
   if (error && !bundle) {
@@ -228,222 +157,134 @@ export function PatientProfilePage() {
     return null;
   }
 
-  const previewEvents = bundle.events.slice(0, 4);
-
   return (
     <div className="page-stack">
       <div className="profile-toolbar">
         <Link className="action-hint" to="/patients">
           العودة إلى قائمة المرضى
         </Link>
-        <div className="button-row">
-          {canManage ? (
-            <button
-              className="ghost-button"
-              type="button"
-              onClick={() => {
-                setIsEditing((current) => !current);
-                setSuccessMessage("");
-                setError("");
-              }}
-            >
-              {isEditing ? "إلغاء التعديل" : "تعديل البيانات"}
-            </button>
-          ) : null}
-          <Link className="primary-button" to={`/patients/${bundle.patient.id}/timeline`}>
-            فتح السجل الزمني
-          </Link>
-        </div>
+        <Link className="primary-button" to={`/patients/${bundle.patient.id}/timeline`}>
+          فتح السجل الزمني الكامل
+        </Link>
       </div>
 
-      {successMessage ? <div className="empty-state compact">{successMessage}</div> : null}
       {error ? <div className="error-banner">{error}</div> : null}
 
-      {canManage && isEditing ? (
-        <SectionCard title="تعديل بيانات المريض" subtitle="حدّث المعلومات الأساسية والسجل المحلي للمريض.">
-          <form className="form-grid" onSubmit={handleUpdate}>
-            <label className="field">
-              <span>الاسم الكامل</span>
-              <input
-                value={form.fullName}
-                onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>رقم الهوية</span>
-              <input
-                value={form.nationalId}
-                onChange={(event) => setForm((current) => ({ ...current, nationalId: event.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>تاريخ الميلاد</span>
-              <input
-                type="date"
-                value={form.dateOfBirth}
-                onChange={(event) => setForm((current) => ({ ...current, dateOfBirth: event.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>الجنس</span>
-              <select
-                value={form.gender}
-                onChange={(event) => setForm((current) => ({ ...current, gender: event.target.value }))}
-              >
-                <option value="MALE">{toArabicLabel("MALE")}</option>
-                <option value="FEMALE">{toArabicLabel("FEMALE")}</option>
-                <option value="OTHER">{toArabicLabel("OTHER")}</option>
-                <option value="PREFER_NOT_TO_SAY">{toArabicLabel("PREFER_NOT_TO_SAY")}</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>رقم الهاتف</span>
-              <input
-                value={form.primaryPhone}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, primaryPhone: event.target.value }))
-                }
-              />
-            </label>
-            <label className="field field-span-2">
-              <span>العنوان</span>
-              <input
-                value={form.address}
-                onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>جهة اتصال الطوارئ</span>
-              <input
-                value={form.emergencyContact}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, emergencyContact: event.target.value }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>فصيلة الدم</span>
-              <input
-                value={form.bloodType}
-                onChange={(event) => setForm((current) => ({ ...current, bloodType: event.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>الحساسيات</span>
-              <input
-                value={form.allergies}
-                onChange={(event) => setForm((current) => ({ ...current, allergies: event.target.value }))}
-                placeholder="افصل بين العناصر بفاصلة"
-              />
-            </label>
-            <label className="field">
-              <span>الأمراض المزمنة</span>
-              <input
-                value={form.chronicDiseases}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, chronicDiseases: event.target.value }))
-                }
-                placeholder="افصل بين العناصر بفاصلة"
-              />
-            </label>
-            <div className="field-span-2 button-row">
-              <button className="primary-button" disabled={isSubmitting} type="submit">
-                {isSubmitting ? "جارٍ الحفظ..." : "حفظ التعديلات"}
-              </button>
-              <button
-                className="danger-button"
-                disabled={isDeleting}
-                onClick={() => void handleDelete()}
-                type="button"
-              >
-                {isDeleting ? "جارٍ الحذف..." : "حذف الملف المحلي"}
-              </button>
-            </div>
-          </form>
-        </SectionCard>
-      ) : null}
-
       <SectionCard
-        title={bundle.patient.fullName}
+        title={safeDisplay(bundle.patient.fullName, "مريض غير متوفر")}
         subtitle={joinMeta([
           bundle.patient.unifiedId ?? "سجل محلي",
           bundle.patient.nationalId ?? "بدون هوية",
           bundle.patient.phone
         ])}
       >
-        <div className="detail-grid">
-          <div className="detail-field">
-            <span>تاريخ الميلاد</span>
-            <strong>{formatDate(bundle.patient.dateOfBirth)}</strong>
-          </div>
-          <div className="detail-field">
-            <span>الجنس</span>
-            <strong>{toArabicLabel(bundle.patient.gender)}</strong>
-          </div>
-          <div className="detail-field">
-            <span>فصيلة الدم</span>
-            <strong>{bundle.patient.bloodType ?? "غير مسجلة"}</strong>
-          </div>
-          <div className="detail-field">
-            <span>جهة اتصال الطوارئ</span>
-            <strong>{bundle.patient.emergencyContact ?? "غير مسجلة"}</strong>
-          </div>
-          <div className="detail-field field-span-2">
-            <span>العنوان</span>
-            <strong>{bundle.patient.address}</strong>
-          </div>
-          <div className="detail-field field-span-2">
-            <span>الأمراض المزمنة</span>
-            <strong>{renderList(bundle.patient.chronicDiseases)}</strong>
-          </div>
-          <div className="detail-field field-span-2">
-            <span>الحساسيات</span>
-            <strong>{renderList(bundle.patient.allergies)}</strong>
-          </div>
-        </div>
-
-        <div className="chip-row">
-          {bundle.patient.centersSeenAt.map((center) => (
-            <span key={center.centerId} className="tag">
-              {center.centerName}
-            </span>
-          ))}
-        </div>
-
         <div className="stats-strip">
           <div className="stat-pill">
-            <strong>{bundle.patient.visitCount}</strong>
+            <strong>{formatCount(bundle.patient.visitCount)}</strong>
             <span>زيارات</span>
           </div>
           <div className="stat-pill">
-            <strong>{bundle.patient.labResultsCount}</strong>
+            <strong>{formatCount(bundle.patient.labResultsCount)}</strong>
             <span>نتائج مختبر</span>
           </div>
           <div className="stat-pill">
-            <strong>{bundle.patient.referralCount}</strong>
+            <strong>{formatCount(bundle.patient.referralCount)}</strong>
             <span>إحالات</span>
           </div>
           <div className="stat-pill">
-            <strong>{bundle.patient.timelineCount}</strong>
+            <strong>{formatCount(bundle.patient.timelineCount)}</strong>
             <span>أحداث طبية</span>
           </div>
         </div>
 
-        <p className="muted">
-          آخر تحديث ظاهر في السجل: {bundle.patient.lastEventAt ? formatDateTime(bundle.patient.lastEventAt) : "-"}
-        </p>
-      </SectionCard>
+        <div className="tabs" role="tablist" aria-label="تبويبات ملف المريض">
+          {tabs.map((tab) => (
+            <button
+              key={tab.value}
+              className={activeTab === tab.value ? "tab-button active" : "tab-button"}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.value}
+              onClick={() => setActiveTab(tab.value)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
-      <SectionCard title="أحدث الأحداث الطبية" subtitle="ملخص سريع لآخر ما سُجل على المريض قبل فتح السجل الزمني الكامل.">
-        {previewEvents.length > 0 ? (
-          <div className="stack-list">
-            {previewEvents.map((event) => (
-              <EventPreview key={event.id} event={event} />
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state compact">لا توجد أحداث طبية مسجلة لهذا المريض حتى الآن.</div>
-        )}
+        <div className="tab-panel">
+          {activeTab === "basic" ? (
+            <>
+              <div className="detail-grid">
+                <div className="detail-field">
+                  <span>تاريخ الميلاد</span>
+                  <strong>{formatDate(bundle.patient.dateOfBirth)}</strong>
+                </div>
+                <div className="detail-field">
+                  <span>الجنس</span>
+                  <strong>{toArabicLabel(bundle.patient.gender)}</strong>
+                </div>
+                <div className="detail-field">
+                  <span>فصيلة الدم</span>
+                  <strong>{safeDisplay(bundle.patient.bloodType)}</strong>
+                </div>
+                <div className="detail-field">
+                  <span>جهة اتصال الطوارئ</span>
+                  <strong>{safeDisplay(bundle.patient.emergencyContact)}</strong>
+                </div>
+                <div className="detail-field field-span-2">
+                  <span>العنوان</span>
+                  <strong>{safeDisplay(bundle.patient.address)}</strong>
+                </div>
+              </div>
+              <div className="chip-row">
+                {bundle.patient.centersSeenAt.length > 0 ? (
+                  bundle.patient.centersSeenAt.map((center) => (
+                    <span key={center.centerId} className="tag">
+                      {center.centerName}
+                    </span>
+                  ))
+                ) : (
+                  <span className="tag">لا يوجد مركز مرتبط</span>
+                )}
+              </div>
+              <p className="muted">
+                آخر تحديث ظاهر في السجل: {bundle.patient.lastEventAt ? formatDateTime(bundle.patient.lastEventAt) : "غير متوفر"}
+              </p>
+            </>
+          ) : null}
+
+          {activeTab === "visits" ? (
+            <EventList events={groupedEvents.visits} emptyText="لا توجد زيارات أو أحداث زيارة مسجلة." />
+          ) : null}
+          {activeTab === "referrals" ? (
+            <EventList events={groupedEvents.referrals} emptyText="لا توجد إحالات مسجلة لهذا المريض." />
+          ) : null}
+          {activeTab === "diagnoses" ? (
+            <EventList events={groupedEvents.diagnoses} emptyText="لا توجد تشخيصات مسجلة." />
+          ) : null}
+          {activeTab === "prescriptions" ? (
+            <EventList events={groupedEvents.prescriptions} emptyText="لا توجد أدوية أو وصفات مسجلة." />
+          ) : null}
+          {activeTab === "conditions" ? (
+            <div className="details-list">
+              <div className="detail-field">
+                <span>الحساسيات</span>
+                <strong>{renderList(bundle.patient.allergies)}</strong>
+              </div>
+              <div className="detail-field">
+                <span>الأمراض المزمنة</span>
+                <strong>{renderList(bundle.patient.chronicDiseases)}</strong>
+              </div>
+            </div>
+          ) : null}
+          {activeTab === "files" ? (
+            <EventList events={groupedEvents.files} emptyText="لا توجد ملفات أو تقارير مختبرية مرتبطة حاليا." />
+          ) : null}
+          {activeTab === "timeline" ? (
+            <EventList events={groupedEvents.timeline} emptyText="لا توجد أحداث طبية مسجلة لهذا المريض حتى الآن." />
+          ) : null}
+        </div>
       </SectionCard>
     </div>
   );

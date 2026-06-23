@@ -81,8 +81,16 @@ export async function getPatientLabTrend(centerId: number, patientId: number, te
         }
       }
     },
-    include: {
-      test: true
+    select: {
+      id: true,
+      requestDate: true,
+      resultDate: true,
+      resultValue: true,
+      test: {
+        select: {
+          normalRange: true
+        }
+      }
     },
     orderBy: {
       resultDate: "asc"

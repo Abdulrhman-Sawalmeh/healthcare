@@ -119,7 +119,7 @@ export async function getCentralDashboardData() {
       patientName: referral.patient.fullName,
       patientUnifiedId: referral.patient.unifiedId,
       fromCenter: referral.fromCenter.centerName,
-      toCenter: referral.toCenter?.centerName ?? "بانتظار اختيار المركز",
+      toCenter: referral.toCenter?.centerName ?? "لم يتم اختيار مركز مستقبل",
       requiredSpecialty: referral.requiredSpecialty,
       priority: referral.priority,
       status: referral.status,
@@ -262,7 +262,7 @@ export async function getUnifiedPatients(search?: string) {
     recentReferrals: patient.referrals.map((referral) => ({
       id: referral.id,
       fromCenter: referral.fromCenter.centerName,
-      toCenter: referral.toCenter?.centerName ?? "بانتظار التوجيه",
+      toCenter: referral.toCenter?.centerName ?? "لم يتم اختيار مركز مستقبل",
       status: referral.status,
       priority: referral.priority,
       requestedAt: referral.requestedAt
@@ -291,7 +291,7 @@ export async function getCentralReferralsOverview() {
     patientName: referral.patient.fullName,
     patientUnifiedId: referral.patient.unifiedId,
     fromCenter: referral.fromCenter.centerName,
-    toCenter: referral.toCenter?.centerName ?? "بانتظار اختيار الجهة المستقبلة",
+    toCenter: referral.toCenter?.centerName ?? "لم يتم اختيار مركز مستقبل",
     requiredSpecialty: referral.requiredSpecialty,
     priority: referral.priority,
     status: referral.status,
@@ -345,22 +345,32 @@ export async function getMasterDataLists() {
   };
 }
 
-export async function getReportsSummary() {
+export async function getReportsSummary(filters: { startDate?: Date; endDate?: Date } = {}) {
+  const dateRange =
+    filters.startDate || filters.endDate
+      ? {
+          gte: filters.startDate,
+          lte: filters.endDate
+        }
+      : undefined;
   const [referralsByStatus, visitsByCenter, notificationHealth, centerLoad] = await Promise.all([
     prisma.centralReferral.groupBy({
       by: ["status"],
+      where: dateRange ? { requestedAt: dateRange } : undefined,
       _count: {
         _all: true
       }
     }),
     prisma.unifiedVisit.groupBy({
       by: ["centerId"],
+      where: dateRange ? { visitDate: dateRange } : undefined,
       _count: {
         _all: true
       }
     }),
     prisma.centralNotification.groupBy({
       by: ["status"],
+      where: dateRange ? { createdAt: dateRange } : undefined,
       _count: {
         _all: true
       }
@@ -540,7 +550,7 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
       id: referral.id,
       patientName: referral.patient.fullName,
       fromCenter: referral.fromCenter.centerName,
-      toCenter: referral.toCenter?.centerName ?? "بانتظار التوجيه",
+      toCenter: referral.toCenter?.centerName ?? "لم يتم اختيار مركز مستقبل",
       requiredSpecialty: referral.requiredSpecialty,
       priority: referral.priority,
       status: referral.status,

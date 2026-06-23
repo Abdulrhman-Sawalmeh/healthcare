@@ -329,7 +329,13 @@ export async function getCentralAnalyticsDashboard(filters: CentralAnalyticsFilt
           ? { doctorId: Number(filters.doctorId) }
           : {})
       },
-      include: {
+      select: {
+        id: true,
+        centerId: true,
+        doctorId: true,
+        status: true,
+        requestDate: true,
+        resultDate: true,
         doctor: {
           select: {
             id: true,

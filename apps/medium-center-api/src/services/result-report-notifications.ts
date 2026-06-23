@@ -8,6 +8,7 @@ type ResultReportNotificationInput = {
   reportTitle: string;
   reportUrl?: string | null;
   shareWithPatient: boolean;
+  targetPath?: string | null;
 };
 
 type PatientNotificationInput = {
@@ -132,7 +133,7 @@ export async function notifyLocalPatient(input: PatientNotificationInput) {
 }
 
 export async function notifyPatientAboutResultReport(input: ResultReportNotificationInput) {
-  if (!input.shareWithPatient || !input.reportUrl) {
+  if (!input.shareWithPatient) {
     return;
   }
 
