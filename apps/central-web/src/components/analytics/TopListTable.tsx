@@ -1,5 +1,5 @@
 import { AnalyticsCountItem } from "../../types";
-import { toArabicLabel } from "../../lib/arabic";
+import { formatCount, toArabicLabel } from "../../lib/arabic";
 import { AnalyticsEmptyState } from "./AnalyticsStates";
 
 interface TopListTableProps {
@@ -26,7 +26,7 @@ export function TopListTable({ items, label, valueLabel = "العدد" }: TopLis
           {items.map((item) => (
             <tr key={item.key}>
               <td>{toArabicLabel(item.key)}</td>
-              <td>{item.count}</td>
+              <td>{formatCount(item.count)}</td>
             </tr>
           ))}
         </tbody>

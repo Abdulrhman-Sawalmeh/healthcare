@@ -6,13 +6,17 @@ export function createPatientQrToken() {
   return randomUUID();
 }
 
-export function buildPatientQrValue(centerId: number, qrToken: string) {
-  return `${PATIENT_QR_PREFIX}:${centerId}:${qrToken}`;
+export function buildPatientQrValue(qrToken: string) {
+  return `${PATIENT_QR_PREFIX}:${qrToken}`;
 }
 
 export function parsePatientQrToken(value: string) {
   const trimmed = value.trim();
   const parts = trimmed.split(":");
+
+  if (parts.length === 2 && parts[0] === PATIENT_QR_PREFIX) {
+    return parts[1];
+  }
 
   if (parts.length === 3 && parts[0] === PATIENT_QR_PREFIX) {
     return parts[2];

@@ -440,8 +440,16 @@ enum InvoicePaymentMethod {
 }
 
 enum LabRequestStatus {
+  NEW
   PENDING
+  PENDING_SAMPLE
+  SAMPLE_RECEIVED
   IN_PROGRESS
+  RESULT_READY
+  SENT_TO_DOCTOR
+  NEEDS_CORRECTION
+  PUBLISHED_TO_PATIENT
+  INVALID_SAMPLE
   COMPLETED
   CANCELLED
 }
@@ -1066,6 +1074,7 @@ model LocalResultReport {
   patient             LocalPatient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
   visit               LocalVisit        @relation(fields: [visitId], references: [id], onDelete: Cascade)
   author              CenterUserAccount @relation("CenterUserAuthoredReports", fields: [authorId], references: [id], onDelete: Cascade)
+  labRequest          LabRequestLocal?   @relation("LabRequestResultReport")
 
   @@index([centerId, createdAt])
   @@index([patientId, createdAt])
@@ -1253,13 +1262,31 @@ model LabRequestLocal {
   visitId         Int?
   testId          Int
   requestDate     DateTime           @default(now())
-  status          LabRequestStatus   @default(PENDING)
+  status          LabRequestStatus   @default(NEW)
+  priority        String             @default("NORMAL")
+  reason          String?
+  clinicalNotes   String?
+  sampleType      String?
+  fastingRequired Boolean            @default(false)
+  externalTest    Boolean            @default(false)
   resultValue     String?
   resultNotes     String?
+  unit            String?
+  normalRange     String?
+  abnormalFlag    String?
+  criticalNote    String?
+  reportUrl       String?
+  imageUrl        String?
+  doctorNotes     String?
+  patientNotes    String?
+  correctionReason String?
   resultFileName  String?
   resultMimeType  String?
   resultBase64    String?
   resultDate      DateTime?
+  sentToDoctorAt  DateTime?
+  publishedToPatientAt DateTime?
+  resultReportId  Int?               @unique
   completedById   Int?
   syncedToCentral Boolean            @default(false)
   center          CentralCenter      @relation(fields: [centerId], references: [id], onDelete: Cascade)
@@ -1268,9 +1295,11 @@ model LabRequestLocal {
   completedBy     CenterUserAccount? @relation("CompletedLabRequests", fields: [completedById], references: [id], onDelete: SetNull)
   visit           LocalVisit?        @relation(fields: [visitId], references: [id], onDelete: Cascade)
   test            LabTestLocal       @relation(fields: [testId], references: [id], onDelete: Cascade)
+  resultReport    LocalResultReport? @relation("LabRequestResultReport", fields: [resultReportId], references: [id], onDelete: SetNull)
 
   @@index([visitId, status])
   @@index([centerId, status, requestDate])
+  @@index([centerId, priority, requestDate])
 }
 
 model DiseaseCatalog {

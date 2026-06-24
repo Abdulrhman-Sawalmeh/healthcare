@@ -9,6 +9,7 @@ import { CentersPage } from "./pages/CentersPage";
 import { CenterDoctorsPage } from "./pages/CenterDoctorsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DoctorAppointmentsPage } from "./pages/DoctorAppointmentsPage";
+import { LabPage } from "./pages/LabPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MasterDataPage } from "./pages/MasterDataPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
@@ -230,6 +231,16 @@ export function App() {
               </ProtectedRoute>
             }
           />
+          {isRouteEnabled("/lab") ? (
+            <Route
+              path="/lab"
+              element={
+                <ProtectedRoute roles={["LAB_TECH"]}>
+                  <LabPage />
+                </ProtectedRoute>
+              }
+            />
+          ) : null}
           {isRouteEnabled("/referrals") ? (
             <Route
               path="/referrals"
@@ -244,7 +255,7 @@ export function App() {
             <Route
               path="/prescription-verification"
               element={
-                <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"]}>
+                <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "PHARMACIST", "NURSE"]}>
                   <PrescriptionVerificationPage />
                 </ProtectedRoute>
               }

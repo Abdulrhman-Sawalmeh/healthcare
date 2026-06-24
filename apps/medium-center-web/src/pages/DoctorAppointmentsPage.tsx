@@ -107,7 +107,7 @@ export function DoctorAppointmentsPage() {
 
       {selectedAppointment ? (
         <SectionCard title="تفاصيل الحجز المحدد" subtitle="تم فتح هذا الموعد من الإشعار.">
-          <div className="stack-item highlighted-appointment">
+          <div className="stack-item highlighted-appointment" id={`appointment-${selectedAppointment.id}`}>
             <div className="info-row">
               <div>
                 <p className="eyebrow">{selectedAppointment.department.name}</p>
@@ -144,9 +144,13 @@ export function DoctorAppointmentsPage() {
               >
                 رفض الموعد
               </button>
-              <Link className="ghost-button" to={`/patients/${selectedAppointment.patient.id}`}>
-                فتح ملف المريض
-              </Link>
+              {selectedAppointment.patient.localPatientId ? (
+                <Link className="ghost-button" to={`/patients/${selectedAppointment.patient.localPatientId}`}>
+                  فتح ملف المريض
+                </Link>
+              ) : (
+                <span className="inline-note">لم يتم ربط هذا الموعد بملف محلي بعد.</span>
+              )}
             </div>
           </div>
         </SectionCard>
@@ -156,6 +160,7 @@ export function DoctorAppointmentsPage() {
         <div className="stack-list">
           {upcomingAppointments.map((appointment) => (
             <article
+              id={appointment.id === selectedAppointmentId ? undefined : `appointment-${appointment.id}`}
               className={`stack-item ${appointment.id === selectedAppointmentId ? "highlighted-appointment" : ""}`}
               key={appointment.id}
             >

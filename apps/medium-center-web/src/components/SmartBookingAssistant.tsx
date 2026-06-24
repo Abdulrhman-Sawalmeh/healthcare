@@ -32,7 +32,7 @@ export function SmartBookingAssistant({
 
       <div className="ai-assistant-head">
         <div>
-          <p className="eyebrow">AI Booking Assist</p>
+          <p className="eyebrow">مساعد الحجز الذكي</p>
           <h3>المساعد الذكي للحجز</h3>
         </div>
         <span className="tag">{insight.confidenceLabel}</span>

@@ -79,6 +79,17 @@ function toDateTimeLocalValue(value: string) {
   return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 16);
 }
 
+function toDateInputValue(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  const offset = date.getTimezoneOffset();
+  return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 10);
+}
+
 function toSuggestionSearchDate(value: string) {
   if (!value) {
     return new Date().toISOString();
@@ -119,6 +130,7 @@ export function PatientAppointmentsPage() {
   const [appointments, setAppointments] = useState<PortalAppointmentRecord[]>([]);
   const [doctors, setDoctors] = useState<PortalDoctorRecord[]>([]);
   const [form, setForm] = useState<AppointmentFormState>(initialForm);
+  const [preferredDate, setPreferredDate] = useState(() => toDateInputValue(new Date().toISOString()));
   const [suggestions, setSuggestions] = useState<PortalAppointmentSuggestionRecord[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState("");
@@ -136,6 +148,8 @@ export function PatientAppointmentsPage() {
 
   const doctorIdFromQuery = searchParams.get("doctorId") ?? "";
   const scheduledAtFromQuery = searchParams.get("scheduledAt") ?? "";
+  const selectedAppointmentId =
+    searchParams.get("appointmentId") ?? searchParams.get("highlight")?.replace("appointment-", "") ?? "";
 
   async function loadData() {
     setLoading(true);
@@ -168,6 +182,10 @@ export function PatientAppointmentsPage() {
     const nextDoctorId =
       doctorIdFromQuery && doctors.some((doctor) => doctor.id === doctorIdFromQuery) ? doctorIdFromQuery : "";
     const nextScheduledAt = scheduledAtFromQuery ? toDateTimeLocalValue(scheduledAtFromQuery) : "";
+
+    if (scheduledAtFromQuery) {
+      setPreferredDate(toDateInputValue(scheduledAtFromQuery));
+    }
 
     if (!nextDoctorId && !nextScheduledAt) {
       return;
@@ -234,6 +252,23 @@ export function PatientAppointmentsPage() {
       ),
     [appointments]
   );
+
+  useEffect(() => {
+    if (!selectedAppointmentId || loading) {
+      return;
+    }
+
+    const element = document.getElementById(`appointment-${selectedAppointmentId}`);
+    if (!element) {
+      return;
+    }
+
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    element.classList.add("target-highlight");
+    const timeout = window.setTimeout(() => element.classList.remove("target-highlight"), 3500);
+
+    return () => window.clearTimeout(timeout);
+  }, [loading, selectedAppointmentId, appointments]);
 
   const bookingInsight = useMemo(
     () =>
@@ -355,7 +390,7 @@ export function PatientAppointmentsPage() {
     }));
   }
 
-  async function loadSuggestions(preferredDate = form.scheduledAt, options: { scrollToAvailability?: boolean } = {}) {
+  async function loadSuggestions(searchDate = preferredDate, options: { scrollToAvailability?: boolean } = {}) {
     if (!selectedDoctor) {
       clearSuggestions();
       setSuggestionsError("اختر الطبيب أولًا لعرض المواعيد المتاحة له.");
@@ -368,7 +403,7 @@ export function PatientAppointmentsPage() {
     try {
       const payload = await requestAppointmentSuggestions({
         doctorId: selectedDoctor.id,
-        preferredDate: toSuggestionSearchDate(preferredDate),
+        preferredDate: toSuggestionSearchDate(searchDate),
         appointmentType: form.type,
         priority: form.priority
       });
@@ -398,15 +433,15 @@ export function PatientAppointmentsPage() {
     }
 
     void loadSuggestions();
-  }, [selectedDoctor?.id, form.scheduledAt, form.type, form.priority]);
+  }, [selectedDoctor?.id, preferredDate, form.type, form.priority]);
 
   function applySuggestion(suggestion: PortalAppointmentSuggestionRecord) {
+    setPreferredDate(toDateInputValue(suggestion.scheduledAt));
     updateForm({
       doctorId: suggestion.doctor.id,
       scheduledAt: toDateTimeLocalValue(suggestion.scheduledAt)
     });
     clearFeedback();
-    clearSuggestions();
     scrollToSection(submitActionsRef.current);
   }
 
@@ -417,12 +452,17 @@ export function PatientAppointmentsPage() {
       type: preset.type,
       priority: preset.priority,
       doctorId:
-        preset.type === "FOLLOW_UP" && !form.doctorId && latestDoctorId ? latestDoctorId : form.doctorId
+        preset.type === "FOLLOW_UP" && !form.doctorId && latestDoctorId ? latestDoctorId : form.doctorId,
+      scheduledAt: ""
     });
     clearFeedback();
   }
 
   function applyInsightRecommendation() {
+    if (bookingInsight.recommendedSlot) {
+      setPreferredDate(toDateInputValue(bookingInsight.recommendedSlot.scheduledAt));
+    }
+
     updateForm({
       type: bookingInsight.recommendedType,
       priority: bookingInsight.recommendedPriority,
@@ -447,6 +487,16 @@ export function PatientAppointmentsPage() {
       return;
     }
 
+    const selectedSlot = suggestions.find(
+      (suggestion) => toDateTimeLocalValue(suggestion.scheduledAt) === form.scheduledAt
+    );
+
+    if (!selectedSlot) {
+      setError("اختر الوقت من قائمة المواعيد المتاحة بعد عرض التوفر الحالي.");
+      scrollToSection(availabilitySectionRef.current);
+      return;
+    }
+
     if (new Date(form.scheduledAt).getTime() <= Date.now()) {
       setError("يرجى اختيار وقت مستقبلي صالح لحجز الموعد.");
       return;
@@ -457,7 +507,7 @@ export function PatientAppointmentsPage() {
     clearSuggestions();
 
     try {
-      const scheduledAtIso = new Date(form.scheduledAt).toISOString();
+      const scheduledAtIso = selectedSlot.scheduledAt;
 
       const createdAppointment = await apiRequest<PortalAppointmentRecord>("/portal/appointments", {
         method: "POST",
@@ -477,13 +527,14 @@ export function PatientAppointmentsPage() {
         `تم حجز موعدك بنجاح في ${formatDateTime(createdAppointment.scheduledAt)}. سيتواصل معك الطبيب قريباً.`
       );
       setForm(initialForm);
+      setPreferredDate(toDateInputValue(new Date().toISOString()));
       clearSuggestions();
       await loadData();
       scrollToSection(successRef.current);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         setError("الموعد الذي أدخلته غير متاح لهذا الطبيب. اختر موعدًا متاحًا من الاقتراحات التالية.");
-        await loadSuggestions(form.scheduledAt, { scrollToAvailability: true });
+        await loadSuggestions(preferredDate, { scrollToAvailability: true });
       } else {
         setError(
           cause instanceof ApiError
@@ -522,7 +573,7 @@ export function PatientAppointmentsPage() {
       <section className="hero-strip booking-hero">
         <div className="booking-hero-content">
           <div>
-            <p className="eyebrow">Smart Patient Booking</p>
+            <p className="eyebrow">الحجز الذكي للمريض</p>
             <h1>منصة حجز احترافية للمريض</h1>
           <p className="muted">
             اختر الطبيب، راجع التوفر الفعلي، واستفد من مساعد ذكي يقترح عليك المسار الأنسب للحجز قبل تثبيت
@@ -539,7 +590,7 @@ export function PatientAppointmentsPage() {
               type="button"
               onClick={() => {
                 if (selectedDoctor) {
-                  void loadSuggestions(form.scheduledAt, { scrollToAvailability: true });
+                  void loadSuggestions(preferredDate, { scrollToAvailability: true });
                 }
               }}
               disabled={!selectedDoctor || suggestionsLoading}
@@ -665,13 +716,21 @@ export function PatientAppointmentsPage() {
               </button>
             </div>
 
+            <div className="booking-stepper" aria-label="خطوات حجز الموعد">
+              {["نوع الزيارة", "الطبيب", "التاريخ", "الوقت المتاح", "السبب", "الملخص", "التأكيد"].map((step, index) => (
+                <span key={step} className="timeline-filter">
+                  {index + 1}. {step}
+                </span>
+              ))}
+            </div>
+
             <form className="form-grid" onSubmit={handleSubmit}>
               <label className="field">
                 <span>الطبيب</span>
                 <select
                   value={form.doctorId}
                   onChange={(event) => {
-                    updateForm({ doctorId: event.target.value });
+                    updateForm({ doctorId: event.target.value, scheduledAt: "" });
                     clearFeedback();
                     clearSuggestions();
                   }}
@@ -688,10 +747,11 @@ export function PatientAppointmentsPage() {
               <label className="field">
                 <span>التاريخ والوقت</span>
                 <input
-                  type="datetime-local"
-                  value={form.scheduledAt}
+                  type="date"
+                  value={preferredDate}
                   onChange={(event) => {
-                    updateForm({ scheduledAt: event.target.value });
+                    setPreferredDate(event.target.value);
+                    updateForm({ scheduledAt: "" });
                     clearFeedback();
                     clearSuggestions();
                   }}
@@ -708,7 +768,8 @@ export function PatientAppointmentsPage() {
                       doctorId:
                         event.target.value === "FOLLOW_UP" && !form.doctorId && latestDoctorId
                           ? latestDoctorId
-                          : form.doctorId
+                          : form.doctorId,
+                      scheduledAt: ""
                     });
                     clearFeedback();
                     clearSuggestions();
@@ -726,7 +787,8 @@ export function PatientAppointmentsPage() {
                   value={form.priority}
                   onChange={(event) => {
                     updateForm({
-                      priority: event.target.value as AppointmentPriority
+                      priority: event.target.value as AppointmentPriority,
+                      scheduledAt: ""
                     });
                     clearFeedback();
                     clearSuggestions();
@@ -798,6 +860,11 @@ export function PatientAppointmentsPage() {
                 <div className="success-banner field-span-2">{successMessage}</div>
               ) : null}
               {error ? <div className="error-banner field-span-2">{error}</div> : null}
+              {form.priority === "EMERGENCY" || form.priority === "URGENT" ? (
+                <div className="warning-banner field-span-2">
+                  إذا كانت الأعراض شديدة أو تتفاقم بسرعة، توجه للطوارئ مباشرة ولا تنتظر تأكيد الحجز الإلكتروني.
+                </div>
+              ) : null}
 
               <div className="field-span-2 availability-filter-shell" ref={availabilitySectionRef}>
                 <div className="info-row">
@@ -858,7 +925,7 @@ export function PatientAppointmentsPage() {
                   type="button"
                   onClick={() => {
                     if (selectedDoctor) {
-                      void loadSuggestions(form.scheduledAt, { scrollToAvailability: true });
+                      void loadSuggestions(preferredDate, { scrollToAvailability: true });
                     }
                   }}
                   disabled={!selectedDoctor || suggestionsLoading}
@@ -948,7 +1015,7 @@ export function PatientAppointmentsPage() {
           </div>
           <div className="stack-list">
             {upcomingAppointments.map((appointment) => (
-              <div className="stack-item" key={appointment.id}>
+              <div className="stack-item" id={`appointment-${appointment.id}`} key={appointment.id}>
                 <div className="info-row">
                   <div>
                     <strong>{appointment.doctor.fullName}</strong>
@@ -984,7 +1051,7 @@ export function PatientAppointmentsPage() {
           </div>
           <div className="stack-list compact">
             {previousAppointments.map((appointment) => (
-              <div className="stack-item" key={appointment.id}>
+              <div className="stack-item" id={`appointment-${appointment.id}`} key={appointment.id}>
                 <strong>{appointment.doctor.fullName}</strong>
                 <p>{appointment.reason}</p>
                 <div className="tile-stats">

@@ -25,7 +25,7 @@ const rangeOptions: Array<{ value: AnalyticsRangePreset; label: string }> = [
   { value: "last7", label: "آخر 7 أيام" },
   { value: "last30", label: "آخر 30 يوم" },
   { value: "month", label: "هذا الشهر" },
-  { value: "custom", label: "نطاق مخصص" }
+  { value: "custom", label: "فترة مخصصة" }
 ];
 
 function updateRange(value: AnalyticsFilterState, rangePreset: AnalyticsRangePreset): AnalyticsFilterState {

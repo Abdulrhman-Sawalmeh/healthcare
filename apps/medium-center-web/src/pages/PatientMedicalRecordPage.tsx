@@ -3,351 +3,77 @@ import { Link, useLocation } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { PatientContactBar } from "../components/PatientContactBar";
+import { StatusBadge } from "../components/StatusBadge";
 import { formatDate, formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
-import {
-  PortalClinicalReportRecord,
-  PortalMedicalRecord,
-  PortalSubscriptionPlanRecord,
-  PortalSubscriptionRecord
-} from "../types";
+import { PortalClinicalReportRecord, PortalMedicalRecord } from "../types";
 
 type ActivePanel =
   | { kind: "profile" }
-  | { kind: "conditions" }
-  | { kind: "appointments" }
   | { kind: "report"; id: string }
   | { kind: "referral"; id: string }
-  | { kind: "subscription"; id: string }
   | null;
 
 function isActivationKey(event: KeyboardEvent<HTMLElement>) {
   return event.key === "Enter" || event.key === " ";
 }
 
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
+function uniqueReports(reports: PortalClinicalReportRecord[]) {
+  const byKey = new Map<string, PortalClinicalReportRecord>();
 
-function formatAmount(amountInCents: number, currency: string) {
-  const currencyLabel = currency === "ILS" ? "شيكل" : currency;
-  return `${(amountInCents / 100).toFixed(2)} ${currencyLabel}`;
-}
-
-const refillStatusLabels: Record<string, string> = {
-  REQUESTED: "طلب جديد",
-  DOCTOR_APPROVED: "وافق الطبيب",
-  PHARMACY_PREPARING: "قيد التجهيز",
-  READY_FOR_PICKUP: "جاهز للاستلام",
-  COLLECTED: "تم الاستلام",
-  REJECTED: "مرفوض"
-};
-
-const followUpStatusLabels: Record<string, string> = {
-  PENDING: "قيد المتابعة",
-  DONE: "منجز",
-  CANCELLED: "ملغي",
-  MISSED: "فائت"
-};
-
-function refillStatusLabel(status: string) {
-  return refillStatusLabels[status] ?? toArabicLabel(status);
-}
-
-function followUpStatusLabel(status: string) {
-  return followUpStatusLabels[status] ?? toArabicLabel(status);
-}
-
-function isFollowUpOverdue(status: string, dueDate: string) {
-  return status === "PENDING" && new Date(dueDate).getTime() < Date.now();
-}
-
-function renderPrintableReportSections(report: PortalClinicalReportRecord) {
-  const sections = [
-    { title: "ملخص التقرير", value: report.summary ?? report.notes },
-    { title: "النتائج والفحوصات", value: report.findings },
-    { title: "التوصيات", value: report.recommendations },
-    { title: "المتابعة المقترحة", value: report.recommendedFollowUp },
-    { title: "المرفق", value: report.attachment?.fileName }
-  ].filter((section): section is { title: string; value: string } => Boolean(section.value));
-
-  if (sections.length === 0) {
-    return "";
+  for (const report of reports) {
+    const key = [report.source, report.id, report.reason, report.scheduledAt].join(":");
+    if (!byKey.has(key)) {
+      byKey.set(key, report);
+    }
   }
 
-  return `
-    <section>
-      <h2>محتوى التقرير</h2>
-      <div class="report-sections">
-        ${sections
-          .map(
-            (section) => `
-              <div class="field report-field">
-                <span>${escapeHtml(section.title)}</span>
-                <p>${escapeHtml(section.value)}</p>
-              </div>
-            `
-          )
-          .join("")}
-      </div>
-    </section>
-  `;
+  return [...byKey.values()].sort(
+    (left, right) => new Date(right.scheduledAt).getTime() - new Date(left.scheduledAt).getTime()
+  );
 }
 
-function downloadReportAttachment(report: PortalClinicalReportRecord) {
+function normalizeReportHighlight(value: string | null) {
+  if (!value) return null;
+  if (value.startsWith("local-report-")) return value;
+  if (value.startsWith("lab-report-")) return `local-report-${value.replace("lab-report-", "")}`;
+  return null;
+}
+
+const reportPageSizeOptions = [10, 25, 50, 100];
+
+function getReportRequestedAt(report: PortalClinicalReportRecord) {
+  return report.labRequest?.requestedAt ?? report.scheduledAt;
+}
+
+function getReportServiceDescription(report: PortalClinicalReportRecord) {
+  return report.labRequest?.testName ?? report.reason;
+}
+
+function getReportUrl(report: PortalClinicalReportRecord) {
+  return report.reportUrl ?? report.labRequest?.reportUrl ?? null;
+}
+
+function getReportAttachmentHref(report: PortalClinicalReportRecord) {
   if (!report.attachment?.contentBase64) {
-    return;
+    return null;
   }
 
-  const link = document.createElement("a");
-  link.href = `data:${report.attachment.mimeType};base64,${report.attachment.contentBase64}`;
-  link.download = report.attachment.fileName;
-  link.click();
-}
-
-function openPrintableReport(record: PortalMedicalRecord, report: PortalClinicalReportRecord) {
-  const reportWindow = window.open("", "_blank", "width=980,height=720");
-
-  if (!reportWindow) {
-    return;
-  }
-
-  const title = `تقرير-${record.patient.fullName}-${report.id}`;
-  const html = `
-    <!doctype html>
-    <html lang="ar" dir="rtl">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          :root {
-            color-scheme: light;
-          }
-
-          * {
-            box-sizing: border-box;
-          }
-
-          body {
-            margin: 0;
-            font-family: "Segoe UI", Tahoma, Arial, sans-serif;
-            background: #f5f1ea;
-            color: #17322d;
-            line-height: 1.8;
-          }
-
-          main {
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 32px 24px 40px;
-          }
-
-          header,
-          section {
-            background: #fffdf9;
-            border: 1px solid rgba(23, 50, 45, 0.1);
-            border-radius: 22px;
-            padding: 24px;
-            margin-bottom: 18px;
-          }
-
-          h1,
-          h2,
-          h3,
-          p {
-            margin: 0;
-          }
-
-          h1 {
-            font-size: 30px;
-            margin-top: 10px;
-          }
-
-          h2 {
-            font-size: 18px;
-            margin-bottom: 14px;
-          }
-
-          .eyebrow {
-            color: #0f7663;
-            font-size: 13px;
-            font-weight: 700;
-          }
-
-          .muted {
-            color: #607773;
-          }
-
-          .lead {
-            margin-top: 14px;
-            font-size: 16px;
-          }
-
-          .grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 12px;
-          }
-
-          .field {
-            padding: 14px 16px;
-            border-radius: 16px;
-            background: #f7faf8;
-            border: 1px solid rgba(23, 50, 45, 0.08);
-          }
-
-          .field span {
-            display: block;
-            color: #607773;
-            font-size: 13px;
-            margin-bottom: 4px;
-          }
-
-          .field strong {
-            font-size: 16px;
-          }
-
-          .helper {
-            margin-top: 12px;
-            padding: 12px 14px;
-            border-radius: 14px;
-            background: rgba(15, 118, 99, 0.08);
-            color: #0f7663;
-          }
-
-          .report-sections {
-            display: grid;
-            gap: 12px;
-          }
-
-          .report-field p {
-            white-space: pre-wrap;
-          }
-
-          @media print {
-            body {
-              background: white;
-            }
-
-            main {
-              max-width: none;
-              padding: 0;
-            }
-
-            header,
-            section {
-              border: 1px solid rgba(23, 50, 45, 0.08);
-              box-shadow: none;
-              break-inside: avoid;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        <main>
-          <header>
-            <p class="eyebrow">السجل الصحي والتقرير الطبي</p>
-            <h1>${escapeHtml(report.reason)}</h1>
-            <p class="muted">${escapeHtml(
-              joinMeta([
-                record.patient.fullName,
-                record.patient.medicalRecordNumber,
-                formatDateTime(report.scheduledAt)
-              ])
-            )}</p>
-            <p class="lead">${escapeHtml(report.notes ?? "تم توثيق الزيارة داخل السجل الصحي دون ملاحظات إضافية.")}</p>
-          </header>
-
-          <section>
-            <h2>بيانات المريض</h2>
-            <div class="grid">
-              <div class="field">
-                <span>اسم المريض</span>
-                <strong>${escapeHtml(record.patient.fullName)}</strong>
-              </div>
-              <div class="field">
-                <span>رقم الملف الطبي</span>
-                <strong>${escapeHtml(record.patient.medicalRecordNumber)}</strong>
-              </div>
-              <div class="field">
-                <span>تاريخ الميلاد</span>
-                <strong>${escapeHtml(formatDate(record.profile.dateOfBirth))}</strong>
-              </div>
-              <div class="field">
-                <span>الجنس</span>
-                <strong>${escapeHtml(toArabicLabel(record.profile.gender))}</strong>
-              </div>
-            </div>
-          </section>
-
-          ${renderPrintableReportSections(report)}
-
-          <section>
-            <h2>تفاصيل الزيارة</h2>
-            <div class="grid">
-              <div class="field">
-                <span>الطبيب</span>
-                <strong>${escapeHtml(report.doctor.fullName)}</strong>
-              </div>
-              <div class="field">
-                <span>التخصص</span>
-                <strong>${escapeHtml(report.doctor.specialization)}</strong>
-              </div>
-              <div class="field">
-                <span>القسم</span>
-                <strong>${escapeHtml(report.department.name)}</strong>
-              </div>
-              <div class="field">
-                <span>نوع الزيارة</span>
-                <strong>${escapeHtml(toArabicLabel(report.type))}</strong>
-              </div>
-              <div class="field">
-                <span>الحالة</span>
-                <strong>${escapeHtml(toArabicLabel(report.status))}</strong>
-              </div>
-              <div class="field">
-                <span>المركز</span>
-                <strong>${escapeHtml(report.center.name)}</strong>
-              </div>
-            </div>
-            <p class="helper">يمكنك اختيار Save as PDF من نافذة الطباعة للاحتفاظ بالتقرير كملف PDF.</p>
-          </section>
-        </main>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.setTimeout(() => window.print(), 250);
-          });
-        </script>
-      </body>
-    </html>
-  `;
-
-  reportWindow.document.open();
-  reportWindow.document.write(html);
-  reportWindow.document.close();
+  return `data:${report.attachment.mimeType};base64,${report.attachment.contentBase64}`;
 }
 
 export function PatientMedicalRecordPage() {
   const location = useLocation();
   const [record, setRecord] = useState<PortalMedicalRecord | null>(null);
-  const [plans, setPlans] = useState<PortalSubscriptionPlanRecord[]>([]);
-  const [selectedPlanId, setSelectedPlanId] = useState("");
-  const [paymentToken, setPaymentToken] = useState("");
-  const [subscriptionMessage, setSubscriptionMessage] = useState("");
-  const [refillMessage, setRefillMessage] = useState("");
-  const [refillError, setRefillError] = useState("");
-  const [refillBusyId, setRefillBusyId] = useState<number | null>(null);
-  const [activatingSubscription, setActivatingSubscription] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
   const [reportSearch, setReportSearch] = useState("");
   const [reportFromDate, setReportFromDate] = useState("");
   const [reportToDate, setReportToDate] = useState("");
+  const [reportPageSize, setReportPageSize] = useState(10);
+  const [reportPage, setReportPage] = useState(1);
+  const [refillMessage, setRefillMessage] = useState("");
+  const [refillError, setRefillError] = useState("");
+  const [refillBusyId, setRefillBusyId] = useState<number | null>(null);
   const detailPanelRef = useRef<HTMLElement | null>(null);
   const reportResultsRef = useRef<HTMLElement | null>(null);
 
@@ -364,23 +90,11 @@ export function PatientMedicalRecordPage() {
   }, []);
 
   useEffect(() => {
-    apiRequest<PortalSubscriptionPlanRecord[]>("/portal/subscriptions/plans")
-      .then((payload) => {
-        setPlans(payload);
-        setSelectedPlanId((current) => current || payload[0]?.id || "");
-      })
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
     if (!activePanel || !detailPanelRef.current) {
       return;
     }
 
-    detailPanelRef.current.scrollIntoView({
-      behavior: "smooth",
-      block: "start"
-    });
+    detailPanelRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [activePanel]);
 
   useEffect(() => {
@@ -388,21 +102,31 @@ export function PatientMedicalRecordPage() {
       return;
     }
 
-    reportResultsRef.current.scrollIntoView({
-      behavior: "smooth",
-      block: "start"
-    });
-  }, [loading, location.hash, record]);
+    reportResultsRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [loading, location.hash]);
 
-  const activeReport = useMemo(() => {
-    if (!record || activePanel?.kind !== "report") {
-      return null;
+  useEffect(() => {
+    if (loading || !record) {
+      return;
     }
 
-    return record.clinicalReports.find((report) => report.id === activePanel.id) ?? null;
-  }, [activePanel, record]);
+    const reportId = normalizeReportHighlight(new URLSearchParams(location.search).get("highlight"));
+    if (!reportId) {
+      return;
+    }
 
-  const filteredClinicalReports = useMemo(() => {
+    const report = uniqueReports(record.clinicalReports).find((item) => item.id === reportId);
+    if (!report) {
+      return;
+    }
+
+    setActivePanel({ kind: "report", id: report.id });
+    window.setTimeout(() => {
+      reportResultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+  }, [loading, location.search, record]);
+
+  const filteredReports = useMemo(() => {
     if (!record) {
       return [];
     }
@@ -411,32 +135,53 @@ export function PatientMedicalRecordPage() {
     const fromTime = reportFromDate ? new Date(`${reportFromDate}T00:00:00`).getTime() : null;
     const toTime = reportToDate ? new Date(`${reportToDate}T23:59:59`).getTime() : null;
 
-    return record.clinicalReports.filter((report) => {
-      if (report.source !== "RESULT_REPORT" || !report.reportUrl) {
-        return false;
-      }
+    return uniqueReports(record.clinicalReports).filter((report) => {
+      const reportTime = new Date(getReportRequestedAt(report)).getTime();
+      const labRequest = report.labRequest;
+      const matchesQuery =
+        !query ||
+        report.reason.toLowerCase().includes(query) ||
+        report.doctor.fullName.toLowerCase().includes(query) ||
+        report.center.name.toLowerCase().includes(query) ||
+        report.department.name.toLowerCase().includes(query) ||
+        (labRequest?.testName ?? "").toLowerCase().includes(query) ||
+        (labRequest?.resultValue ?? "").toLowerCase().includes(query) ||
+        (report.summary ?? "").toLowerCase().includes(query);
+      const matchesFrom = fromTime == null || reportTime >= fromTime;
+      const matchesTo = toTime == null || reportTime <= toTime;
 
-      const scheduledTime = new Date(report.scheduledAt).getTime();
-      const matchesDate =
-        (!fromTime || scheduledTime >= fromTime) &&
-        (!toTime || scheduledTime <= toTime);
-      const haystack = [
-        report.reason,
-        report.notes,
-        report.summary,
-        report.doctor.fullName,
-        report.department.name,
-        report.reportUrl,
-        record.patient.fullName,
-        record.patient.medicalRecordNumber
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      return matchesDate && (!query || haystack.includes(query));
+      return matchesQuery && matchesFrom && matchesTo;
     });
   }, [record, reportFromDate, reportSearch, reportToDate]);
+
+  const reportPageCount = Math.max(1, Math.ceil(filteredReports.length / reportPageSize));
+  const currentReportPage = Math.min(reportPage, reportPageCount);
+
+  const paginatedReports = useMemo(() => {
+    const start = (currentReportPage - 1) * reportPageSize;
+    return filteredReports.slice(start, start + reportPageSize);
+  }, [currentReportPage, filteredReports, reportPageSize]);
+
+  const reportRangeStart = filteredReports.length === 0 ? 0 : (currentReportPage - 1) * reportPageSize + 1;
+  const reportRangeEnd = filteredReports.length === 0 ? 0 : reportRangeStart + paginatedReports.length - 1;
+
+  useEffect(() => {
+    setReportPage(1);
+  }, [reportFromDate, reportPageSize, reportSearch, reportToDate]);
+
+  useEffect(() => {
+    if (reportPage > reportPageCount) {
+      setReportPage(reportPageCount);
+    }
+  }, [reportPage, reportPageCount]);
+
+  const activeReport = useMemo(() => {
+    if (!record || activePanel?.kind !== "report") {
+      return null;
+    }
+
+    return uniqueReports(record.clinicalReports).find((report) => report.id === activePanel.id) ?? null;
+  }, [activePanel, record]);
 
   const activeReferral = useMemo(() => {
     if (!record || activePanel?.kind !== "referral") {
@@ -446,13 +191,7 @@ export function PatientMedicalRecordPage() {
     return record.referrals.find((referral) => referral.id === activePanel.id) ?? null;
   }, [activePanel, record]);
 
-  const activeSubscription = useMemo(() => {
-    if (!record || activePanel?.kind !== "subscription") {
-      return null;
-    }
-
-    return record.subscriptions.find((subscription) => subscription.id === activePanel.id) ?? null;
-  }, [activePanel, record]);
+  const highlightedReportId = normalizeReportHighlight(new URLSearchParams(location.search).get("highlight"));
 
   function openPanel(nextPanel: Exclude<ActivePanel, null>) {
     setActivePanel(nextPanel);
@@ -465,36 +204,6 @@ export function PatientMedicalRecordPage() {
 
     event.preventDefault();
     openPanel(nextPanel);
-  }
-
-  async function handleActivateSubscription() {
-    if (!selectedPlanId || paymentToken.trim().length < 12) {
-      setSubscriptionMessage("Enter a secure payment token with at least 12 characters.");
-      return;
-    }
-
-    setActivatingSubscription(true);
-    setSubscriptionMessage("");
-
-    try {
-      const subscription = await apiRequest<PortalSubscriptionRecord>("/portal/subscriptions/activate", {
-        method: "POST",
-        body: JSON.stringify({
-          planId: selectedPlanId,
-          securePaymentToken: paymentToken,
-          autoRenew: true
-        })
-      });
-
-      setPaymentToken("");
-      setSubscriptionMessage("Subscription activated. Follow-up reminders and doctor messaging are available.");
-      await loadRecord();
-      setActivePanel({ kind: "subscription", id: subscription.id });
-    } catch (cause) {
-      setSubscriptionMessage(cause instanceof Error ? cause.message : "Subscription activation failed.");
-    } finally {
-      setActivatingSubscription(false);
-    }
   }
 
   async function handleRequestRefill(prescriptionId: number) {
@@ -526,237 +235,78 @@ export function PatientMedicalRecordPage() {
         <section className="section-card detail-panel" ref={detailPanelRef}>
           <div className="section-header">
             <div>
-              <p className="eyebrow">بيانات السجل</p>
-              <h3>تفاصيل الملف الصحي الأساسية</h3>
+              <p className="eyebrow">بيانات الملف</p>
+              <h3>{record.patient.fullName}</h3>
             </div>
-            <button className="ghost-button" type="button" onClick={() => setActivePanel(null)}>
-              إغلاق
-            </button>
+            <button className="ghost-button" type="button" onClick={() => setActivePanel(null)}>إغلاق</button>
           </div>
           <div className="detail-grid">
-            <div className="detail-field">
-              <span>اسم المريض</span>
-              <strong>{record.patient.fullName}</strong>
-            </div>
-            <div className="detail-field">
-              <span>رقم الملف الطبي</span>
-              <strong>{record.patient.medicalRecordNumber}</strong>
-            </div>
-            <div className="detail-field">
-              <span>المركز الطبي</span>
-              <strong>{record.profile.center.name}</strong>
-            </div>
-            <div className="detail-field">
-              <span>رمز المركز</span>
-              <strong>{record.profile.center.code}</strong>
-            </div>
-            <div className="detail-field">
-              <span>المدينة</span>
-              <strong>{record.profile.center.city}</strong>
-            </div>
-            <div className="detail-field">
-              <span>العنوان</span>
-              <strong>{record.profile.center.address}</strong>
-            </div>
-            <div className="detail-field">
-              <span>رقم التأمين</span>
-              <strong>{record.profile.insuranceNumber ?? "غير مسجل"}</strong>
-            </div>
-            <div className="detail-field">
-              <span>جهة التواصل الطارئة</span>
-              <strong>{record.profile.emergencyContact ?? "غير مسجلة"}</strong>
-            </div>
-          </div>
-          <div className="chip-row">
-            <Link className="primary-button" to="/appointments">
-              إدارة المواعيد
-            </Link>
-            <Link className="ghost-button" to="/notifications">
-              متابعة الإشعارات
-            </Link>
+            <div className="detail-field"><span>رقم الملف</span><strong>{record.patient.medicalRecordNumber}</strong></div>
+            <div className="detail-field"><span>تاريخ الميلاد</span><strong>{formatDate(record.profile.dateOfBirth)}</strong></div>
+            <div className="detail-field"><span>الجنس</span><strong>{toArabicLabel(record.profile.gender)}</strong></div>
+            <div className="detail-field"><span>الطوارئ</span><strong>{record.profile.emergencyContact ?? "غير مسجل"}</strong></div>
+            <div className="detail-field"><span>الحالات المزمنة</span><strong>{record.patient.chronicConditions ?? "لا توجد بيانات مسجلة"}</strong></div>
+            <div className="detail-field"><span>المركز</span><strong>{record.profile.center.name}</strong></div>
           </div>
         </section>
       );
     }
 
-    if (activePanel.kind === "conditions") {
+    if (activeReport) {
       return (
         <section className="section-card detail-panel" ref={detailPanelRef}>
           <div className="section-header">
             <div>
-              <p className="eyebrow">الحالة الصحية</p>
-              <h3>الأمراض المزمنة ومعلومات المتابعة</h3>
-            </div>
-            <button className="ghost-button" type="button" onClick={() => setActivePanel(null)}>
-              إغلاق
-            </button>
-          </div>
-          <div className="stack-item">
-            <strong>{record.profile.chronicConditions ?? "لا توجد أمراض مزمنة موثقة حتى الآن."}</strong>
-            <p>جهة التواصل الطارئة: {record.profile.emergencyContact ?? "غير مسجلة"}</p>
-            <div className="tile-stats">
-              <span>{toArabicLabel(record.profile.gender)}</span>
-              <span>{formatDate(record.profile.dateOfBirth)}</span>
-              <span>{record.profile.center.name}</span>
-            </div>
-          </div>
-          <p className="inline-note">يمكنك الرجوع إلى الطبيب أو حجز متابعة جديدة إذا تغيرت الأعراض أو الخطة العلاجية.</p>
-          <div className="chip-row">
-            <Link className="primary-button" to="/appointments">
-              حجز متابعة
-            </Link>
-            <Link className="ghost-button" to="/messages">
-              مراسلة الطبيب
-            </Link>
-          </div>
-        </section>
-      );
-    }
-
-    if (activePanel.kind === "appointments") {
-      return (
-        <section className="section-card detail-panel" ref={detailPanelRef}>
-          <div className="section-header">
-            <div>
-              <p className="eyebrow">المواعيد القادمة</p>
-              <h3>كل المواعيد النشطة في السجل الصحي</h3>
-            </div>
-            <button className="ghost-button" type="button" onClick={() => setActivePanel(null)}>
-              إغلاق
-            </button>
-          </div>
-          <div className="stack-list">
-            {record.upcomingAppointments.map((appointment) => (
-              <div className="stack-item" key={appointment.id}>
-                <strong>{appointment.doctor.fullName}</strong>
-                <p>{appointment.reason}</p>
-                <div className="tile-stats">
-                  <span>{formatDateTime(appointment.scheduledAt)}</span>
-                  <span>{appointment.department.name}</span>
-                  <span>{toArabicLabel(appointment.type)}</span>
-                  <span>{toArabicLabel(appointment.status)}</span>
-                </div>
-              </div>
-            ))}
-            {record.upcomingAppointments.length === 0 ? (
-              <div className="empty-state compact">لا توجد مواعيد قادمة مسجلة في الوقت الحالي.</div>
-            ) : null}
-          </div>
-          <div className="chip-row">
-            <Link className="primary-button" to="/appointments">
-              فتح صفحة المواعيد
-            </Link>
-            <Link className="ghost-button" to="/doctors">
-              عرض الأطباء
-            </Link>
-          </div>
-        </section>
-      );
-    }
-
-    if (activePanel.kind === "report" && activeReport) {
-      return (
-        <section className="section-card detail-panel" ref={detailPanelRef}>
-          <div className="section-header">
-            <div>
-              <p className="eyebrow">التقرير الطبي</p>
+              <p className="eyebrow">تفاصيل التقرير</p>
               <h3>{activeReport.reason}</h3>
             </div>
-            <button className="ghost-button" type="button" onClick={() => setActivePanel(null)}>
-              إغلاق
-            </button>
+            <button className="ghost-button" type="button" onClick={() => setActivePanel(null)}>إغلاق</button>
           </div>
-          <div className="stack-item">
-            <strong>{activeReport.doctor.fullName}</strong>
-            <p>{activeReport.notes ?? "تم توثيق الزيارة ضمن السجل الصحي دون ملاحظات إضافية."}</p>
-            <div className="tile-stats">
-              <span>{formatDateTime(activeReport.scheduledAt)}</span>
-              <span>{activeReport.department.name}</span>
-              <span>{toArabicLabel(activeReport.type)}</span>
-              <span>{toArabicLabel(activeReport.status)}</span>
-            </div>
+          <div className="tile-stats">
+            <span>{formatDateTime(activeReport.scheduledAt)}</span>
+            <span>{activeReport.doctor.fullName}</span>
+            <span>{activeReport.department.name}</span>
+            <span>{toArabicLabel(activeReport.status)}</span>
           </div>
           <div className="detail-grid">
-            <div className="detail-field">
-              <span>الطبيب</span>
-              <strong>{activeReport.doctor.fullName}</strong>
+            <div className="detail-field field-span-2">
+              <span>الملخص</span>
+              <strong>{activeReport.summary ?? activeReport.notes ?? "لا يوجد ملخص إضافي."}</strong>
             </div>
-            <div className="detail-field">
-              <span>التخصص</span>
-              <strong>{activeReport.doctor.specialization}</strong>
+            <div className="detail-field field-span-2">
+              <span>النتائج</span>
+              <strong>{activeReport.findings ?? "لا توجد نتائج مفصلة."}</strong>
             </div>
-            <div className="detail-field">
-              <span>القسم</span>
-              <strong>{activeReport.department.name}</strong>
+            <div className="detail-field field-span-2">
+              <span>التوصيات</span>
+              <strong>{activeReport.recommendations ?? activeReport.recommendedFollowUp ?? "لا توجد توصيات مسجلة."}</strong>
             </div>
-            <div className="detail-field">
-              <span>المركز</span>
-              <strong>{activeReport.center.name}</strong>
-            </div>
-            {activeReport.reportUrl ? (
-              <div className="detail-field detail-field-wide">
-                <span>رابط التقرير</span>
-                <a className="primary-button" href={activeReport.reportUrl} rel="noreferrer" target="_blank">
-                  فتح التقرير في صفحة جديدة
+          </div>
+          {activeReport.reportUrl ? (
+            <a className="ghost-button" href={activeReport.reportUrl} rel="noreferrer" target="_blank">
+              فتح رابط التقرير
+            </a>
+          ) : null}
+          {activeReport.attachment ? (
+            <div className="inline-note">
+              <strong>{activeReport.attachment.fileName}</strong>
+              <p className="muted">{activeReport.attachment.mimeType}</p>
+              {activeReport.attachment.contentBase64 ? (
+                <a
+                  className="ghost-button"
+                  download={activeReport.attachment.fileName}
+                  href={`data:${activeReport.attachment.mimeType};base64,${activeReport.attachment.contentBase64}`}
+                >
+                  تنزيل المرفق
                 </a>
-              </div>
-            ) : null}
-            {[
-              { label: "ملخص التقرير", value: activeReport.summary ?? activeReport.notes },
-              { label: "النتائج والفحوصات", value: activeReport.findings },
-              { label: "التوصيات", value: activeReport.recommendations },
-              { label: "المتابعة المقترحة", value: activeReport.recommendedFollowUp }
-            ]
-              .filter((section): section is { label: string; value: string } => Boolean(section.value))
-              .map((section) => (
-                <div className="detail-field detail-field-wide" key={section.label}>
-                  <span>{section.label}</span>
-                  <p className="preserve-lines">{section.value}</p>
-                </div>
-              ))}
-            {activeReport.attachment ? (
-              <div className="detail-field detail-field-wide">
-                <span>المرفق</span>
-                <strong>{activeReport.attachment.fileName}</strong>
-                {activeReport.attachment.contentBase64 ? (
-                  <button
-                    className="ghost-button"
-                    onClick={() => downloadReportAttachment(activeReport)}
-                    type="button"
-                  >
-                    تنزيل المرفق
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-          <p className="inline-note">
-            {activeReport.reportUrl
-              ? "يفتح رابط التقرير في صفحة جديدة كما هو منشور من الطبيب."
-              : "زر الطباعة يفتح نسخة مناسبة للطباعة ويمكن حفظها من المتصفح كملف PDF."}
-          </p>
-          <div className="chip-row">
-            {activeReport.reportUrl ? (
-              <a className="primary-button" href={activeReport.reportUrl} rel="noreferrer" target="_blank">
-                فتح التقرير
-              </a>
-            ) : (
-              <button className="primary-button" type="button" onClick={() => openPrintableReport(record, activeReport)}>
-                طباعة أو حفظ PDF
-              </button>
-            )}
-            <Link className="ghost-button" to="/messages">
-              مراسلة الطبيب
-            </Link>
-            <Link className="ghost-button" to="/appointments">
-              حجز متابعة
-            </Link>
-          </div>
+              ) : null}
+            </div>
+          ) : null}
         </section>
       );
     }
 
-    if (activePanel.kind === "referral" && activeReferral) {
+    if (activeReferral) {
       return (
         <section className="section-card detail-panel" ref={detailPanelRef}>
           <div className="section-header">
@@ -764,109 +314,17 @@ export function PatientMedicalRecordPage() {
               <p className="eyebrow">تفاصيل الإحالة</p>
               <h3>{activeReferral.reason}</h3>
             </div>
-            <button className="ghost-button" type="button" onClick={() => setActivePanel(null)}>
-              إغلاق
-            </button>
-          </div>
-          <div className="stack-item">
-            <strong>
-              {activeReferral.fromCenter.name} ← {activeReferral.toCenter.name}
-            </strong>
-            <p>{activeReferral.notes ?? "لا توجد ملاحظات إضافية على الإحالة."}</p>
-            <div className="tile-stats">
-              <span>{toArabicLabel(activeReferral.status)}</span>
-              <span>{toArabicLabel(activeReferral.priority)}</span>
-              <span>{formatDate(activeReferral.createdAt)}</span>
-            </div>
+            <button className="ghost-button" type="button" onClick={() => setActivePanel(null)}>إغلاق</button>
           </div>
           <div className="detail-grid">
-            <div className="detail-field">
-              <span>الطبيب المحيل</span>
-              <strong>{activeReferral.fromDoctor.fullName}</strong>
-            </div>
-            <div className="detail-field">
-              <span>الطبيب المستلم</span>
-              <strong>{activeReferral.toDoctor?.fullName ?? "لم يتم التحديد بعد"}</strong>
-            </div>
-            <div className="detail-field">
-              <span>القسم</span>
-              <strong>{activeReferral.department?.name ?? "غير محدد"}</strong>
-            </div>
-            <div className="detail-field">
-              <span>تاريخ القبول</span>
-              <strong>{activeReferral.acceptedAt ? formatDate(activeReferral.acceptedAt) : "بانتظار القبول"}</strong>
-            </div>
+            <div className="detail-field"><span>من</span><strong>{activeReferral.fromCenter.name}</strong></div>
+            <div className="detail-field"><span>إلى</span><strong>{activeReferral.toCenter.name}</strong></div>
+            <div className="detail-field"><span>الطبيب المحيل</span><strong>{activeReferral.fromDoctor.fullName}</strong></div>
+            <div className="detail-field"><span>الطبيب المستقبل</span><strong>{activeReferral.toDoctor?.fullName ?? "لم يتم التحديد بعد"}</strong></div>
+            <div className="detail-field"><span>القسم</span><strong>{activeReferral.department?.name ?? "غير محدد"}</strong></div>
+            <div className="detail-field"><span>الحالة</span><StatusBadge status={activeReferral.status} /></div>
           </div>
-          <div className="chip-row">
-            <Link className="primary-button" to="/messages">
-              متابعة مع الطبيب
-            </Link>
-            <Link className="ghost-button" to="/notifications">
-              فتح الإشعارات
-            </Link>
-          </div>
-        </section>
-      );
-    }
-
-    if (activePanel.kind === "subscription" && activeSubscription) {
-      return (
-        <section className="section-card detail-panel" ref={detailPanelRef}>
-          <div className="section-header">
-            <div>
-              <p className="eyebrow">تفاصيل الاشتراك</p>
-              <h3>{activeSubscription.plan.name}</h3>
-            </div>
-            <button className="ghost-button" type="button" onClick={() => setActivePanel(null)}>
-              إغلاق
-            </button>
-          </div>
-          <div className="stack-item">
-            <strong>{activeSubscription.plan.description ?? "خطة متابعة علاجية مرتبطة بالحساب الحالي."}</strong>
-            <div className="tile-stats">
-              <span>{toArabicLabel(activeSubscription.status)}</span>
-              <span>{toArabicLabel(activeSubscription.plan.billingCycle)}</span>
-              <span>{formatAmount(activeSubscription.plan.priceInCents, "ILS")}</span>
-            </div>
-          </div>
-          <div className="detail-grid">
-            <div className="detail-field">
-              <span>المركز</span>
-              <strong>{activeSubscription.center.name}</strong>
-            </div>
-            <div className="detail-field">
-              <span>أقصى عدد زيارات</span>
-              <strong>{activeSubscription.plan.maxVisits}</strong>
-            </div>
-            <div className="detail-field">
-              <span>تاريخ البداية</span>
-              <strong>{formatDate(activeSubscription.startedAt)}</strong>
-            </div>
-            <div className="detail-field">
-              <span>تاريخ النهاية</span>
-              <strong>{formatDate(activeSubscription.endsAt)}</strong>
-            </div>
-            <div className="detail-field">
-              <span>التجديد التلقائي</span>
-              <strong>{activeSubscription.autoRenew ? "مفعل" : "غير مفعل"}</strong>
-            </div>
-          </div>
-          <div className="stack-list compact">
-            {activeSubscription.payments.map((payment) => (
-              <div className="stack-item" key={payment.id}>
-                <strong>{formatAmount(payment.amountInCents, payment.currency)}</strong>
-                <p>{toArabicLabel(payment.status)}</p>
-                <div className="tile-stats">
-                  <span>{toArabicLabel(payment.method)}</span>
-                  <span>{formatDate(payment.paidAt ?? payment.createdAt)}</span>
-                  <span>{payment.reference ?? "بدون مرجع"}</span>
-                </div>
-              </div>
-            ))}
-            {activeSubscription.payments.length === 0 ? (
-              <div className="empty-state compact">لا توجد دفعات مسجلة لهذا الاشتراك بعد.</div>
-            ) : null}
-          </div>
+          {activeReferral.notes ? <p className="inline-note">{activeReferral.notes}</p> : null}
         </section>
       );
     }
@@ -875,7 +333,7 @@ export function PatientMedicalRecordPage() {
   }
 
   if (loading) {
-    return <div className="screen-center">جارٍ تحميل السجل الصحي...</div>;
+    return <div className="screen-center">جاري تحميل السجل الصحي...</div>;
   }
 
   if (!record) {
@@ -883,7 +341,7 @@ export function PatientMedicalRecordPage() {
   }
 
   return (
-    <div className="page-stack">
+    <div className="page-stack patient-medical-record-page">
       <PatientContactBar centerName={record.profile.center.name} phone={record.profile.center.phone} />
 
       <section className="hero-strip">
@@ -891,143 +349,227 @@ export function PatientMedicalRecordPage() {
           <p className="eyebrow">السجل الصحي والتقارير الطبية</p>
           <h1>{record.patient.fullName}</h1>
           <p className="muted">
-            {joinMeta([
-              record.patient.medicalRecordNumber,
-              toArabicLabel(record.profile.gender),
-              formatDate(record.profile.dateOfBirth)
-            ])}
+            {joinMeta([record.patient.medicalRecordNumber, toArabicLabel(record.profile.gender), formatDate(record.profile.dateOfBirth)])}
           </p>
         </div>
         <div className="chip-row">
-          <Link className="primary-button" to="/appointments">
-            إدارة المواعيد
-          </Link>
-          <Link className="ghost-button" to="/messages">
-            مراسلة الفريق الطبي
-          </Link>
+          <Link className="primary-button" to="/appointments">إدارة المواعيد</Link>
+          <Link className="ghost-button" to="/messages">مراسلة الفريق الطبي</Link>
+          <button className="ghost-button" type="button" onClick={() => openPanel({ kind: "profile" })}>بيانات الملف</button>
         </div>
       </section>
 
-      <section className="card-grid">
-        <article
-          className="profile-tile interactive-card"
-          role="button"
-          tabIndex={0}
-          onClick={() => openPanel({ kind: "profile" })}
-          onKeyDown={(event) => handlePanelActivation(event, { kind: "profile" })}
-        >
-          <p className="eyebrow">البيانات الأساسية</p>
-          <h3>{record.profile.center.name}</h3>
-          <p>{record.profile.center.city}</p>
-          <div className="tile-stats">
-            <span>{record.profile.center.code}</span>
-            <span>{record.profile.insuranceNumber ?? "لا يوجد رقم تأمين"}</span>
-          </div>
-          <p className="action-hint">اضغط لعرض التفاصيل الكاملة للملف.</p>
-        </article>
-
-        <article
-          className="profile-tile interactive-card"
-          role="button"
-          tabIndex={0}
-          onClick={() => openPanel({ kind: "conditions" })}
-          onKeyDown={(event) => handlePanelActivation(event, { kind: "conditions" })}
-        >
-          <p className="eyebrow">الأمراض المزمنة</p>
-          <h3>{record.profile.chronicConditions ?? "لا توجد أمراض مزمنة موثقة"}</h3>
-          <p>جهة الاتصال الطارئة: {record.profile.emergencyContact ?? "غير مسجلة"}</p>
-          <p className="action-hint">اضغط لعرض الحالة الصحية ومعلومات المتابعة.</p>
-        </article>
-
-        <article
-          className="profile-tile interactive-card"
-          role="button"
-          tabIndex={0}
-          onClick={() => openPanel({ kind: "appointments" })}
-          onKeyDown={(event) => handlePanelActivation(event, { kind: "appointments" })}
-        >
-          <p className="eyebrow">المواعيد القادمة</p>
-          <h3>{record.upcomingAppointments.length}</h3>
-          <p>مواعيد نشطة داخل الخطة العلاجية الحالية.</p>
-          <p className="action-hint">اضغط لعرض جميع المواعيد القادمة.</p>
-        </article>
+      <section className="metric-grid compact-metrics">
+        <article className="metric-card"><span className="eyebrow">التقارير</span><h3>{filteredReports.length}</h3><p className="muted">تقارير ونتائج قابلة للمراجعة.</p></article>
+        <article className="metric-card"><span className="eyebrow">المواعيد القادمة</span><h3>{record.upcomingAppointments.length}</h3><p className="muted">زيارات مجدولة أو مؤكدة.</p></article>
+        <article className="metric-card"><span className="eyebrow">الإحالات</span><h3>{record.referrals.length}</h3><p className="muted">طلبات إحالة مرتبطة بسجلك.</p></article>
+        <article className="metric-card"><span className="eyebrow">تذكيرات المتابعة</span><h3>{record.followUpReminders?.length ?? 0}</h3><p className="muted">متابعات علاجية قادمة.</p></article>
       </section>
 
       {renderDetailPanel()}
 
-      <section className="split-grid">
-        <article className="section-card report-results-card" id="reports" ref={reportResultsRef}>
-          <div className="section-header">
-            <div>
-              <p className="eyebrow">التقارير والنتائج</p>
-              <h3>روابط التقارير الطبية</h3>
-            </div>
+      <section className="section-card" id="reports" ref={reportResultsRef}>
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">التقارير الطبية</p>
+            <h3>نتائج وملخصات الزيارات</h3>
           </div>
-          <div className="form-grid">
-            <label className="field">
-              <span>من تاريخ</span>
-              <input type="date" value={reportFromDate} onChange={(event) => setReportFromDate(event.target.value)} />
+        </div>
+        <div className="medical-report-date-filter">
+          <label className="field">
+            <span>من تاريخ*</span>
+            <input type="date" value={reportFromDate} onChange={(event) => setReportFromDate(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>إلى تاريخ*</span>
+            <input type="date" value={reportToDate} onChange={(event) => setReportToDate(event.target.value)} />
+          </label>
+          <button className="primary-button" type="button" onClick={() => setReportPage(1)}>ابحث</button>
+        </div>
+        <div className="form-grid compact-form-grid legacy-report-filters" aria-hidden="true">
+          <label className="field"><span>بحث</span><input value={reportSearch} onChange={(event) => setReportSearch(event.target.value)} placeholder="الطبيب، القسم، سبب الزيارة..." /></label>
+          <label className="field"><span>من تاريخ</span><input type="date" value={reportFromDate} onChange={(event) => setReportFromDate(event.target.value)} /></label>
+          <label className="field"><span>إلى تاريخ</span><input type="date" value={reportToDate} onChange={(event) => setReportToDate(event.target.value)} /></label>
+        </div>
+        <div className="medical-reports-table-card">
+          <div className="medical-reports-table-toolbar">
+            <label className="entries-control">
+              <span>أظهر</span>
+              <select
+                value={reportPageSize}
+                onChange={(event) => setReportPageSize(Number(event.target.value))}
+              >
+                {reportPageSizeOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+              <span>مدخلات</span>
             </label>
-            <label className="field">
-              <span>إلى تاريخ</span>
-              <input type="date" value={reportToDate} onChange={(event) => setReportToDate(event.target.value)} />
-            </label>
-            <label className="field field-span-2">
-              <span>بحث</span>
+            <label className="medical-report-search">
+              <span>ابحث:</span>
               <input
                 value={reportSearch}
                 onChange={(event) => setReportSearch(event.target.value)}
-                placeholder="ابحث باسم الطبيب، القسم، عنوان التقرير، أو رقم المريض"
+                placeholder="مثال بحث"
               />
             </label>
           </div>
-          <div className="table-shell">
-            <table className="data-table">
+
+          <div className="table-wrapper medical-reports-table-wrapper">
+            <table className="medical-reports-table">
               <thead>
                 <tr>
                   <th>رقم المريض</th>
                   <th>اسم المريض</th>
+                  <th>وصف الخدمة</th>
                   <th>اسم الطبيب</th>
-                  <th>اسم القسم</th>
+                  <th>اسم المركز / القسم</th>
                   <th>تاريخ الطلب</th>
                   <th>رابط التقرير</th>
+                  <th>ملف PDF / النتائج</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredClinicalReports.map((report) => (
-                  <tr key={report.id}>
-                    <td>{record.patient.medicalRecordNumber}</td>
-                    <td>{record.patient.fullName}</td>
-                    <td>{report.doctor.fullName}</td>
-                    <td>{report.department.name}</td>
-                    <td>{formatDateTime(report.scheduledAt)}</td>
-                    <td>
-                      <a className="table-action-button" href={report.reportUrl ?? "#"} rel="noreferrer" target="_blank">
-                        عرض التفاصيل
-                      </a>
-                    </td>
-                  </tr>
-                ))}
-                {filteredClinicalReports.length === 0 ? (
+                {paginatedReports.map((report) => {
+                  const reportUrl = getReportUrl(report);
+                  const attachmentHref = getReportAttachmentHref(report);
+                  const imageUrl = report.labRequest?.imageUrl ?? null;
+                  const resultText = report.labRequest?.resultValue
+                    ? joinMeta([
+                        report.labRequest.resultValue,
+                        report.labRequest.unit,
+                        report.labRequest.normalRange ? `الطبيعي: ${report.labRequest.normalRange}` : null
+                      ])
+                    : null;
+
+                  return (
+                    <tr
+                      className={highlightedReportId === report.id ? "target-highlight" : undefined}
+                      id={report.id}
+                      key={`${report.source}-${report.id}`}
+                    >
+                      <td>{report.patient.medicalRecordNumber}</td>
+                      <td><strong>{report.patient.fullName}</strong></td>
+                      <td>
+                        <strong>{getReportServiceDescription(report)}</strong>
+                        <button
+                          className="medical-report-details-button"
+                          type="button"
+                          onClick={() => openPanel({ kind: "report", id: report.id })}
+                        >
+                          عرض التفاصيل
+                        </button>
+                      </td>
+                      <td>{report.doctor.fullName}</td>
+                      <td>{joinMeta([report.center.name, report.department.name])}</td>
+                      <td>{formatDate(getReportRequestedAt(report))}</td>
+                      <td>
+                        {reportUrl ? (
+                          <a className="medical-report-link" href={reportUrl} rel="noreferrer" target="_blank">
+                            فتح التقرير
+                          </a>
+                        ) : (
+                          <span className="muted">لا يوجد رابط</span>
+                        )}
+                      </td>
+                      <td>
+                        {attachmentHref ? (
+                          <a
+                            className="medical-report-link"
+                            download={report.attachment?.fileName}
+                            href={attachmentHref}
+                          >
+                            {report.attachment?.mimeType.includes("pdf") ? "فتح PDF" : "تنزيل الملف"}
+                          </a>
+                        ) : imageUrl ? (
+                          <a className="medical-report-link" href={imageUrl} rel="noreferrer" target="_blank">
+                            فتح الصورة
+                          </a>
+                        ) : resultText ? (
+                          <span>{resultText}</span>
+                        ) : (
+                          <span className="muted">لا يوجد ملف</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {paginatedReports.length === 0 ? (
                   <tr>
-                    <td colSpan={6}>لا توجد بيانات متاحة في الجدول.</td>
+                    <td className="medical-reports-empty-cell" colSpan={8}>لا يوجد بيانات متاحة في الجدول</td>
                   </tr>
                 ) : null}
               </tbody>
             </table>
           </div>
-          <p className="table-status">
-            يعرض {filteredClinicalReports.length} من أصل{" "}
-            {record.clinicalReports.filter((report) => report.source === "RESULT_REPORT" && report.reportUrl).length} مدخل
-          </p>
+
+          <div className="medical-reports-table-footer">
+            <p>يعرض {reportRangeStart} إلى {reportRangeEnd} من أصل {filteredReports.length} مدخل</p>
+            <div className="pagination-bar medical-reports-pagination">
+              <button className="ghost-button" type="button" disabled={currentReportPage === 1} onClick={() => setReportPage(1)}>الأول</button>
+              <button className="ghost-button" type="button" disabled={currentReportPage === 1} onClick={() => setReportPage((page) => Math.max(1, page - 1))}>السابق</button>
+              <button className="ghost-button" type="button" disabled={currentReportPage >= reportPageCount} onClick={() => setReportPage((page) => Math.min(reportPageCount, page + 1))}>التالي</button>
+              <button className="ghost-button" type="button" disabled={currentReportPage >= reportPageCount} onClick={() => setReportPage(reportPageCount)}>الأخير</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="stack-list compact legacy-report-cards" aria-hidden="true">
+          {filteredReports.map((report) => {
+            return (
+              <article
+                className={`stack-item interactive-card${highlightedReportId === report.id ? " target-highlight" : ""}`}
+                id={report.id}
+                key={`${report.source}-${report.id}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => openPanel({ kind: "report", id: report.id })}
+                onKeyDown={(event) => handlePanelActivation(event, { kind: "report", id: report.id })}
+              >
+                <div className="info-row">
+                  <div>
+                    <strong>{report.reason}</strong>
+                    <p className="muted">{report.summary ?? report.notes ?? "تقرير محفوظ ضمن السجل الصحي."}</p>
+                  </div>
+                  <StatusBadge status={report.status} />
+                </div>
+                <div className="tile-stats">
+                  <span>{formatDateTime(report.scheduledAt)}</span>
+                  <span>{report.doctor.fullName}</span>
+                  <span>{report.department.name}</span>
+                </div>
+              </article>
+            );
+          })}
+          {filteredReports.length === 0 ? <div className="empty-state compact">لا توجد تقارير مطابقة للبحث الحالي.</div> : null}
+        </div>
+      </section>
+
+      <section className="split-grid">
+        <article className="section-card">
+          <div className="section-header">
+            <div><p className="eyebrow">المواعيد القادمة</p><h3>زيارات مجدولة</h3></div>
+            <Link className="ghost-button" to="/appointments">فتح المواعيد</Link>
+          </div>
+          <div className="stack-list compact">
+            {record.upcomingAppointments.map((appointment) => (
+              <Link className="stack-item interactive-card" key={appointment.id} to={`/appointments?appointmentId=${appointment.id}`}>
+                <strong>{appointment.doctor.fullName}</strong>
+                <p>{appointment.reason}</p>
+                <div className="tile-stats">
+                  <span>{formatDateTime(appointment.scheduledAt)}</span>
+                  <span>{appointment.department.name}</span>
+                  <span>{toArabicLabel(appointment.status)}</span>
+                </div>
+              </Link>
+            ))}
+            {record.upcomingAppointments.length === 0 ? <div className="empty-state compact">لا توجد مواعيد قادمة.</div> : null}
+          </div>
         </article>
 
         <article className="section-card">
           <div className="section-header">
-            <div>
-              <p className="eyebrow">الإحالات</p>
-              <h3>الحالة الحالية للإحالات</h3>
-            </div>
+            <div><p className="eyebrow">الإحالات</p><h3>طلبات إحالة ومتابعة</h3></div>
           </div>
           <div className="stack-list compact">
             {record.referrals.map((referral) => (
@@ -1039,21 +581,17 @@ export function PatientMedicalRecordPage() {
                 onClick={() => openPanel({ kind: "referral", id: referral.id })}
                 onKeyDown={(event) => handlePanelActivation(event, { kind: "referral", id: referral.id })}
               >
-                <strong>{referral.reason}</strong>
-                <p>
-                  {referral.fromCenter.name} ← {referral.toCenter.name}
-                </p>
-                <div className="tile-stats">
-                  <span>{toArabicLabel(referral.status)}</span>
-                  <span>{referral.toDoctor?.fullName ?? "لم يحدد الطبيب بعد"}</span>
-                  <span>{formatDate(referral.createdAt)}</span>
+                <div className="info-row">
+                  <div><strong>{referral.reason}</strong><p className="muted">{referral.toCenter.name}</p></div>
+                  <StatusBadge status={referral.status} />
                 </div>
-                <p className="action-hint">اضغط لعرض تفاصيل الإحالة الحالية.</p>
+                <div className="tile-stats">
+                  <span>{formatDate(referral.createdAt)}</span>
+                  <span>{toArabicLabel(referral.priority)}</span>
+                </div>
               </article>
             ))}
-            {record.referrals.length === 0 ? (
-              <div className="empty-state compact">لا توجد إحالات مسجلة حاليًا.</div>
-            ) : null}
+            {record.referrals.length === 0 ? <div className="empty-state compact">لا توجد إحالات مسجلة.</div> : null}
           </div>
         </article>
       </section>
@@ -1061,153 +599,58 @@ export function PatientMedicalRecordPage() {
       <section className="split-grid">
         <article className="section-card">
           <div className="section-header">
-            <div>
-              <p className="eyebrow">تجديد الأدوية</p>
-              <h3>طلب تجديد وصفة ومتابعة الحالة</h3>
-            </div>
+            <div><p className="eyebrow">تجديد الدواء</p><h3>وصفات مؤهلة للطلب</h3></div>
           </div>
-          {refillError ? <div className="error-banner">{refillError}</div> : null}
           {refillMessage ? <div className="success-banner">{refillMessage}</div> : null}
+          {refillError ? <div className="error-banner">{refillError}</div> : null}
           <div className="stack-list compact">
             {(record.eligiblePrescriptions ?? []).map((prescription) => (
               <article className="stack-item" key={prescription.id}>
-                <strong>{prescription.medicineName}</strong>
-                <p>{joinMeta([prescription.dosage, prescription.duration, prescription.doctorName])}</p>
+                <div className="info-row">
+                  <div>
+                    <strong>{prescription.medicineName}</strong>
+                    <p className="muted">{joinMeta([prescription.dosage, prescription.duration, prescription.doctorName])}</p>
+                  </div>
+                  <button
+                    className="ghost-button"
+                    disabled={refillBusyId === prescription.id || prescription.latestRefillStatus === "REQUESTED"}
+                    type="button"
+                    onClick={() => void handleRequestRefill(prescription.id)}
+                  >
+                    طلب تجديد
+                  </button>
+                </div>
                 <div className="tile-stats">
-                  <span>{formatDateTime(prescription.issuedAt)}</span>
-                  <span>{prescription.dispensed ? "مصروف" : "غير مصروف"}</span>
+                  <span>{formatDate(prescription.issuedAt)}</span>
+                  <span>{prescription.latestRefillStatus ? toArabicLabel(prescription.latestRefillStatus) : "مؤهل"}</span>
                 </div>
-                <button
-                  className="primary-button"
-                  disabled={refillBusyId === prescription.id}
-                  onClick={() => void handleRequestRefill(prescription.id)}
-                  type="button"
-                >
-                  طلب تجديد
-                </button>
               </article>
             ))}
-            {(record.eligiblePrescriptions ?? []).length === 0 ? (
-              <div className="empty-state compact">لا توجد وصفات مؤهلة لطلب تجديد حالياً.</div>
-            ) : null}
-          </div>
-
-          <div className="stack-list compact">
-            {(record.medicationRefills ?? []).map((request) => (
-              <article className="stack-item" key={request.id}>
-                <div className="progress-row">
-                  <strong>{request.medicineName}</strong>
-                  <span className={request.status === "REJECTED" ? "status-badge danger" : "status-badge success"}>
-                    {refillStatusLabel(request.status)}
-                  </span>
-                </div>
-                <p>{joinMeta([request.dosage, request.duration, request.doctorName, formatDateTime(request.requestedAt)])}</p>
-                {request.rejectionReason ? <p className="muted">سبب الرفض: {request.rejectionReason}</p> : null}
-              </article>
-            ))}
+            {(record.eligiblePrescriptions ?? []).length === 0 ? <div className="empty-state compact">لا توجد وصفات مؤهلة للتجديد حاليًا.</div> : null}
           </div>
         </article>
 
         <article className="section-card">
           <div className="section-header">
-            <div>
-              <p className="eyebrow">تذكيرات المتابعة</p>
-              <h3>المواعيد المطلوبة بعد الزيارة</h3>
-            </div>
+            <div><p className="eyebrow">تذكيرات المتابعة</p><h3>المهام العلاجية القادمة</h3></div>
           </div>
           <div className="stack-list compact">
-            {(record.followUpReminders ?? []).map((reminder) => {
-              const overdue = isFollowUpOverdue(reminder.status, reminder.dueDate);
-
-              return (
-                <article className="stack-item" key={reminder.id}>
-                  <div className="progress-row">
-                    <strong>{reminder.reason}</strong>
-                    <span className={overdue ? "status-badge danger" : "status-badge success"}>
-                      {overdue ? "متأخر" : followUpStatusLabel(reminder.status)}
-                    </span>
-                  </div>
-                  <p>{joinMeta([reminder.doctorName, formatDateTime(reminder.dueDate), reminder.visitSummary])}</p>
-                  {reminder.notes ? <p className="muted">{reminder.notes}</p> : null}
-                </article>
-              );
-            })}
-            {(record.followUpReminders ?? []).length === 0 ? (
-              <div className="empty-state compact">لا توجد تذكيرات متابعة قادمة.</div>
-            ) : null}
+            {(record.followUpReminders ?? []).map((reminder) => (
+              <article className="stack-item" key={reminder.id}>
+                <div className="info-row">
+                  <div><strong>{reminder.reason}</strong><p className="muted">{reminder.doctorName}</p></div>
+                  <StatusBadge status={reminder.status} />
+                </div>
+                <div className="tile-stats">
+                  <span>{formatDate(reminder.dueDate)}</span>
+                  <span>{reminder.visitSummary ?? "متابعة علاجية"}</span>
+                </div>
+                {reminder.notes ? <p className="muted">{reminder.notes}</p> : null}
+              </article>
+            ))}
+            {(record.followUpReminders ?? []).length === 0 ? <div className="empty-state compact">لا توجد تذكيرات متابعة قادمة.</div> : null}
           </div>
         </article>
-      </section>
-
-      <section className="section-card">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">خطط المتابعة</p>
-            <h3>الاشتراكات والفواتير</h3>
-          </div>
-        </div>
-        <div className="form-grid">
-          <label className="field">
-            <span>خطة الاشتراك</span>
-            <select value={selectedPlanId} onChange={(event) => setSelectedPlanId(event.target.value)}>
-              {plans.map((plan) => (
-                <option key={plan.id} value={plan.id}>
-                  {plan.name} - {formatAmount(plan.priceInCents, "ILS")}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>رمز الدفع الآمن</span>
-            <input
-              value={paymentToken}
-              onChange={(event) => setPaymentToken(event.target.value)}
-              placeholder="رمز بطاقة آمن"
-              type="password"
-            />
-          </label>
-          <div className="field-span-2">
-            <button
-              className="primary-button"
-              disabled={activatingSubscription || plans.length === 0}
-              type="button"
-              onClick={handleActivateSubscription}
-            >
-              {activatingSubscription ? "جاري التفعيل..." : "تفعيل الاشتراك عبر دفع آمن"}
-            </button>
-          </div>
-          {subscriptionMessage ? <div className="field-span-2 inline-note">{subscriptionMessage}</div> : null}
-        </div>
-        <div className="stack-list compact">
-          {record.subscriptions.map((subscription) => (
-            <article
-              className="stack-item interactive-card"
-              key={subscription.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => openPanel({ kind: "subscription", id: subscription.id })}
-              onKeyDown={(event) => handlePanelActivation(event, { kind: "subscription", id: subscription.id })}
-            >
-              <strong>{subscription.plan.name}</strong>
-              <p>{subscription.plan.description ?? "خطة متابعة علاجية بدون وصف إضافي."}</p>
-              <div className="tile-stats">
-                <span>{toArabicLabel(subscription.status)}</span>
-                <span>{toArabicLabel(subscription.plan.billingCycle)}</span>
-                <span>{formatAmount(subscription.plan.priceInCents, "ILS")}</span>
-              </div>
-              {subscription.payments[0] ? (
-                <p className="muted">
-                  آخر دفعة: {formatAmount(subscription.payments[0].amountInCents, subscription.payments[0].currency)} في{" "}
-                  {formatDate(subscription.payments[0].paidAt ?? subscription.payments[0].createdAt)}
-                </p>
-              ) : null}
-              <p className="action-hint">اضغط لعرض تفاصيل الاشتراك والدفعات.</p>
-            </article>
-          ))}
-          {record.subscriptions.length === 0 ? (
-            <div className="empty-state compact">لا توجد اشتراكات علاجية مرتبطة بالحساب.</div>
-          ) : null}
-        </div>
       </section>
     </div>
   );

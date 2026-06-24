@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
-import { formatDate, formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
+import { cleanDemoText, formatCount, formatDate, formatDateTime, joinMeta, safeDisplay, toArabicLabel } from "../lib/arabic";
 import { PatientTimelineBundle, PatientTimelineEventType } from "../types";
 
 type TimelineFilter = "all" | PatientTimelineEventType;
@@ -67,7 +67,7 @@ export function PatientTimelinePage() {
   }, [patientId]);
 
   if (loading) {
-    return <div className="empty-state">جارٍ تحميل السجل الزمني للمريض...</div>;
+    return <div className="empty-state">جاري تحميل السجل الزمني للمريض...</div>;
   }
 
   if (error || !bundle) {
@@ -113,7 +113,7 @@ export function PatientTimelinePage() {
       <SectionCard
         title="السجل الزمني الطبي"
         subtitle={joinMeta([
-          bundle.patient.fullName,
+          safeDisplay(bundle.patient.fullName, "مريض غير متوفر"),
           bundle.patient.unifiedId ?? "سجل محلي",
           bundle.patient.nationalId ?? "بدون هوية"
         ])}
@@ -121,7 +121,7 @@ export function PatientTimelinePage() {
         <div className="detail-grid">
           <div className="detail-field">
             <span>الهاتف</span>
-            <strong>{bundle.patient.phone}</strong>
+            <strong>{safeDisplay(bundle.patient.phone)}</strong>
           </div>
           <div className="detail-field">
             <span>تاريخ الميلاد</span>
@@ -133,7 +133,7 @@ export function PatientTimelinePage() {
           </div>
           <div className="detail-field">
             <span>آخر حدث</span>
-            <strong>{bundle.patient.lastEventAt ? formatDateTime(bundle.patient.lastEventAt) : "-"}</strong>
+            <strong>{bundle.patient.lastEventAt ? formatDateTime(bundle.patient.lastEventAt) : "غير متوفر"}</strong>
           </div>
         </div>
 
@@ -143,10 +143,11 @@ export function PatientTimelinePage() {
               {center.centerName}
             </span>
           ))}
+          {bundle.patient.centersSeenAt.length === 0 ? <span className="tag">لا يوجد مركز مرتبط</span> : null}
         </div>
       </SectionCard>
 
-      <SectionCard title="الأحداث الطبية" subtitle="مرتبة من الأحدث إلى الأقدم مع إمكانية الفلترة حسب نوع الحدث.">
+      <SectionCard title="الأحداث الطبية" subtitle="مرتبة من الأحدث إلى الأقدم مع فلترة حسب نوع الحدث.">
         <div className="timeline-filters">
           {filterOptions.map((option) => (
             <button
@@ -156,15 +157,15 @@ export function PatientTimelinePage() {
               type="button"
             >
               <span>{option.label}</span>
-              <strong>{option.count}</strong>
+              <strong>{formatCount(option.count)}</strong>
             </button>
           ))}
         </div>
 
         <p className="muted">
           {activeFilter === "all"
-            ? `إجمالي الأحداث الظاهرة: ${filteredEvents.length}`
-            : `الأحداث الظاهرة بعد الفلترة: ${filteredEvents.length}`}
+            ? `إجمالي الأحداث الظاهرة: ${formatCount(filteredEvents.length)}`
+            : `الأحداث الظاهرة بعد الفلترة: ${formatCount(filteredEvents.length)}`}
         </p>
 
         {filteredEvents.length > 0 ? (
@@ -179,14 +180,14 @@ export function PatientTimelinePage() {
                     <div className="timeline-card-head">
                       <div>
                         <p className="eyebrow">{config.label}</p>
-                        <h4>{event.title}</h4>
+                        <h4>{safeDisplay(event.title)}</h4>
                       </div>
                       <span className="timeline-date">{formatDateTime(event.date)}</span>
                     </div>
-                    <p>{event.description}</p>
+                    <p>{cleanDemoText(event.description)}</p>
                     <div className="timeline-meta">
-                      <span>سجلها: {event.createdBy}</span>
-                      <span>{event.sourceTable}</span>
+                      <span>سجلها: {safeDisplay(event.createdBy)}</span>
+                      <span>{safeDisplay(event.sourceTable)}</span>
                     </div>
                   </div>
                 </article>

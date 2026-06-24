@@ -1,10 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { PatientContactBar } from "../components/PatientContactBar";
 import { formatDate, formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
 import { PortalSummary } from "../types";
+
+const quickActions = [
+  { to: "/appointments", title: "حجز موعد", helper: "اختر الطبيب والوقت المتاح." },
+  { to: "/medical-record", title: "السجل الصحي", helper: "اطلع على الزيارات والتقارير." },
+  { to: "/medical-record#reports", title: "التقارير الطبية", helper: "نتائج وتقارير قابلة للمراجعة." },
+  { to: "/messages", title: "المحادثة الطبية", helper: "تابع رسائلك مع الطبيب." },
+  { to: "/notifications", title: "الإشعارات", helper: "تنبيهات المواعيد والتقارير." },
+  { to: "/doctors", title: "الأطباء", helper: "ابحث حسب التخصص والتوفر." }
+];
 
 export function PatientHomePage() {
   const [summary, setSummary] = useState<PortalSummary | null>(null);
@@ -18,91 +27,86 @@ export function PatientHomePage() {
       });
   }, []);
 
+  const recentUnreadThreads = useMemo(
+    () =>
+      summary?.recentThreads.filter((thread) =>
+        thread.messages.some((message) => !message.isRead && message.sender.role !== "PATIENT")
+      ).length ?? 0,
+    [summary?.recentThreads]
+  );
+
   if (loading) {
-    return <div className="screen-center">جارٍ تحميل ملف الرعاية الصحية...</div>;
+    return <div className="screen-center">جاري تحميل ملف الرعاية الصحية...</div>;
   }
 
   if (!summary) {
     return <div className="empty-state">تعذر تحميل ملخص الرعاية الصحية.</div>;
   }
 
-  const hasActiveSubscription = summary.stats.activeSubscriptions > 0;
-
   return (
-    <div className="page-stack">
+    <div className="page-stack patient-home-page">
       <PatientContactBar centerName={summary.patient.center.name} phone={summary.patient.center.phone} />
 
       <section className="hero-strip">
         <div>
-          <p className="eyebrow">ملف المريض</p>
+          <p className="eyebrow">بوابة المريض</p>
           <h1>{summary.patient.fullName}</h1>
           <p className="muted">
             {joinMeta([
               summary.patient.medicalRecordNumber,
               summary.patient.center.name,
-              summary.patient.insuranceNumber ?? "تأمين غير مسجل"
+              summary.patient.phone
             ])}
           </p>
         </div>
-        <div className="chip-row">
-          <Link className="primary-button" to="/appointments">
-            حجز موعد جديد
-          </Link>
-          <Link className="ghost-button" to="/medical-record">
-            فتح السجل الصحي
-          </Link>
-          <Link className={hasActiveSubscription ? "ghost-button" : "primary-button"} to="/medical-record">
-            {hasActiveSubscription ? "إدارة الاشتراك" : "تفعيل الاشتراك"}
-          </Link>
+        <div className="button-row hero-actions">
+          <Link className="primary-button" to="/appointments">حجز موعد جديد</Link>
+          <Link className="ghost-button" to="/medical-record">فتح السجل الصحي</Link>
         </div>
       </section>
 
-      <section className="section-card">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">Patient subscription</p>
-            <h3>{hasActiveSubscription ? "Follow-up support is active" : "Add follow-up support"}</h3>
-          </div>
-          <Link className="ghost-button" to="/medical-record">
-            {hasActiveSubscription ? "عرض الفواتير" : "دفع آمن"}
-          </Link>
-        </div>
-        <div className="tile-stats">
-          <span>Appointment reminders</span>
-          <span>Medication reminders</span>
-          <span>Contact your doctor</span>
-        </div>
-        <p className="muted">
-          Non-subscribers can still view health history and prescriptions. The subscription adds
-          follow-up reminders and secure doctor messaging.
-        </p>
-      </section>
-
-      <section className="metric-grid">
+      <section className="metric-grid compact-metrics">
         <Link className="metric-card interactive-card" to="/appointments">
           <span className="eyebrow">المواعيد القادمة</span>
           <h3>{summary.stats.upcomingAppointments}</h3>
-          <p className="muted">مواعيد مؤكدة أو مجدولة في الفترة القادمة.</p>
-          <p className="action-hint">اضغط لفتح صفحة المواعيد.</p>
+          <p className="muted">مواعيد مؤكدة أو مجدولة للفترة القادمة.</p>
+          <p className="action-hint">فتح المواعيد</p>
         </Link>
         <Link className="metric-card interactive-card" to="/medical-record">
-          <span className="eyebrow">التقارير السريرية</span>
+          <span className="eyebrow">التقارير الطبية</span>
           <h3>{summary.stats.completedReports}</h3>
-          <p className="muted">زيارات مكتملة يمكن الرجوع إلى ملخصها الطبي.</p>
-          <p className="action-hint">اضغط لفتح السجل الصحي.</p>
+          <p className="muted">تقارير وملخصات زيارات جاهزة للعرض.</p>
+          <p className="action-hint">فتح السجل الصحي</p>
         </Link>
         <Link className="metric-card interactive-card" to="/medical-record">
           <span className="eyebrow">الإحالات النشطة</span>
           <h3>{summary.stats.activeReferrals}</h3>
-          <p className="muted">إحالات ما زالت قيد المتابعة أو التنفيذ.</p>
-          <p className="action-hint">اضغط لعرض الإحالات داخل السجل.</p>
+          <p className="muted">إحالات قيد المتابعة أو التنفيذ.</p>
+          <p className="action-hint">عرض الإحالات</p>
         </Link>
         <Link className="metric-card interactive-card" to="/notifications">
-          <span className="eyebrow">الإشعارات غير المقروءة</span>
+          <span className="eyebrow">إشعارات غير مقروءة</span>
           <h3>{summary.stats.unreadNotifications}</h3>
-          <p className="muted">تنبيهات جديدة تخص المواعيد والتقارير والمحادثات.</p>
-          <p className="action-hint">اضغط لفتح الإشعارات.</p>
+          <p className="muted">تنبيهات المواعيد، التقارير، والرسائل.</p>
+          <p className="action-hint">فتح الإشعارات</p>
         </Link>
+      </section>
+
+      <section className="section-card quick-action-panel">
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">اختصارات</p>
+            <h3>ما الذي تريد فعله الآن؟</h3>
+          </div>
+        </div>
+        <div className="card-grid compact-action-grid">
+          {quickActions.map((action) => (
+            <Link className="profile-tile interactive-card" key={action.to} to={action.to}>
+              <strong>{action.title}</strong>
+              <p className="muted">{action.helper}</p>
+            </Link>
+          ))}
+        </div>
       </section>
 
       <section className="split-grid">
@@ -112,12 +116,10 @@ export function PatientHomePage() {
               <p className="eyebrow">الموعد القادم</p>
               <h3>الخطة القادمة</h3>
             </div>
-            <Link className="ghost-button" to="/appointments">
-              إدارة المواعيد
-            </Link>
+            <Link className="ghost-button" to="/appointments">إدارة المواعيد</Link>
           </div>
           {summary.nextAppointment ? (
-            <Link className="stack-item interactive-card" to="/appointments">
+            <Link className="stack-item interactive-card" to={`/appointments?appointmentId=${summary.nextAppointment.id}`}>
               <strong>{summary.nextAppointment.doctor.fullName}</strong>
               <p>{summary.nextAppointment.reason}</p>
               <div className="tile-stats">
@@ -125,7 +127,6 @@ export function PatientHomePage() {
                 <span>{toArabicLabel(summary.nextAppointment.type)}</span>
                 <span>{summary.nextAppointment.department.name}</span>
               </div>
-              <p className="action-hint">اضغط لفتح صفحة المواعيد.</p>
             </Link>
           ) : (
             <div className="empty-state compact">لا يوجد موعد قادم حتى الآن.</div>
@@ -138,13 +139,11 @@ export function PatientHomePage() {
               <p className="eyebrow">آخر التقارير</p>
               <h3>ملخصات الزيارات</h3>
             </div>
-            <Link className="ghost-button" to="/medical-record">
-              عرض السجل الصحي
-            </Link>
+            <Link className="ghost-button" to="/medical-record#reports">عرض التقارير</Link>
           </div>
           <div className="stack-list compact">
-            {summary.recentReports.map((report) => (
-              <Link className="stack-item interactive-card" key={report.id} to="/medical-record">
+            {summary.recentReports.slice(0, 4).map((report) => (
+              <Link className="stack-item interactive-card" key={report.id} to="/medical-record#reports">
                 <strong>{report.reason}</strong>
                 <p>{report.notes ?? "تم توثيق الزيارة ضمن السجل الصحي."}</p>
                 <div className="tile-stats">
@@ -152,7 +151,6 @@ export function PatientHomePage() {
                   <span>{formatDate(report.scheduledAt)}</span>
                   <span>{toArabicLabel(report.status)}</span>
                 </div>
-                <p className="action-hint">اضغط لعرض التقرير داخل السجل الصحي.</p>
               </Link>
             ))}
             {summary.recentReports.length === 0 ? (
@@ -169,20 +167,17 @@ export function PatientHomePage() {
               <p className="eyebrow">الفريق العلاجي</p>
               <h3>أطباء المركز</h3>
             </div>
-            <Link className="ghost-button" to="/doctors">
-              قائمة الأطباء
-            </Link>
+            <Link className="ghost-button" to="/doctors">قائمة الأطباء</Link>
           </div>
           <div className="stack-list compact">
-            {summary.careTeam.map((doctor) => (
-              <Link className="stack-item interactive-card" key={doctor.id} to="/doctors">
+            {summary.careTeam.slice(0, 5).map((doctor) => (
+              <Link className="stack-item interactive-card" key={doctor.id} to={`/appointments?doctorId=${doctor.id}`}>
                 <strong>{doctor.fullName}</strong>
                 <p>{doctor.specialization}</p>
                 <div className="tile-stats">
                   <span>{doctor.department.name}</span>
                   <span>{doctor.yearsExperience} سنوات خبرة</span>
                 </div>
-                <p className="action-hint">اضغط لفتح قائمة الأطباء.</p>
               </Link>
             ))}
           </div>
@@ -191,15 +186,14 @@ export function PatientHomePage() {
         <article className="section-card">
           <div className="section-header">
             <div>
-              <p className="eyebrow">المحادثات الحديثة</p>
-              <h3>آخر التحديثات من الطبيب</h3>
+              <p className="eyebrow">المحادثات الطبية</p>
+              <h3>تحديثات الطبيب</h3>
             </div>
-            <Link className="ghost-button" to="/messages">
-              {hasActiveSubscription ? "فتح المحادثات" : "Activate to contact doctor"}
-            </Link>
+            <Link className="ghost-button" to="/messages">فتح المحادثات</Link>
           </div>
+          <div className="inline-note">رسائل غير مقروءة من الفريق الطبي: {recentUnreadThreads}</div>
           <div className="stack-list compact">
-            {summary.recentThreads.map((thread) => {
+            {summary.recentThreads.slice(0, 4).map((thread) => {
               const latestMessage = thread.messages[thread.messages.length - 1];
 
               return (
@@ -210,7 +204,6 @@ export function PatientHomePage() {
                     <span>{thread.doctor.departmentName}</span>
                     <span>{latestMessage ? formatDateTime(latestMessage.createdAt) : "-"}</span>
                   </div>
-                  <p className="action-hint">اضغط لفتح المحادثات الطبية.</p>
                 </Link>
               );
             })}

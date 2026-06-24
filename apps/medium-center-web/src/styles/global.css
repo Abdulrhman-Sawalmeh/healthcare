@@ -2140,6 +2140,182 @@ textarea:focus-visible {
   background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 
+.legacy-report-filters,
+.legacy-report-cards {
+  display: none;
+}
+
+.medical-report-date-filter {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  gap: var(--space-4);
+  align-items: end;
+  direction: rtl;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.medical-report-date-filter .primary-button {
+  min-height: 48px;
+  border-radius: 8px;
+  padding-inline: 1.25rem;
+}
+
+.medical-reports-table-card {
+  display: grid;
+  gap: var(--space-3);
+  direction: rtl;
+  overflow: hidden;
+}
+
+.medical-reports-table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.entries-control,
+.medical-report-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.entries-control select,
+.medical-report-search input {
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  padding: 0.45rem 0.7rem;
+}
+
+.entries-control select {
+  min-width: 76px;
+}
+
+.medical-report-search input {
+  width: min(280px, 54vw);
+}
+
+.medical-reports-table-wrapper {
+  overflow-x: auto;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.medical-reports-table {
+  width: 100%;
+  min-width: 1040px;
+  border-collapse: collapse;
+}
+
+.medical-reports-table th,
+.medical-reports-table td {
+  padding: 0.8rem 0.9rem;
+  text-align: right;
+  border-bottom: 1px solid rgba(15, 61, 54, 0.08);
+  vertical-align: middle;
+}
+
+.medical-reports-table th {
+  background: color-mix(in srgb, var(--accent-secondary) 82%, #ffffff);
+  color: #ffffff;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.medical-reports-table td {
+  color: var(--text);
+  background: #ffffff;
+}
+
+.medical-reports-table td strong {
+  display: block;
+}
+
+.medical-report-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 9%, #ffffff);
+  color: var(--accent);
+  padding: 0.35rem 0.8rem;
+  font-weight: 900;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.medical-report-details-button {
+  display: inline-flex;
+  margin-top: 0.35rem;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  padding: 0;
+  font-weight: 900;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.medical-reports-empty-cell {
+  background: #f2f2f2 !important;
+  color: var(--text) !important;
+  font-size: 1.05rem;
+  text-align: center !important;
+}
+
+.medical-reports-table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.medical-reports-table-footer p {
+  margin: 0;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.medical-reports-pagination {
+  justify-content: flex-start;
+  margin-top: 0;
+}
+
+.medical-reports-pagination .ghost-button {
+  border-radius: 8px;
+  padding: 0.55rem 0.85rem;
+}
+
+@media (max-width: 760px) {
+  .medical-report-date-filter {
+    grid-template-columns: 1fr;
+  }
+
+  .medical-reports-table-toolbar,
+  .medical-reports-table-footer,
+  .medical-reports-pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .entries-control,
+  .medical-report-search,
+  .medical-report-search input,
+  .medical-reports-pagination .ghost-button {
+    width: 100%;
+  }
+}
+
 .status-badge {
   min-height: 32px;
 }
@@ -2472,6 +2648,202 @@ textarea:focus-visible {
 
   .login-brand-panel h1 {
     font-size: 0.92rem;
+  }
+}
+
+/* Medium center manager workflow refinements */
+.login-subtitle {
+  text-align: center;
+  line-height: 1.7;
+}
+
+.manager-dashboard {
+  gap: 1rem;
+}
+
+.manager-hero {
+  align-items: center;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(135deg, rgba(15, 118, 99, 0.1), rgba(240, 143, 82, 0.1)),
+    var(--surface-strong);
+}
+
+.hero-actions {
+  justify-content: flex-start;
+}
+
+.compact-metrics .metric-card {
+  grid-column: span 2;
+  min-height: 142px;
+}
+
+.dashboard-focus-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(260px, 0.75fr);
+  gap: 1rem;
+}
+
+.staff-status-grid,
+.doctor-list-grid,
+.patient-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+}
+
+.staff-status-card,
+.doctor-card,
+.patient-card {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface-muted);
+  padding: 1rem;
+}
+
+.doctor-card.is-disabled {
+  opacity: 0.68;
+}
+
+.compact-tags {
+  gap: 0.35rem;
+}
+
+.doctor-form {
+  align-items: start;
+}
+
+.form-section {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface-muted);
+}
+
+.form-section legend {
+  padding: 0 0.5rem;
+  color: var(--accent);
+  font-weight: 900;
+}
+
+.day-chip-grid,
+.checkbox-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.checkbox-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--text);
+  padding: 0.55rem 0.8rem;
+  font-weight: 800;
+}
+
+.checkbox-chip input {
+  width: auto;
+}
+
+.checkbox-chip.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.filter-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface-muted);
+}
+
+.patient-card-header,
+.patient-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.patient-card-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.patient-card-facts span,
+.stat-pill {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  padding: 0.65rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.patient-card-facts strong,
+.stat-pill strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.permission-note {
+  align-self: center;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.target-highlight {
+  animation: targetPulse 2.2s ease;
+}
+
+@keyframes targetPulse {
+  0%,
+  100% {
+    box-shadow: none;
+  }
+
+  18%,
+  72% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-secondary) 36%, transparent);
+    background: color-mix(in srgb, var(--accent-secondary) 10%, transparent);
+  }
+}
+
+@media (max-width: 960px) {
+  .compact-metrics .metric-card {
+    grid-column: span 6;
+  }
+
+  .dashboard-focus-grid,
+  .filter-strip,
+  .form-section {
+    grid-template-columns: 1fr;
+  }
+
+  .patient-card-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -2928,7 +3300,37 @@ textarea:focus-visible {
   }
 }
 
+.doctor-referral-toolbar > button:first-child {
+  display: none;
+}
+
+.booking-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.warning-banner {
+  border: 1px solid rgba(180, 83, 9, 0.35);
+  border-radius: 8px;
+  background: rgba(251, 191, 36, 0.16);
+  color: #92400e;
+  padding: 0.85rem 1rem;
+  font-weight: 800;
+}
+
+.stack-item.is-unread {
+  border-color: rgba(37, 99, 235, 0.35);
+  background: rgba(219, 234, 254, 0.35);
+}
+
 @media print {
+  @page {
+    size: A6 landscape;
+    margin: 8mm;
+  }
+
   body {
     background: #ffffff;
   }
@@ -2954,7 +3356,41 @@ textarea:focus-visible {
   }
 
   .patient-qr-card {
+    width: 100%;
+    min-height: auto;
+    grid-template-columns: minmax(0, 1fr) 38mm;
+    gap: 7mm;
+    padding: 7mm;
+    border: 1px solid #17322d;
+    border-radius: 5mm;
     box-shadow: none;
     break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .qr-card-main {
+    gap: 0.45rem;
+  }
+
+  .qr-card-main h1 {
+    font-size: 18pt;
+  }
+
+  .qr-card-code {
+    padding: 0;
+    border: 0;
+  }
+
+  .qr-card-code img {
+    width: 36mm;
+    height: 36mm;
+  }
+
+  .qr-card-code small {
+    font-size: 7.5pt;
+  }
+
+  .qr-token {
+    display: none !important;
   }
 }

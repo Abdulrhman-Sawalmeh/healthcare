@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { ApiError, apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
@@ -59,9 +60,30 @@ type WorkflowVisit = {
   labRequests?: Array<{
     id: number;
     status: string;
+    priority?: string | null;
+    requestDate?: string | null;
     resultValue?: string | null;
     resultNotes?: string | null;
+    unit?: string | null;
+    normalRange?: string | null;
+    abnormalFlag?: string | null;
+    criticalNote?: string | null;
+    reportUrl?: string | null;
+    imageUrl?: string | null;
+    doctorNotes?: string | null;
+    patientNotes?: string | null;
+    correctionReason?: string | null;
+    resultFileName?: string | null;
+    resultMimeType?: string | null;
     resultDate?: string | null;
+    sentToDoctorAt?: string | null;
+    publishedToPatientAt?: string | null;
+    resultReport?: {
+      id: number;
+      title: string;
+      reportUrl?: string | null;
+      shareWithPatient: boolean;
+    } | null;
     test: { testName: string; category?: string | null };
   }>;
   resultReports?: Array<{
@@ -152,6 +174,76 @@ const taskLabels: Record<string, string> = {
   PHARMACY_DISPENSING: "صرف الأدوية"
 };
 
+type LabRequest = NonNullable<WorkflowVisit["labRequests"]>[number];
+
+const labStatusLabels: Record<string, string> = {
+  NEW: "جديد",
+  PENDING: "قيد الانتظار",
+  PENDING_SAMPLE: "بانتظار العينة",
+  SAMPLE_RECEIVED: "تم استلام العينة",
+  IN_PROGRESS: "قيد الفحص",
+  RESULT_READY: "جاهزة للإرسال",
+  SENT_TO_DOCTOR: "مرسلة للطبيب",
+  NEEDS_CORRECTION: "بحاجة تصحيح",
+  PUBLISHED_TO_PATIENT: "منشورة للمريض",
+  INVALID_SAMPLE: "عينة غير صالحة",
+  COMPLETED: "مكتملة",
+  CANCELLED: "ملغاة",
+  NORMAL: "عادي",
+  URGENT: "عاجل",
+  CRITICAL: "حرج",
+  ABNORMAL: "غير طبيعي"
+};
+
+const labPublishableStatuses = new Set(["SENT_TO_DOCTOR", "COMPLETED"]);
+const labReturnableStatuses = new Set(["SENT_TO_DOCTOR", "RESULT_READY", "COMPLETED"]);
+
+function labStatusLabel(status: string) {
+  return labStatusLabels[status] ?? status;
+}
+
+function labResultSummary(request: LabRequest) {
+  const structuredResult = [request.resultValue, request.unit].filter(Boolean).join(" ");
+
+  if (structuredResult) return structuredResult;
+  if (request.resultNotes) return request.resultNotes;
+  if (request.reportUrl) return "رابط تقرير متاح";
+  if (request.imageUrl) return "رابط صورة متاح";
+  if (request.resultFileName) return `ملف مرفق: ${request.resultFileName}`;
+  return "بانتظار النتيجة";
+}
+
+function labRequestDetails(request: LabRequest) {
+  return [
+    request.normalRange ? `المدى المرجعي: ${request.normalRange}` : null,
+    request.abnormalFlag ? `التصنيف: ${labStatusLabel(request.abnormalFlag)}` : null,
+    request.criticalNote ? `ملاحظة حرجة: ${request.criticalNote}` : null,
+    request.correctionReason ? `سبب التصحيح: ${request.correctionReason}` : null,
+    request.patientNotes ? `للمريض: ${request.patientNotes}` : null
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function labRequestMeta(request: LabRequest) {
+  return [
+    request.priority ? labStatusLabel(request.priority) : null,
+    request.requestDate ? `طلب: ${formatDateTime(request.requestDate)}` : null,
+    request.sentToDoctorAt ? `إرسال للطبيب: ${formatDateTime(request.sentToDoctorAt)}` : null,
+    request.publishedToPatientAt ? `نشر للمريض: ${formatDateTime(request.publishedToPatientAt)}` : null
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function canPublishLabRequest(request: LabRequest) {
+  return labPublishableStatuses.has(request.status) && !request.publishedToPatientAt;
+}
+
+function canReturnLabRequestForCorrection(request: LabRequest) {
+  return labReturnableStatuses.has(request.status) && !request.publishedToPatientAt;
+}
+
 function optionalNumber(value: FormDataEntryValue | null) {
   return value ? Number(value) : undefined;
 }
@@ -216,6 +308,7 @@ function hasHighSeverityWarning(warnings: PrescriptionSafetyWarningRecord[]) {
 
 export function VisitWorkflowPage() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const role = user?.role;
   const [visits, setVisits] = useState<WorkflowVisit[]>([]);
   const [intake, setIntake] = useState<IntakeOptions>({ patients: [], doctors: [] });
@@ -233,16 +326,16 @@ export function VisitWorkflowPage() {
     payload: Record<string, unknown>;
   } | null>(null);
 
-  const canIntake = hasRole(role, ["CENTER_MANAGER", "RECEPTIONIST"]);
-  const canAssess = hasRole(role, ["CENTER_MANAGER", "DOCTOR"]);
+  const canIntake = hasRole(role, ["RECEPTIONIST"]);
+  const canAssess = hasRole(role, ["DOCTOR"]);
   const canViewReception = hasRole(role, ["CENTER_MANAGER", "RECEPTIONIST", "DOCTOR"]);
   const canViewNursing = hasRole(role, ["CENTER_MANAGER", "DOCTOR", "NURSE"]);
   const canViewDoctor = hasRole(role, ["CENTER_MANAGER", "DOCTOR"]);
   const canViewLab = hasRole(role, ["CENTER_MANAGER", "DOCTOR", "LAB_TECH"]);
   const canViewPharmacy = hasRole(role, ["CENTER_MANAGER", "DOCTOR", "PHARMACIST"]);
-  const canEditNursing = hasRole(role, ["CENTER_MANAGER", "NURSE"]);
-  const canEditLab = hasRole(role, ["CENTER_MANAGER", "LAB_TECH"]);
-  const canEditPharmacy = hasRole(role, ["CENTER_MANAGER", "PHARMACIST"]);
+  const canEditNursing = hasRole(role, ["NURSE"]);
+  const canEditLab = hasRole(role, ["LAB_TECH"]);
+  const canEditPharmacy = hasRole(role, ["PHARMACIST"]);
 
   const selectedVisit = useMemo(
     () => visits.find((visit) => visit.id === selectedVisitId) ?? null,
@@ -278,6 +371,25 @@ export function VisitWorkflowPage() {
   useEffect(() => {
     void loadPage();
   }, [loadPage]);
+
+  useEffect(() => {
+    const highlight = searchParams.get("highlight");
+    if (!highlight?.startsWith("lab-result-")) {
+      return;
+    }
+
+    const requestId = Number(highlight.replace("lab-result-", ""));
+    const visit = visits.find((item) => item.labRequests?.some((request) => request.id === requestId));
+
+    if (!visit) {
+      return;
+    }
+
+    setSelectedVisitId(visit.id);
+    window.setTimeout(() => {
+      document.getElementById(highlight)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 150);
+  }, [searchParams, visits]);
 
   async function runAction(visitId: number, action: () => Promise<unknown>, successMessage = "تم حفظ التغييرات.") {
     try {
@@ -475,18 +587,60 @@ export function VisitWorkflowPage() {
     });
   }
 
-  function submitLabResult(visitId: number, requestId: number) {
-    const resultValue = window.prompt("أدخل نتيجة الفحص");
-    if (!resultValue?.trim()) return;
+  function submitVisitLabRequest(event: FormEvent<HTMLFormElement>, visitId: number) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
 
     void runAction(
       visitId,
       () =>
-        apiRequest(`/center/visit-workflow/lab/${requestId}/result`, {
-          method: "PATCH",
-          body: JSON.stringify({ resultValue: resultValue.trim() })
+        apiRequest(`/center/visit-workflow/${visitId}/lab-requests`, {
+          method: "POST",
+          body: JSON.stringify({
+            testId: Number(form.get("testId")),
+            priority: form.get("priority") || "NORMAL",
+            reason: form.get("reason") || undefined,
+            clinicalNotes: form.get("clinicalNotes") || undefined,
+            sampleType: form.get("sampleType") || undefined,
+            fastingRequired: form.get("fastingRequired") === "on",
+            externalTest: form.get("externalTest") === "on"
+          })
         }),
-      "تم إرسال نتيجة المختبر للطبيب."
+      "تم إرسال طلب الفحص المخبري للمختبر."
+    ).then(() => formElement.reset());
+  }
+
+  function publishLabResult(visitId: number, requestId: number) {
+    const patientNotes = window.prompt("ملاحظة تظهر للمريض عند النشر (اختياري)") ?? "";
+
+    void runAction(
+      visitId,
+      () =>
+        apiRequest(`/center/lab/requests/${requestId}/publish`, {
+          method: "POST",
+          body: JSON.stringify({
+            patientNotes: patientNotes.trim() || undefined
+          })
+        }),
+      "تم نشر تقرير المختبر للمريض."
+    );
+  }
+
+  function returnLabResultForCorrection(visitId: number, requestId: number) {
+    const reason = window.prompt("سبب إرجاع النتيجة للتصحيح");
+    if (!reason?.trim()) return;
+
+    void runAction(
+      visitId,
+      () =>
+        apiRequest(`/center/lab/requests/${requestId}/return-correction`, {
+          method: "POST",
+          body: JSON.stringify({
+            reason: reason.trim()
+          })
+        }),
+      "تم إرجاع نتيجة المختبر للتصحيح."
     );
   }
 
@@ -775,6 +929,54 @@ export function VisitWorkflowPage() {
                     </label>
                     <button className="primary-button" disabled={busyId === selectedVisit.id} type="submit">
                       حفظ تعيين الطبيب
+                    </button>
+                  </form>
+                ) : null}
+                {canAssess ? (
+                  <form className="form-grid visit-inline-form" onSubmit={(event) => submitVisitLabRequest(event, selectedVisit.id)}>
+                    <label className="field">
+                      <span>طلب فحص مخبري</span>
+                      <select name="testId" required defaultValue="">
+                        <option value="" disabled>
+                          اختر الفحص
+                        </option>
+                        {catalogs.labTests.map((test) => (
+                          <option key={test.id} value={test.id}>
+                            {test.testName} - {test.category}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>الأولوية</span>
+                      <select name="priority" defaultValue="NORMAL">
+                        <option value="NORMAL">عادي</option>
+                        <option value="URGENT">عاجل</option>
+                        <option value="CRITICAL">حرج</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>نوع العينة</span>
+                      <input name="sampleType" placeholder="دم، بول، مسحة..." />
+                    </label>
+                    <label className="field">
+                      <span>سبب الطلب</span>
+                      <input name="reason" placeholder="سبب الفحص أو التشخيص المتوقع" />
+                    </label>
+                    <label className="field field-span-2">
+                      <span>ملاحظات للمختبر</span>
+                      <textarea name="clinicalNotes" />
+                    </label>
+                    <label className="checkbox-field">
+                      <input name="fastingRequired" type="checkbox" />
+                      <span>يتطلب صيام</span>
+                    </label>
+                    <label className="checkbox-field">
+                      <input name="externalTest" type="checkbox" />
+                      <span>فحص خارجي</span>
+                    </label>
+                    <button className="primary-button" disabled={busyId === selectedVisit.id} type="submit">
+                      طلب فحص مخبري
                     </button>
                   </form>
                 ) : null}
@@ -1078,35 +1280,88 @@ export function VisitWorkflowPage() {
                       <thead>
                         <tr>
                           <th>الفحص</th>
-                          <th>التصنيف</th>
                           <th>الحالة</th>
-                          <th>النتيجة</th>
+                          <th>النتيجة والتقرير</th>
+                          <th>ملاحظات المراجعة</th>
                           <th>الإجراء</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {selectedVisit.labRequests?.map((request) => (
-                          <tr key={request.id}>
-                            <td>{request.test.testName}</td>
-                            <td>{valueOrDash(request.test.category)}</td>
-                            <td>{request.status === "COMPLETED" ? "مكتمل" : "معلق"}</td>
-                            <td>{request.status === "COMPLETED" ? valueOrDash(request.resultValue) : "بانتظار النتيجة"}</td>
-                            <td>
-                              {canEditLab && request.status !== "COMPLETED" ? (
-                                <button
-                                  className="primary-button"
-                                  disabled={busyId === selectedVisit.id}
-                                  type="button"
-                                  onClick={() => submitLabResult(selectedVisit.id, request.id)}
-                                >
-                                  إضافة النتيجة
-                                </button>
-                              ) : (
-                                <span className="muted">قراءة فقط</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                        {selectedVisit.labRequests?.map((request) => {
+                          const highlighted = searchParams.get("highlight") === `lab-result-${request.id}`;
+                          const details = labRequestDetails(request);
+                          const canPublish = canAssess && canPublishLabRequest(request);
+                          const canReturnForCorrection = canAssess && canReturnLabRequestForCorrection(request);
+                          const hasVisibleAction =
+                            canEditLab || canPublish || canReturnForCorrection || Boolean(request.publishedToPatientAt);
+
+                          return (
+                            <tr key={request.id} id={`lab-result-${request.id}`} className={highlighted ? "target-highlight" : undefined}>
+                              <td>
+                                <strong>{request.test.testName}</strong>
+                                <span>{valueOrDash(request.test.category)}</span>
+                                {request.resultFileName ? <span>{request.resultFileName}</span> : null}
+                              </td>
+                              <td>
+                                <strong>{labStatusLabel(request.status)}</strong>
+                                <span>{labRequestMeta(request)}</span>
+                              </td>
+                              <td>
+                                <strong>{labResultSummary(request)}</strong>
+                                <div className="button-row">
+                                  {request.reportUrl ? (
+                                    <a className="ghost-button" href={request.reportUrl} rel="noreferrer" target="_blank">
+                                      فتح التقرير
+                                    </a>
+                                  ) : null}
+                                  {request.imageUrl ? (
+                                    <a className="ghost-button" href={request.imageUrl} rel="noreferrer" target="_blank">
+                                      فتح الصورة
+                                    </a>
+                                  ) : null}
+                                  {request.resultReport?.reportUrl ? (
+                                    <a className="ghost-button" href={request.resultReport.reportUrl} rel="noreferrer" target="_blank">
+                                      التقرير المنشور
+                                    </a>
+                                  ) : null}
+                                </div>
+                              </td>
+                              <td>{details ? <span>{details}</span> : <span className="muted">لا توجد ملاحظات إضافية.</span>}</td>
+                              <td>
+                                <div className="button-row">
+                                  {canEditLab ? (
+                                    <Link className="ghost-button" to={`/lab?highlight=lab-request-${request.id}`}>
+                                      فتح في المختبر
+                                    </Link>
+                                  ) : null}
+                                  {canPublish ? (
+                                    <button
+                                      className="primary-button"
+                                      disabled={busyId === selectedVisit.id}
+                                      type="button"
+                                      onClick={() => publishLabResult(selectedVisit.id, request.id)}
+                                    >
+                                      نشر للمريض
+                                    </button>
+                                  ) : null}
+                                  {canReturnForCorrection ? (
+                                    <button
+                                      className="ghost-button"
+                                      disabled={busyId === selectedVisit.id}
+                                      type="button"
+                                      onClick={() => returnLabResultForCorrection(selectedVisit.id, request.id)}
+                                    >
+                                      إرجاع للتصحيح
+                                    </button>
+                                  ) : null}
+                                  {request.publishedToPatientAt ? <span className="tag">ظاهر للمريض</span> : null}
+                                  {!canEditLab && !canAssess ? <span className="muted">قراءة فقط</span> : null}
+                                  {!hasVisibleAction && canAssess ? <span className="muted">بانتظار إرسال المختبر</span> : null}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

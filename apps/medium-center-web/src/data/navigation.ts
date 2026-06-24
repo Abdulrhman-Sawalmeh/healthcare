@@ -15,6 +15,10 @@ const allCenterRoles: Role[] = [
   "NURSE"
 ];
 
+const prescriptionVerificationRoles: Role[] = allCenterRoles.filter(
+  (role) => role !== "RECEPTIONIST" && role !== "LAB_TECH"
+);
+
 export const navigationItems: NavigationItem[] = [
   { to: "/ai-assistant", label: "المساعد الذكي", roles: ["PATIENT", ...allCenterRoles] },
   { to: "/", label: "لوحة المتابعة", roles: ["CENTRAL_ADMIN", ...allCenterRoles] },
@@ -26,8 +30,9 @@ export const navigationItems: NavigationItem[] = [
   { to: "/patients", label: "المرضى", roles: ["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"] },
   { to: "/visits", label: "الزيارات", roles: ["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"] },
   { to: "/visit-workflow", label: "ملفات الزيارة والمتابعة", roles: allCenterRoles },
+  { to: "/lab", label: "لوحة المختبر", roles: ["LAB_TECH"] },
   { to: "/referrals", label: "الإحالات", roles: ["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"] },
-  { to: "/prescription-verification", label: "التحقق من الوصفات", roles: allCenterRoles },
+  { to: "/prescription-verification", label: "التحقق من الوصفات", roles: prescriptionVerificationRoles },
   { to: "/master-data", label: "البيانات المرجعية", roles: ["CENTRAL_ADMIN"] },
   { to: "/reports", label: "التقارير", roles: ["CENTRAL_ADMIN"] },
   { to: "/notifications", label: "الإشعارات", roles: ["PATIENT", "CENTRAL_ADMIN", ...allCenterRoles] }

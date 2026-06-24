@@ -33,7 +33,7 @@ export function PatientDoctorsPage() {
   const [availableSlots, setAvailableSlots] = useState<PortalAppointmentSuggestionRecord[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeSpecialty, setActiveSpecialty] = useState("الكل");
-  const [sortMode, setSortMode] = useState<"EXPERIENCE" | "NAME">("EXPERIENCE");
+  const [sortMode, setSortMode] = useState<"EXPERIENCE" | "NAME" | "SPECIALTY" | "TODAY" | "NEXT_SLOT">("EXPERIENCE");
   const [loading, setLoading] = useState(true);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [error, setError] = useState("");
@@ -93,9 +93,19 @@ export function PatientDoctorsPage() {
         return left.fullName.localeCompare(right.fullName, "ar");
       }
 
+      if (sortMode === "SPECIALTY") {
+        return left.specialization.localeCompare(right.specialization, "ar") || left.fullName.localeCompare(right.fullName, "ar");
+      }
+
+      if (sortMode === "TODAY" || sortMode === "NEXT_SLOT") {
+        if (left.id === selectedDoctorId) return -1;
+        if (right.id === selectedDoctorId) return 1;
+        return right.yearsExperience - left.yearsExperience;
+      }
+
       return right.yearsExperience - left.yearsExperience;
     });
-  }, [doctors, deferredSearchQuery, activeSpecialty, sortMode]);
+  }, [doctors, deferredSearchQuery, activeSpecialty, sortMode, selectedDoctorId]);
 
   useEffect(() => {
     async function loadDoctorAvailability(doctor: PortalDoctorRecord) {
@@ -176,7 +186,7 @@ export function PatientDoctorsPage() {
       <section className="hero-strip booking-hero">
         <div className="booking-hero-content">
           <div>
-            <p className="eyebrow">Patient Doctor Directory</p>
+            <p className="eyebrow">دليل أطباء المركز</p>
             <h1>اختر الطبيب بأسلوب بحث وحجز احترافي</h1>
             <p className="muted">
               مستوحى من تجارب الحجز العالمية: ابحث، صفِّ النتائج، افتح ملف الطبيب، ثم احجز من المواعيد المتاحة
@@ -229,11 +239,14 @@ export function PatientDoctorsPage() {
             <select
               value={sortMode}
               onChange={(event) => {
-                setSortMode(event.target.value as "EXPERIENCE" | "NAME");
+                setSortMode(event.target.value as "EXPERIENCE" | "NAME" | "SPECIALTY" | "TODAY" | "NEXT_SLOT");
               }}
             >
               <option value="EXPERIENCE">الأكثر خبرة</option>
               <option value="NAME">الاسم</option>
+              <option value="NEXT_SLOT">أقرب موعد متاح</option>
+              <option value="SPECIALTY">حسب التخصص</option>
+              <option value="TODAY">حسب التوفر اليوم</option>
             </select>
           </label>
         </div>
@@ -271,6 +284,12 @@ export function PatientDoctorsPage() {
               {selectedDoctor ? "الطبيب المحدد" : "أفضل نتيجة ضمن الفلتر الحالي"}
             </span>
           </div>
+
+          <p className="inline-note">
+            {nextAvailableSlot
+              ? `مناسب لأن أقرب وقت ظاهر هو ${formatDateTime(nextAvailableSlot.scheduledAt)}`
+              : "مناسب لأنه يطابق التخصص والبحث الحالي."}
+          </p>
 
           <div className="button-row">
             <button

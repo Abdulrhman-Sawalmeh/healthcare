@@ -111,7 +111,7 @@ async function getPatientCardRecord(centerId: number, patientId: number) {
 }
 
 function mapPatientQrCard(patient: NonNullable<PatientCardRecord>) {
-  const qrValue = buildPatientQrValue(patient.centerId, patient.qrToken);
+  const qrValue = buildPatientQrValue(patient.qrToken);
 
   return {
     patient: {
@@ -140,7 +140,9 @@ function mapPatientQrCard(patient: NonNullable<PatientCardRecord>) {
 
 const patientSchema = z.object({
   fullName: z.string().min(3),
-  dateOfBirth: z.coerce.date(),
+  dateOfBirth: z.coerce.date().refine((value) => value <= new Date(), {
+    message: "تاريخ الميلاد لا يمكن أن يكون في المستقبل."
+  }),
   gender: z.enum(["MALE", "FEMALE", "OTHER", "PREFER_NOT_TO_SAY"]),
   primaryPhone: z.string().min(6),
   email: z.preprocess(
@@ -154,6 +156,8 @@ const patientSchema = z.object({
   chronicDiseases: z.array(z.string()).default([]),
   nationalId: z.string().min(6)
 });
+
+const patientUpdateSchema = patientSchema.omit({ email: true });
 
 const visitSchema = z.object({
   patientId: z.coerce.number(),
@@ -249,16 +253,192 @@ const referralStartVisitSchema = z.object({
   visitType: z.enum(["CONSULTATION", "EMERGENCY", "FOLLOW_UP", "LAB"]).default("CONSULTATION")
 });
 
+const optionalUrlSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  reportUrlSchema.optional()
+);
+
+const labPrioritySchema = z.enum(["NORMAL", "URGENT", "CRITICAL"]);
+const labStatusSchema = z.enum([
+  "NEW",
+  "PENDING",
+  "PENDING_SAMPLE",
+  "SAMPLE_RECEIVED",
+  "IN_PROGRESS",
+  "RESULT_READY",
+  "SENT_TO_DOCTOR",
+  "NEEDS_CORRECTION",
+  "PUBLISHED_TO_PATIENT",
+  "INVALID_SAMPLE",
+  "COMPLETED",
+  "CANCELLED"
+]);
+
 const labRequestSchema = z.object({
-  patientId: z.coerce.number(),
-  doctorId: z.coerce.number(),
-  testId: z.coerce.number()
+  patientId: z.coerce.number().int().positive(),
+  doctorId: z.coerce.number().int().positive().optional(),
+  visitId: z.coerce.number().int().positive().optional(),
+  testId: z.coerce.number().int().positive(),
+  priority: labPrioritySchema.default("NORMAL"),
+  reason: z.string().trim().min(2).max(1000).optional(),
+  clinicalNotes: z.string().trim().max(1000).optional(),
+  sampleType: z.string().trim().max(120).optional(),
+  fastingRequired: z.boolean().default(false),
+  externalTest: z.boolean().default(false)
 });
 
-const labResultSchema = z.object({
-  status: z.enum(["PENDING", "IN_PROGRESS", "COMPLETED", "CANCELLED"]),
-  resultValue: z.string().optional()
+const labStatusUpdateSchema = z.object({
+  status: z.enum(["PENDING_SAMPLE", "SAMPLE_RECEIVED", "IN_PROGRESS", "INVALID_SAMPLE", "CANCELLED"]),
+  note: z.string().trim().max(1000).optional()
 });
+
+const labResultSchema = z
+  .object({
+    action: z.enum(["SAVE_DRAFT", "MARK_READY", "SEND_TO_DOCTOR"]).default("SAVE_DRAFT"),
+    resultValue: z.string().trim().optional(),
+    resultNotes: z.string().trim().optional(),
+    unit: z.string().trim().max(60).optional(),
+    normalRange: z.string().trim().max(120).optional(),
+    abnormalFlag: z.enum(["NORMAL", "ABNORMAL", "CRITICAL"]).default("NORMAL"),
+    criticalNote: z.string().trim().max(1000).optional(),
+    reportUrl: optionalUrlSchema,
+    imageUrl: optionalUrlSchema,
+    doctorNotes: z.string().trim().max(1200).optional(),
+    resultFileName: z.string().trim().max(255).optional(),
+    resultMimeType: z.string().trim().max(120).optional(),
+    resultBase64: z.string().trim().optional()
+  })
+  .superRefine((payload, context) => {
+    const hasStructuredResult = Boolean(payload.resultValue || payload.resultNotes);
+    const hasReportLink = Boolean(payload.reportUrl || payload.imageUrl);
+    const hasAttachment = Boolean(payload.resultFileName && payload.resultMimeType && payload.resultBase64);
+
+    if (!hasStructuredResult && !hasReportLink && !hasAttachment) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "يجب إدخال نتيجة منظمة أو رابط/ملف للتقرير قبل حفظ نتيجة المختبر."
+      });
+    }
+
+    if (payload.abnormalFlag === "CRITICAL" && !payload.criticalNote) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "يجب إضافة ملاحظة للحالة الحرجة قبل إرسال النتيجة."
+      });
+    }
+  });
+
+const labPublishSchema = z.object({
+  doctorNotes: z.string().trim().max(1200).optional(),
+  patientNotes: z.string().trim().max(1200).optional()
+});
+
+const labCorrectionSchema = z.object({
+  reason: z.string().trim().min(3).max(1200)
+});
+
+const labRequestDetailInclude = {
+  patient: true,
+  doctor: {
+    include: {
+      doctorProfile: true
+    }
+  },
+  test: true,
+  visit: true,
+  resultReport: true
+} as const;
+
+const labWorkPendingStatuses = [
+  "NEW",
+  "PENDING",
+  "PENDING_SAMPLE",
+  "SAMPLE_RECEIVED",
+  "IN_PROGRESS",
+  "RESULT_READY",
+  "NEEDS_CORRECTION"
+] as const;
+
+function hasLabResultContent(request: {
+  resultValue: string | null;
+  resultNotes: string | null;
+  reportUrl: string | null;
+  imageUrl: string | null;
+  resultFileName: string | null;
+  resultMimeType: string | null;
+  resultBase64: string | null;
+}) {
+  return Boolean(
+    request.resultValue ||
+      request.resultNotes ||
+      request.reportUrl ||
+      request.imageUrl ||
+      (request.resultFileName && request.resultMimeType && request.resultBase64)
+  );
+}
+
+async function findLabRequest(centerId: number, requestId: number) {
+  return prisma.labRequestLocal.findFirst({
+    where: {
+      id: requestId,
+      centerId
+    },
+    include: labRequestDetailInclude
+  });
+}
+
+function assertDoctorCanUseLabRequest(req: Parameters<typeof asyncHandler>[0] extends never ? never : any, request: Awaited<ReturnType<typeof findLabRequest>>) {
+  if (!request) {
+    throw new AppError("طلب المختبر غير موجود داخل هذا المركز.", 404);
+  }
+
+  const actorId = getActorCenterUserId(req);
+  if (req.auth?.role === "DOCTOR" && request.doctorId !== actorId && request.visit?.doctorId !== actorId) {
+    throw new AppError("لا يمكنك مراجعة طلب مختبر لطبيب آخر.", 403);
+  }
+}
+
+async function completeLabWorkflowTaskIfReady(tx: Prisma.TransactionClient, visitId: number, completedById: number, resultSummary?: string | null) {
+  const remaining = await tx.labRequestLocal.count({
+    where: {
+      visitId,
+      status: {
+        in: [...labWorkPendingStatuses]
+      }
+    }
+  });
+
+  if (remaining > 0) {
+    return;
+  }
+
+  const task = await tx.visitWorkflowTask.findFirst({
+    where: {
+      visitId,
+      taskType: "LAB_TEST",
+      status: {
+        in: ["PENDING", "IN_PROGRESS"]
+      }
+    },
+    orderBy: {
+      createdAt: "asc"
+    }
+  });
+
+  if (task) {
+    await tx.visitWorkflowTask.update({
+      where: {
+        id: task.id
+      },
+      data: {
+        status: "COMPLETED",
+        completedById,
+        completedAt: new Date(),
+        resultSummary: resultSummary ?? undefined
+      }
+    });
+  }
+}
 
 const medicationRefillStatusValues = [
   "REQUESTED",
@@ -374,11 +554,16 @@ const receivingReviewStatuses = ["AUTO_SELECTED", "PENDING_RECEIVING_MANAGER", "
 const receivingInboxStatuses = [...receivingReviewStatuses, "RECEIVING_MANAGER_ACCEPTED"] as const;
 
 const doctorAccountSchema = z.object({
-  username: z.string().optional(),
+  username: z
+    .string()
+    .trim()
+    .min(4, "رقم الهوية / اسم الدخول مطلوب.")
+    .regex(/^[\p{L}\p{N}._@-]+$/u, "رقم الهوية / اسم الدخول يحتوي على رموز غير مسموحة.")
+    .optional(),
   password: z.string().optional(),
   fullName: z.string().min(2),
   phone: z.string().min(5),
-  email: z.string().optional(),
+  email: z.string().trim().email("البريد الإلكتروني مطلوب وصالح لاستعادة كلمة المرور."),
   nationalId: z.string().min(4),
   gender: z.enum(["MALE", "FEMALE", "OTHER", "PREFER_NOT_TO_SAY"]),
   specialization: z.string().min(2),
@@ -437,7 +622,7 @@ router.get(
 
 router.get(
   "/prescriptions/verify/:code",
-  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "PHARMACIST", "LAB_TECH", "NURSE"),
+  authorize("CENTER_MANAGER", "DOCTOR", "PHARMACIST", "LAB_TECH", "NURSE"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const rawCode = String(req.params.code ?? "").trim();
@@ -516,7 +701,7 @@ router.get(
 
 router.get(
   "/doctors",
-  authorize("CENTER_MANAGER"),
+  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"),
   asyncHandler(async (req, res) => {
     res.json(await getCenterDoctorsBundle(getCenterId(req)));
   })
@@ -526,7 +711,7 @@ router.post(
   "/doctors",
   authorize("CENTER_MANAGER"),
   asyncHandler(async (req, res) => {
-    const payload = doctorAccountSchema.extend({ password: z.string().min(6) }).parse(req.body);
+    const payload = doctorAccountSchema.extend({ password: z.string().min(8) }).parse(req.body);
     const result = await createCenterDoctor({
         ...payload,
         centerId: getCenterId(req),
@@ -584,7 +769,7 @@ router.delete(
     const result = await deleteCenterDoctor(getCenterId(req), doctorId);
 
     await recordAuditLog(req, {
-      action: "DELETE_DOCTOR",
+      action: "DISABLE_DOCTOR",
       entityType: "CenterUserAccount",
       entityId: doctorId
     });
@@ -979,6 +1164,134 @@ router.post(
   })
 );
 
+router.put(
+  "/patients/:patientId",
+  authorize("RECEPTIONIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const patientId = parsePositiveParam(req.params.patientId, "Patient ID");
+    const payload = patientUpdateSchema.parse(req.body);
+    const existingPatient = await prisma.localPatient.findFirst({
+      where: {
+        id: patientId,
+        centerId
+      },
+      include: {
+        unifiedPatient: true
+      }
+    });
+
+    if (!existingPatient) {
+      throw new AppError("ملف المريض غير موجود داخل هذا المركز.", 404);
+    }
+
+    const updatedPatient = await prisma.$transaction(async (tx) => {
+      let unifiedPatient = existingPatient.unifiedPatient;
+
+      if (unifiedPatient) {
+        unifiedPatient = await tx.unifiedPatient.update({
+          where: { id: unifiedPatient.id },
+          data: {
+            nationalId: payload.nationalId,
+            fullName: payload.fullName,
+            dateOfBirth: payload.dateOfBirth,
+            gender: payload.gender,
+            primaryPhone: payload.primaryPhone,
+            address: payload.address,
+            bloodType: payload.bloodType,
+            allergies: payload.allergies,
+            chronicDiseases: payload.chronicDiseases
+          }
+        });
+      }
+
+      return tx.localPatient.update({
+        where: {
+          id: existingPatient.id
+        },
+        data: {
+          unifiedPatientId: unifiedPatient?.id ?? existingPatient.unifiedPatientId,
+          unifiedId: unifiedPatient?.unifiedId ?? existingPatient.unifiedId,
+          fullName: payload.fullName,
+          dateOfBirth: payload.dateOfBirth,
+          gender: payload.gender,
+          phone: payload.primaryPhone,
+          address: payload.address,
+          emergencyContact: payload.emergencyContact,
+          bloodType: payload.bloodType,
+          allergies: payload.allergies,
+          chronicDiseases: payload.chronicDiseases
+        }
+      });
+    });
+
+    await recordAuditLog(req, {
+      action: "UPDATE_PATIENT",
+      entityType: "LocalPatient",
+      entityId: updatedPatient.id,
+      centerId,
+      newValue: {
+        fullName: updatedPatient.fullName,
+        unifiedId: updatedPatient.unifiedId,
+        phone: updatedPatient.phone
+      }
+    });
+
+    res.json(updatedPatient);
+  })
+);
+
+router.delete(
+  "/patients/:patientId",
+  authorize("RECEPTIONIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const patientId = parsePositiveParam(req.params.patientId, "Patient ID");
+    const existingPatient = await prisma.localPatient.findFirst({
+      where: {
+        id: patientId,
+        centerId
+      },
+      include: {
+        _count: {
+          select: {
+            visits: true,
+            labRequests: true,
+            resultReports: true
+          }
+        }
+      }
+    });
+
+    if (!existingPatient) {
+      throw new AppError("ملف المريض غير موجود داخل هذا المركز.", 404);
+    }
+
+    if (
+      existingPatient._count.visits > 0 ||
+      existingPatient._count.labRequests > 0 ||
+      existingPatient._count.resultReports > 0
+    ) {
+      throw new AppError("لا يمكن حذف ملف مريض مرتبط بزيارات أو نتائج. يمكن إبقاء الملف للعرض والمتابعة.", 409);
+    }
+
+    await prisma.localPatient.delete({
+      where: {
+        id: existingPatient.id
+      }
+    });
+
+    await recordAuditLog(req, {
+      action: "DELETE_PATIENT",
+      entityType: "LocalPatient",
+      entityId: patientId,
+      centerId
+    });
+
+    res.json({ success: true });
+  })
+);
+
 router.get(
   "/visits",
   authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"),
@@ -989,7 +1302,7 @@ router.get(
 
 router.post(
   "/visits",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const payload = visitSchema.parse(req.body);
@@ -1074,7 +1387,7 @@ router.post(
 
 router.post(
   "/visits/:visitId/reports",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const visitId = Number(req.params.visitId);
@@ -1145,7 +1458,7 @@ router.post(
 
 router.put(
   "/visits/:visitId/reports/:reportId",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const visitId = Number(req.params.visitId);
@@ -1224,7 +1537,7 @@ router.put(
 
 router.delete(
   "/visits/:visitId/reports/:reportId",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const visitId = Number(req.params.visitId);
@@ -1317,7 +1630,7 @@ router.get(
 
 router.patch(
   "/refill-requests/:requestId/doctor",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const actorId = getActorCenterUserId(req);
@@ -1408,7 +1721,7 @@ router.patch(
 
 router.patch(
   "/refill-requests/:requestId/status",
-  authorize("CENTER_MANAGER", "PHARMACIST"),
+  authorize("PHARMACIST"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const actorId = getActorCenterUserId(req);
@@ -1526,7 +1839,7 @@ router.get(
 
 router.post(
   "/follow-up-reminders",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const actorId = getActorCenterUserId(req);
@@ -1629,7 +1942,7 @@ router.post(
 
 router.patch(
   "/follow-up-reminders/:reminderId",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const actorId = getActorCenterUserId(req);
@@ -1703,7 +2016,7 @@ router.patch(
 
 router.delete(
   "/follow-up-reminders/:reminderId",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const actorId = getActorCenterUserId(req);
@@ -1749,11 +2062,17 @@ router.get(
   authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
+    const doctorActorId = req.auth?.role === "DOCTOR" ? getActorCenterUserId(req) : null;
     const [referrals, outgoingReferralRequests, center] = await Promise.all([
       prisma.centralReferral.findMany({
-        where: {
-          OR: [{ fromCenterId: centerId }, { toCenterId: centerId }]
-        },
+        where: doctorActorId
+          ? {
+              toCenterId: centerId,
+              assignedDoctorId: doctorActorId
+            }
+          : {
+              OR: [{ fromCenterId: centerId }, { toCenterId: centerId }]
+            },
         include: centralReferralInclude,
         orderBy: {
           requestedAt: "desc"
@@ -1779,19 +2098,28 @@ router.get(
     res.json(
       [
         ...referrals.map(mapCentralReferral),
-        ...outgoingReferralRequests.map((notification) => {
+        ...outgoingReferralRequests
+          .filter((notification) => {
+            if (!doctorActorId) {
+              return true;
+            }
+
+            const payload = notification.payload as Record<string, unknown>;
+            return Number(payload.created_by_center_user_id) === doctorActorId;
+          })
+          .map((notification) => {
           const payload = notification.payload as Record<string, unknown>;
 
           return {
             id: -notification.id,
-            patientName: String(payload.patient_unified_id ?? "Patient"),
+            patientName: String(payload.patient_unified_id ?? "مريض"),
             patientUnifiedId: String(payload.patient_unified_id ?? ""),
-            fromCenter: center?.centerName ?? "Current center",
-            toCenter: "Awaiting central matching",
+            fromCenter: center?.centerName ?? "المركز الحالي",
+            toCenter: "بانتظار المطابقة المركزية",
             requiredSpecialty: String(payload.required_specialty ?? "-"),
             priority: String(payload.priority ?? "NORMAL"),
             status: notification.status,
-            reason: String(payload.reason ?? "Referral request queued for central processing."),
+            reason: String(payload.reason ?? "طلب الإحالة في قائمة المعالجة المركزية."),
             selectedCenterReason: null,
             rejectionReason: notification.lastError,
             managerDecisionReason: null,
@@ -1818,9 +2146,10 @@ router.get(
 
 router.post(
   "/referrals/request",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
     const payload = referralSchema.parse(req.body);
 
     let patientUnifiedId = payload.patientUnifiedId;
@@ -1845,7 +2174,8 @@ router.post(
       required_medicine_ids: payload.requiredMedicineIds,
       preferred_region: payload.preferredRegion,
       max_distance_km: payload.maxDistanceKm,
-      notes_from_sender: payload.notesFromSender
+      notes_from_sender: payload.notesFromSender,
+      created_by_center_user_id: actorId
     });
 
     if (payload.processNow) {
@@ -2237,7 +2567,7 @@ router.post(
 
 router.post(
   "/referrals/:referralId/complete",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const actorId = getActorCenterUserId(req);
@@ -2305,29 +2635,123 @@ router.get(
 
 router.post(
   "/lab/requests",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
     const payload = labRequestSchema.parse(req.body);
 
-    const requestRecord = await prisma.labRequestLocal.create({
-      data: {
-        centerId,
-        patientId: payload.patientId,
-        doctorId: payload.doctorId,
-        testId: payload.testId
+    const [patient, test, visit] = await Promise.all([
+      prisma.localPatient.findFirst({
+        where: {
+          id: payload.patientId,
+          centerId
+        }
+      }),
+      prisma.labTestLocal.findFirst({
+        where: {
+          id: payload.testId,
+          centerId
+        }
+      }),
+      payload.visitId
+        ? prisma.localVisit.findFirst({
+            where: {
+              id: payload.visitId,
+              centerId
+            }
+          })
+        : Promise.resolve(null)
+    ]);
+
+    if (!patient) {
+      throw new AppError("المريض غير موجود داخل هذا المركز.", 404);
+    }
+
+    if (!test) {
+      throw new AppError("الفحص المخبري غير موجود داخل هذا المركز.", 404);
+    }
+
+    if (payload.visitId && !visit) {
+      throw new AppError("ملف الزيارة غير موجود داخل هذا المركز.", 404);
+    }
+
+    if (visit && visit.patientId !== payload.patientId) {
+      throw new AppError("طلب المختبر يجب أن يرتبط بنفس مريض الزيارة.", 400);
+    }
+
+    if (visit?.doctorId && visit.doctorId !== actorId) {
+      throw new AppError("لا يمكنك إنشاء طلب مختبر على زيارة طبيب آخر.", 403);
+    }
+
+    const requestRecord = await prisma.$transaction(async (tx) => {
+      const created = await tx.labRequestLocal.create({
+        data: {
+          centerId,
+          patientId: payload.patientId,
+          doctorId: actorId,
+          visitId: payload.visitId,
+          testId: payload.testId,
+          status: "NEW",
+          priority: payload.priority,
+          reason: payload.reason,
+          clinicalNotes: payload.clinicalNotes,
+          sampleType: payload.sampleType,
+          fastingRequired: payload.fastingRequired,
+          externalTest: payload.externalTest,
+          normalRange: test.normalRange
+        },
+        include: labRequestDetailInclude
+      });
+
+      if (payload.visitId) {
+        const existingTask = await tx.visitWorkflowTask.findFirst({
+          where: {
+            visitId: payload.visitId,
+            taskType: "LAB_TEST",
+            status: {
+              in: ["PENDING", "IN_PROGRESS"]
+            }
+          }
+        });
+
+        if (!existingTask) {
+          await tx.visitWorkflowTask.create({
+            data: {
+              visitId: payload.visitId,
+              taskType: "LAB_TEST",
+              assignedRole: "LAB_TECH",
+              instructions: "تنفيذ طلب المختبر وإرسال النتيجة للطبيب."
+            }
+          });
+        }
       }
+
+      return created;
+    });
+
+    await notifyRole({
+      centerId,
+      role: "LAB_TECH",
+      type: "LAB_REQUEST_CREATED",
+      title: "طلب فحص مخبري جديد",
+      message: `${patient.fullName} لديه طلب ${test.testName}. [[target:/lab?highlight=lab-request-${requestRecord.id}]]`,
+      severity: payload.priority === "NORMAL" ? "INFO" : "WARNING"
     });
 
     await recordAuditLog(req, {
-      action: "CREATE_LAB_REQUEST",
+      action: "LAB_REQUEST_CREATED",
       entityType: "LabRequestLocal",
       entityId: requestRecord.id,
       centerId,
       newValue: {
-        patientId: requestRecord.patientId,
-        doctorId: requestRecord.doctorId,
-        testId: requestRecord.testId
+        centerId,
+        patientId: payload.patientId,
+        doctorId: actorId,
+        visitId: payload.visitId,
+        testId: payload.testId,
+        priority: payload.priority,
+        status: requestRecord.status
       }
     });
 
@@ -2336,27 +2760,475 @@ router.post(
 );
 
 router.patch(
-  "/lab/requests/:requestId",
-  authorize("CENTER_MANAGER", "LAB_TECH"),
+  "/lab/requests/:requestId/status",
+  authorize("LAB_TECH"),
   asyncHandler(async (req, res) => {
-    const payload = labResultSchema.parse(req.body);
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const requestId = parsePositiveParam(req.params.requestId, "Lab request ID");
+    const payload = labStatusUpdateSchema.parse(req.body);
+    const existing = await findLabRequest(centerId, requestId);
+
+    if (!existing) {
+      throw new AppError("طلب المختبر غير موجود داخل هذا المركز.", 404);
+    }
+
+    if (["SENT_TO_DOCTOR", "PUBLISHED_TO_PATIENT"].includes(existing.status)) {
+      throw new AppError("لا يمكن تعديل طلب مختبر تم إرساله للطبيب أو نشره للمريض.", 409);
+    }
+
+    if (payload.status === "INVALID_SAMPLE" && !payload.note) {
+      throw new AppError("يجب توضيح سبب رفض أو تلف العينة.", 400);
+    }
+
     const record = await prisma.labRequestLocal.update({
-      where: { id: Number(req.params.requestId) },
+      where: { id: requestId },
       data: {
         status: payload.status,
-        resultValue: payload.resultValue,
-        resultDate: payload.status === "COMPLETED" ? new Date() : null
-      }
+        completedById: actorId,
+        resultNotes: payload.note ?? existing.resultNotes
+      },
+      include: labRequestDetailInclude
     });
 
     await recordAuditLog(req, {
-      action: "UPDATE_LAB_RESULT",
+      action: payload.status === "SAMPLE_RECEIVED" ? "LAB_SAMPLE_RECEIVED" : "LAB_REQUEST_STATUS_UPDATED",
       entityType: "LabRequestLocal",
       entityId: record.id,
-      centerId: getCenterId(req),
+      centerId,
+      oldValue: {
+        status: existing.status
+      },
       newValue: {
         status: record.status,
-        resultValue: record.resultValue
+        note: payload.note
+      }
+    });
+
+    res.json(record);
+  })
+);
+
+router.patch(
+  "/lab/requests/:requestId/result",
+  authorize("LAB_TECH"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const requestId = parsePositiveParam(req.params.requestId, "Lab request ID");
+    const payload = labResultSchema.parse(req.body);
+    const existing = await findLabRequest(centerId, requestId);
+
+    if (!existing) {
+      throw new AppError("طلب المختبر غير موجود داخل هذا المركز.", 404);
+    }
+
+    if (["SENT_TO_DOCTOR", "PUBLISHED_TO_PATIENT"].includes(existing.status)) {
+      throw new AppError("لا يمكن تعديل النتيجة بعد إرسالها للطبيب إلا إذا أعادها للتصحيح.", 409);
+    }
+
+    const nextStatus =
+      payload.action === "SEND_TO_DOCTOR"
+        ? "SENT_TO_DOCTOR"
+        : payload.action === "MARK_READY"
+          ? "RESULT_READY"
+          : "IN_PROGRESS";
+    const now = new Date();
+
+    const record = await prisma.$transaction(async (tx) => {
+      const updated = await tx.labRequestLocal.update({
+        where: { id: requestId },
+        data: {
+          resultValue: payload.resultValue,
+          resultNotes: payload.resultNotes,
+          unit: payload.unit,
+          normalRange: payload.normalRange,
+          abnormalFlag: payload.abnormalFlag,
+          criticalNote: payload.criticalNote,
+          reportUrl: payload.reportUrl,
+          imageUrl: payload.imageUrl,
+          doctorNotes: payload.doctorNotes,
+          resultFileName: payload.resultFileName,
+          resultMimeType: payload.resultMimeType,
+          resultBase64: payload.resultBase64,
+          status: nextStatus,
+          completedById: actorId,
+          resultDate: now,
+          sentToDoctorAt: nextStatus === "SENT_TO_DOCTOR" ? now : existing.sentToDoctorAt,
+          correctionReason: nextStatus === "SENT_TO_DOCTOR" ? null : existing.correctionReason
+        },
+        include: labRequestDetailInclude
+      });
+
+      if (nextStatus === "SENT_TO_DOCTOR" && updated.visitId) {
+        await completeLabWorkflowTaskIfReady(tx, updated.visitId, actorId, payload.resultNotes ?? payload.resultValue);
+      }
+
+      return updated;
+    });
+
+    await recordAuditLog(req, {
+      action: "LAB_RESULT_DRAFTED",
+      entityType: "LabRequestLocal",
+      entityId: record.id,
+      centerId,
+      oldValue: {
+        status: existing.status
+      },
+      newValue: {
+        status: record.status,
+        abnormalFlag: record.abnormalFlag,
+        hasReportUrl: Boolean(record.reportUrl),
+        hasImageUrl: Boolean(record.imageUrl),
+        hasAttachment: Boolean(record.resultFileName)
+      }
+    });
+
+    if (record.abnormalFlag === "CRITICAL") {
+      await recordAuditLog(req, {
+        action: "LAB_RESULT_MARKED_CRITICAL",
+        entityType: "LabRequestLocal",
+        entityId: record.id,
+        centerId,
+        newValue: {
+          criticalNote: record.criticalNote
+        }
+      });
+
+      await notifyRole({
+        centerId,
+        role: "DOCTOR",
+        type: "CRITICAL_LAB_RESULT",
+        title: "نتيجة مختبر حرجة",
+        message: `نتيجة ${record.test.testName} للمريض ${record.patient.fullName} حرجة وتحتاج مراجعة عاجلة. [[target:/visit-workflow?highlight=lab-result-${record.id}]]`,
+        severity: "ERROR"
+      });
+      await notifyRole({
+        centerId,
+        role: "CENTER_MANAGER",
+        type: "CRITICAL_LAB_RESULT",
+        title: "نتيجة مختبر حرجة",
+        message: `تم تعليم نتيجة ${record.test.testName} كحرجة للمريض ${record.patient.fullName}. [[target:/lab?critical=1&highlight=lab-request-${record.id}]]`,
+        severity: "ERROR"
+      });
+    }
+
+    if (nextStatus === "SENT_TO_DOCTOR") {
+      await recordAuditLog(req, {
+        action: "LAB_RESULT_SENT_TO_DOCTOR",
+        entityType: "LabRequestLocal",
+        entityId: record.id,
+        centerId,
+        newValue: {
+          status: record.status,
+          sentToDoctorAt: record.sentToDoctorAt
+        }
+      });
+
+      await notifyRole({
+        centerId,
+        role: "DOCTOR",
+        type: "LAB_RESULT_READY",
+        title: "نتيجة مختبر جاهزة للمراجعة",
+        message: `نتيجة ${record.test.testName} للمريض ${record.patient.fullName} جاهزة للمراجعة. [[target:/visit-workflow?highlight=lab-result-${record.id}]]`,
+        severity: record.abnormalFlag === "CRITICAL" || record.priority === "CRITICAL" ? "ERROR" : "INFO"
+      });
+    }
+
+    res.json(record);
+  })
+);
+
+router.post(
+  "/lab/requests/:requestId/send-to-doctor",
+  authorize("LAB_TECH"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const requestId = parsePositiveParam(req.params.requestId, "Lab request ID");
+    const existing = await findLabRequest(centerId, requestId);
+
+    if (!existing) {
+      throw new AppError("طلب المختبر غير موجود داخل هذا المركز.", 404);
+    }
+
+    if (["SENT_TO_DOCTOR", "PUBLISHED_TO_PATIENT"].includes(existing.status)) {
+      return res.json(existing);
+    }
+
+    if (!hasLabResultContent(existing)) {
+      throw new AppError("يجب إدخال نتيجة أو رابط/ملف التقرير قبل الإرسال للطبيب.", 400);
+    }
+
+    if (existing.abnormalFlag === "CRITICAL" && !existing.criticalNote) {
+      throw new AppError("يجب إضافة ملاحظة للحالة الحرجة قبل إرسال النتيجة.", 400);
+    }
+
+    const now = new Date();
+    const record = await prisma.$transaction(async (tx) => {
+      const updated = await tx.labRequestLocal.update({
+        where: { id: requestId },
+        data: {
+          status: "SENT_TO_DOCTOR",
+          completedById: actorId,
+          sentToDoctorAt: now,
+          resultDate: existing.resultDate ?? now,
+          correctionReason: null
+        },
+        include: labRequestDetailInclude
+      });
+
+      if (updated.visitId) {
+        await completeLabWorkflowTaskIfReady(tx, updated.visitId, actorId, updated.resultNotes ?? updated.resultValue);
+      }
+
+      return updated;
+    });
+
+    await notifyRole({
+      centerId,
+      role: "DOCTOR",
+      type: "LAB_RESULT_READY",
+      title: "نتيجة مختبر جاهزة للمراجعة",
+      message: `نتيجة ${record.test.testName} للمريض ${record.patient.fullName} جاهزة للمراجعة. [[target:/visit-workflow?highlight=lab-result-${record.id}]]`,
+      severity: record.abnormalFlag === "CRITICAL" || record.priority === "CRITICAL" ? "ERROR" : "INFO"
+    });
+
+    await recordAuditLog(req, {
+      action: "LAB_RESULT_SENT_TO_DOCTOR",
+      entityType: "LabRequestLocal",
+      entityId: record.id,
+      centerId,
+      oldValue: {
+        status: existing.status
+      },
+      newValue: {
+        status: record.status,
+        sentToDoctorAt: record.sentToDoctorAt
+      }
+    });
+
+    res.json(record);
+  })
+);
+
+router.post(
+  "/lab/requests/:requestId/publish",
+  authorize("DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const requestId = parsePositiveParam(req.params.requestId, "Lab request ID");
+    const payload = labPublishSchema.parse(req.body);
+    const existing = await findLabRequest(centerId, requestId);
+
+    assertDoctorCanUseLabRequest(req, existing);
+
+    if (!existing) {
+      throw new AppError("طلب المختبر غير موجود داخل هذا المركز.", 404);
+    }
+
+    if (!existing.visitId) {
+      throw new AppError("لا يمكن نشر نتيجة للمريض بدون ربطها بزيارة حقيقية.", 400);
+    }
+
+    if (!["SENT_TO_DOCTOR", "COMPLETED"].includes(existing.status)) {
+      throw new AppError("يجب إرسال نتيجة المختبر للطبيب قبل نشرها للمريض.", 409);
+    }
+
+    if (!hasLabResultContent(existing)) {
+      throw new AppError("لا توجد نتيجة مختبر قابلة للنشر.", 400);
+    }
+
+    const reportSummary =
+      payload.patientNotes ||
+      existing.resultValue ||
+      existing.resultNotes ||
+      `نتيجة فحص ${existing.test.testName} متاحة في السجل الصحي.`;
+    const findings = [
+      existing.resultValue ? `Result: ${existing.resultValue}` : null,
+      existing.unit ? `Unit: ${existing.unit}` : null,
+      existing.normalRange ? `Normal range: ${existing.normalRange}` : null,
+      existing.resultNotes ? `Notes: ${existing.resultNotes}` : null,
+      existing.reportUrl ? `Report URL: ${existing.reportUrl}` : null,
+      existing.imageUrl ? `Image URL: ${existing.imageUrl}` : null
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const record = await prisma.$transaction(async (tx) => {
+      const reportData = {
+        centerId,
+        patientId: existing.patientId,
+        visitId: existing.visitId!,
+        authorId: actorId,
+        title: `نتيجة ${existing.test.testName}`,
+        category: "LAB",
+        summary: reportSummary,
+        reportUrl: existing.reportUrl,
+        findings,
+        recommendations: payload.doctorNotes,
+        recommendedFollowUp: null,
+        shareWithPatient: true,
+        attachmentFileName: existing.resultFileName,
+        attachmentMimeType: existing.resultMimeType,
+        attachmentBase64: existing.resultBase64
+      };
+
+      const report = existing.resultReportId
+        ? await tx.localResultReport.update({
+            where: {
+              id: existing.resultReportId
+            },
+            data: reportData
+          })
+        : await tx.localResultReport.create({
+            data: reportData
+          });
+
+      const updated = await tx.labRequestLocal.update({
+        where: {
+          id: requestId
+        },
+        data: {
+          status: "PUBLISHED_TO_PATIENT",
+          doctorNotes: payload.doctorNotes,
+          patientNotes: payload.patientNotes,
+          resultReportId: report.id,
+          publishedToPatientAt: new Date()
+        },
+        include: labRequestDetailInclude
+      });
+
+      return { updated, report };
+    });
+
+    await notifyPatientAboutResultReport({
+      centerId,
+      patientId: existing.patientId,
+      reportTitle: record.report.title,
+      reportUrl: record.report.reportUrl,
+      shareWithPatient: true,
+      targetPath: `/medical-record?highlight=lab-report-${record.report.id}`
+    });
+
+    await recordAuditLog(req, {
+      action: "LAB_RESULT_PUBLISHED_TO_PATIENT",
+      entityType: "LabRequestLocal",
+      entityId: record.updated.id,
+      centerId,
+      oldValue: {
+        status: existing.status
+      },
+      newValue: {
+        status: record.updated.status,
+        resultReportId: record.report.id,
+        publishedToPatientAt: record.updated.publishedToPatientAt
+      }
+    });
+
+    res.json(record.updated);
+  })
+);
+
+router.post(
+  "/lab/requests/:requestId/return-correction",
+  authorize("DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const requestId = parsePositiveParam(req.params.requestId, "Lab request ID");
+    const payload = labCorrectionSchema.parse(req.body);
+    const existing = await findLabRequest(centerId, requestId);
+
+    assertDoctorCanUseLabRequest(req, existing);
+
+    if (!existing) {
+      throw new AppError("طلب المختبر غير موجود داخل هذا المركز.", 404);
+    }
+
+    if (!["SENT_TO_DOCTOR", "RESULT_READY", "COMPLETED"].includes(existing.status)) {
+      throw new AppError("يمكن إرجاع نتيجة جاهزة فقط للتصحيح.", 409);
+    }
+
+    const record = await prisma.labRequestLocal.update({
+      where: {
+        id: requestId
+      },
+      data: {
+        status: "NEEDS_CORRECTION",
+        correctionReason: payload.reason,
+        doctorNotes: payload.reason
+      },
+      include: labRequestDetailInclude
+    });
+
+    await notifyRole({
+      centerId,
+      role: "LAB_TECH",
+      type: "LAB_RESULT_NEEDS_CORRECTION",
+      title: "نتيجة مختبر بحاجة للتصحيح",
+      message: `طلب ${record.test.testName} للمريض ${record.patient.fullName} أعاده الطبيب للتصحيح. [[target:/lab?highlight=lab-request-${record.id}]]`,
+      severity: "WARNING"
+    });
+
+    await recordAuditLog(req, {
+      action: "LAB_RESULT_RETURNED_FOR_CORRECTION",
+      entityType: "LabRequestLocal",
+      entityId: record.id,
+      centerId,
+      oldValue: {
+        status: existing.status
+      },
+      newValue: {
+        status: record.status,
+        correctionReason: record.correctionReason
+      }
+    });
+
+    res.json(record);
+  })
+);
+
+router.patch(
+  "/lab/requests/:requestId",
+  authorize("LAB_TECH"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const requestId = parsePositiveParam(req.params.requestId, "Lab request ID");
+    const status = labStatusSchema.optional().parse(req.body.status);
+
+    if (!status) {
+      throw new AppError("يجب إرسال حالة طلب المختبر.", 400);
+    }
+
+    const existing = await findLabRequest(centerId, requestId);
+
+    if (!existing) {
+      throw new AppError("طلب المختبر غير موجود داخل هذا المركز.", 404);
+    }
+
+    const record = await prisma.labRequestLocal.update({
+      where: {
+        id: requestId
+      },
+      data: {
+        status,
+        resultValue: typeof req.body.resultValue === "string" ? req.body.resultValue : existing.resultValue,
+        resultDate: ["COMPLETED", "RESULT_READY", "SENT_TO_DOCTOR"].includes(status) ? new Date() : existing.resultDate
+      },
+      include: labRequestDetailInclude
+    });
+
+    await recordAuditLog(req, {
+      action: "LAB_REQUEST_STATUS_UPDATED",
+      entityType: "LabRequestLocal",
+      entityId: record.id,
+      centerId,
+      oldValue: {
+        status: existing.status
+      },
+      newValue: {
+        status: record.status
       }
     });
 

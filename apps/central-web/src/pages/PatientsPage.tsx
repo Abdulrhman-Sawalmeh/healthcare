@@ -1,24 +1,14 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
-import { StatusBadge } from "../components/StatusBadge";
 import { Breadcrumbs, EmptyState, ErrorState, LoadingState, PageHeader, ResultSummary, SearchBox } from "../components/UiStates";
-import { useAuth } from "../context/AuthContext";
-import { joinMeta, toArabicLabel } from "../lib/arabic";
-import { LocalPatientRecord, NetworkPatientSearchResult, UnifiedPatientRecord } from "../types";
-
-function splitCsv(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
+import { formatCount, formatDateTime, joinMeta, safeDisplay, toArabicLabel } from "../lib/arabic";
+import { UnifiedPatientRecord } from "../types";
 
 function isPlaceholderText(value?: string | null) {
   const normalizedValue = value?.trim() ?? "";
-
   return normalizedValue.length > 0 && /^[?\s]+$/.test(normalizedValue);
 }
 
@@ -32,66 +22,38 @@ function getPatientDisplayName(fullName: string, index = 0) {
 
 function getChronicDiseasesLabel(chronicDiseases: string[]) {
   const validDiseases = chronicDiseases.filter((disease) => !isPlaceholderText(disease));
-
   return validDiseases.length > 0 ? validDiseases.join("، ") : "لا توجد أمراض مزمنة مسجلة.";
 }
 
 export function PatientsPage() {
-  const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [centralPatients, setCentralPatients] = useState<UnifiedPatientRecord[]>([]);
-  const [localPatients, setLocalPatients] = useState<LocalPatientRecord[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [searchResult, setSearchResult] = useState<NetworkPatientSearchResult | null>(null);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => searchParams.get("search") ?? "");
+  const [centerFilter, setCenterFilter] = useState("");
+  const [activityFilter, setActivityFilter] = useState("");
+  const [visitsFilter, setVisitsFilter] = useState("");
+  const [referralsFilter, setReferralsFilter] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const didRunInitialFilter = useRef(false);
-  const [form, setForm] = useState({
-    fullName: "",
-    dateOfBirth: "",
-    gender: "MALE",
-    primaryPhone: "",
-    address: "",
-    emergencyContact: "",
-    bloodType: "",
-    allergies: "",
-    chronicDiseases: ""
-  });
 
   async function loadPatients(search?: string) {
     setLoading(true);
-    const path =
-      user?.workspace === "central"
-        ? `/central/patients${search ? `?search=${encodeURIComponent(search)}` : ""}`
-        : `/center/patients${search ? `?search=${encodeURIComponent(search)}` : ""}`;
+    const path = `/central/patients${search ? `?search=${encodeURIComponent(search)}` : ""}`;
 
     try {
-      const payload = await apiRequest<UnifiedPatientRecord[] | LocalPatientRecord[]>(path);
-
-      if (user?.workspace === "central") {
-        setCentralPatients(payload as UnifiedPatientRecord[]);
-      } else {
-        setLocalPatients(payload as LocalPatientRecord[]);
-      }
+      const payload = await apiRequest<UnifiedPatientRecord[]>(path);
+      setCentralPatients(payload);
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    if (!user) {
-      return;
-    }
-
-    loadPatients().catch((cause: Error) => setError(cause.message));
-  }, [user]);
+    loadPatients(query.trim()).catch((cause: Error) => setError(cause.message));
+  }, []);
 
   useEffect(() => {
-    if (!user) {
-      return;
-    }
-
     if (!didRunInitialFilter.current) {
       didRunInitialFilter.current = true;
       return;
@@ -116,105 +78,7 @@ export function PatientsPage() {
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [query, user?.workspace]);
-
-  useEffect(() => {
-    const term = searchTerm.trim();
-
-    if (user?.workspace === "central") {
-      return;
-    }
-
-    if (!term) {
-      setSearchResult(null);
-      setSearchLoading(false);
-      return;
-    }
-
-    let active = true;
-    setSearchLoading(true);
-
-    const timeout = window.setTimeout(() => {
-      apiRequest<NetworkPatientSearchResult>(`/center/patients/search?term=${encodeURIComponent(term)}&limit=8`)
-        .then((payload) => {
-          if (!active) {
-            return;
-          }
-
-          setSearchResult(payload);
-          setError("");
-        })
-        .catch((cause) => {
-          if (active) {
-            setError(cause instanceof Error ? cause.message : "تعذر تنفيذ البحث.");
-          }
-        })
-        .finally(() => {
-          if (active) {
-            setSearchLoading(false);
-          }
-        });
-    }, 180);
-
-    return () => {
-      active = false;
-      window.clearTimeout(timeout);
-    };
-  }, [searchTerm, user?.workspace]);
-
-  async function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    try {
-      setSearchLoading(true);
-      const payload = await apiRequest<NetworkPatientSearchResult>(
-        `/center/patients/search?term=${encodeURIComponent(searchTerm)}&limit=8`
-      );
-      setSearchResult(payload);
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذر تنفيذ البحث.");
-    } finally {
-      setSearchLoading(false);
-    }
-  }
-
-  async function handleCreatePatient(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    try {
-      await apiRequest("/center/patients", {
-        method: "POST",
-        body: JSON.stringify({
-          fullName: form.fullName,
-          dateOfBirth: form.dateOfBirth,
-          gender: form.gender,
-          primaryPhone: form.primaryPhone,
-          address: form.address,
-          emergencyContact: form.emergencyContact || undefined,
-          bloodType: form.bloodType || undefined,
-          allergies: splitCsv(form.allergies),
-          chronicDiseases: splitCsv(form.chronicDiseases)
-        })
-      });
-
-      setForm({
-        fullName: "",
-        dateOfBirth: "",
-        gender: "MALE",
-        primaryPhone: "",
-        address: "",
-        emergencyContact: "",
-        bloodType: "",
-        allergies: "",
-        chronicDiseases: ""
-      });
-      await loadPatients();
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذر إنشاء ملف المريض.");
-    }
-  }
+  }, [query]);
 
   async function handleFilterSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -233,250 +97,151 @@ export function PatientsPage() {
       .catch((cause: Error) => setError(cause.message));
   }
 
-  const patientMatches = searchResult?.patientMatches ?? (searchResult?.patient ? [searchResult.patient] : []);
-  const localMatches = searchResult?.localMatches ?? (searchResult?.localPatient ? [searchResult.localPatient] : []);
+  const centerOptions = useMemo(() => {
+    const centers = centralPatients.flatMap((patient) => patient.centersSeenAt);
+    const unique = new Map<number, string>();
+    centers.forEach((center) => unique.set(center.centerId, center.centerName));
+    return Array.from(unique, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "ar"));
+  }, [centralPatients]);
 
-  if (user?.workspace === "central") {
-    return (
-      <div className="page-stack">
-        <Breadcrumbs items={[{ label: "لوحة المتابعة", to: "/" }, { label: "المرضى" }]} />
-        <PageHeader
-          eyebrow="النظام المركزي"
-          title="السجل الموحد للمرضى"
-          subtitle="ابحث وتابع هوية المريض ونشاطه الأخير عبر جميع المراكز الصحية."
-          meta={`${centralPatients.length} ملف`}
-        />
-        <SectionCard
-          title="السجل الموحد للمرضى"
-          subtitle="المرجع المركزي لهوية المريض ونشاطه الأخير عبر المراكز الصحية."
-        >
-          <SearchBox
-            value={query}
-            onChange={setQuery}
-            onSubmit={handleFilterSubmit}
-            placeholder="ابحث بالرقم الموحد أو الاسم أو رقم الهاتف"
-          />
+  const visiblePatients = useMemo(() => {
+    return centralPatients.filter((patient) => {
+      if (centerFilter && !patient.centersSeenAt.some((center) => String(center.centerId) === centerFilter)) {
+        return false;
+      }
 
-          {error ? <ErrorState message={error} onRetry={() => retryLoadPatients(query)} /> : null}
+      if (activityFilter === "active" && patient.visitCount + patient.referralCount === 0) {
+        return false;
+      }
 
-          {loading ? (
-            <LoadingState text="جار تحميل سجل المرضى..." />
-          ) : centralPatients.length === 0 ? (
-            <EmptyState
-              title="لا توجد ملفات مطابقة"
-              description="غيّر كلمات البحث أو امسح التصفية لعرض كل المرضى المسجلين."
-            />
-          ) : (
-            <>
-              <ResultSummary count={centralPatients.length} label="ملف مريض" query={query.trim() || undefined} />
-              <div className="card-grid">
-                {centralPatients.map((patient, index) => (
-                  <Link key={patient.id} to={`/patients/${patient.id}`} className="profile-tile interactive-card">
-                    <p className="eyebrow">{patient.unifiedId}</p>
-                    <h3>{getPatientDisplayName(patient.fullName, index)}</h3>
-                    <p>{patient.primaryPhone}</p>
-                    <div className="tile-stats">
-                      <span>{patient.visitCount} زيارات حديثة</span>
-                      <span>{patient.referralCount} إحالات</span>
-                      <span>{patient.centersSeenAt.length} مراكز مرتبطة</span>
-                    </div>
-                    <p className="muted">{getChronicDiseasesLabel(patient.chronicDiseases)}</p>
-                    <div className="chip-row">
-                      {patient.centersSeenAt.map((center) => (
-                        <span key={center.centerId} className="tag">
-                          {center.centerName}
-                        </span>
-                      ))}
-                    </div>
-                    <span className="action-hint">عرض أو تعديل ملف المريض</span>
-                  </Link>
-                ))}
-              </div>
-            </>
-          )}
-        </SectionCard>
-      </div>
-    );
-  }
+      if (activityFilter === "quiet" && patient.visitCount + patient.referralCount > 0) {
+        return false;
+      }
+
+      if (visitsFilter === "with" && patient.visitCount === 0) {
+        return false;
+      }
+
+      if (visitsFilter === "without" && patient.visitCount > 0) {
+        return false;
+      }
+
+      if (referralsFilter === "with" && patient.referralCount === 0) {
+        return false;
+      }
+
+      if (referralsFilter === "without" && patient.referralCount > 0) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [activityFilter, centerFilter, centralPatients, referralsFilter, visitsFilter]);
 
   return (
     <div className="page-stack">
       <Breadcrumbs items={[{ label: "لوحة المتابعة", to: "/" }, { label: "المرضى" }]} />
       <PageHeader
-        eyebrow="إدارة المرضى"
-        title="ملفات المرضى المحليين"
-        subtitle="ابحث في السجل المحلي والموحد وأنشئ ملف مريض عند الحاجة."
-        meta={`${localPatients.length} ملف`}
+        eyebrow="النظام المركزي"
+        title="السجل الموحد للمرضى"
+        subtitle="عرض مركزي للمرضى وسجل نشاطهم عبر المراكز. البيانات هنا للقراءة والمتابعة ولا تعدل من النظام المركزي."
+        meta={`${formatCount(centralPatients.length)} ملف`}
       />
-      <div className="split-grid">
-        <SectionCard
-          title="بحث الاستقبال"
-          subtitle="ابحث برقم الهاتف في السجل المحلي والموحد قبل إنشاء ملف مريض جديد."
-        >
-          <SearchBox
-            value={searchTerm}
-            onChange={setSearchTerm}
-            onSubmit={handleSearchSubmit}
-            placeholder="أدخل الاسم أو رقم الهوية أو الهاتف"
-          />
-
-          {searchTerm.trim() ? (
-            <div className="stack-list">
-              <div className="info-row">
-                <span>{searchLoading ? "جاري البحث..." : "نتيجة البحث"}</span>
-                {searchResult ? <StatusBadge status={searchResult.found ? "found" : "not_found"} /> : null}
-              </div>
-
-              {patientMatches.map((patient) => (
-                <article className="stack-item" key={`central-${patient.id}`}>
-                  <strong>{getPatientDisplayName(patient.fullName)}</strong>
-                  <p className="muted">{joinMeta([patient.unifiedId, patient.nationalId ?? "بدون هوية", patient.primaryPhone])}</p>
-                </article>
-              ))}
-
-              {localMatches.map((patient) => (
-                <Link className="stack-item interactive-card" key={`local-${patient.id}`} to={`/patients/${patient.id}`}>
-                  <strong>{getPatientDisplayName(patient.fullName)}</strong>
-                  <p className="muted">{joinMeta([patient.nationalId ?? "بدون هوية", patient.phone])}</p>
-                  <span className="action-hint">فتح بيانات المريض</span>
-                </Link>
-              ))}
-
-              {searchResult && !searchResult.found ? (
-                <EmptyState
-                  title="لم يتم العثور على مريض"
-                  description="يمكن إنشاء ملف محلي جديد ثم ربطه لاحقًا عند المزامنة."
-                />
-              ) : null}
-            </div>
-          ) : null}
-        </SectionCard>
-
-        <SectionCard
-          title="إنشاء ملف مريض محلي"
-          subtitle="إذا لم يكن للمريض سجل موحد، يمكنك إنشاء ملف محلي وربطه لاحقًا عند المزامنة."
-        >
-          <form className="form-grid" onSubmit={handleCreatePatient}>
-            <label className="field">
-              <span>الاسم الكامل</span>
-              <input
-                value={form.fullName}
-                onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>تاريخ الميلاد</span>
-              <input
-                type="date"
-                value={form.dateOfBirth}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, dateOfBirth: event.target.value }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>الجنس</span>
-              <select
-                value={form.gender}
-                onChange={(event) => setForm((current) => ({ ...current, gender: event.target.value }))}
-              >
-                <option value="MALE">{toArabicLabel("MALE")}</option>
-                <option value="FEMALE">{toArabicLabel("FEMALE")}</option>
-                <option value="OTHER">{toArabicLabel("OTHER")}</option>
-                <option value="PREFER_NOT_TO_SAY">{toArabicLabel("PREFER_NOT_TO_SAY")}</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>رقم الهاتف</span>
-              <input
-                value={form.primaryPhone}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, primaryPhone: event.target.value }))
-                }
-              />
-            </label>
-            <label className="field field-span-2">
-              <span>العنوان</span>
-              <input
-                value={form.address}
-                onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>جهة الاتصال للطوارئ</span>
-              <input
-                value={form.emergencyContact}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, emergencyContact: event.target.value }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>فصيلة الدم</span>
-              <input
-                value={form.bloodType}
-                onChange={(event) => setForm((current) => ({ ...current, bloodType: event.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>الحساسيات</span>
-              <input
-                value={form.allergies}
-                onChange={(event) => setForm((current) => ({ ...current, allergies: event.target.value }))}
-                placeholder="افصل بين العناصر بفاصلة"
-              />
-            </label>
-            <label className="field">
-              <span>الأمراض المزمنة</span>
-              <input
-                value={form.chronicDiseases}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, chronicDiseases: event.target.value }))
-                }
-                placeholder="افصل بين العناصر بفاصلة"
-              />
-            </label>
-            <button className="primary-button field-span-2" type="submit">
-              حفظ ملف المريض
-            </button>
-          </form>
-        </SectionCard>
-      </div>
-
-      <SectionCard title="سجل المرضى المحلي" subtitle="المرضى المخزنون حاليًا في قاعدة بيانات هذا المركز.">
+      <SectionCard
+        title="ملفات المرضى"
+        subtitle="ابحث وفلتر السجل المركزي حسب المركز والنشاط والزيارات والإحالات."
+      >
         <SearchBox
           value={query}
           onChange={setQuery}
           onSubmit={handleFilterSubmit}
-          placeholder="تصفية بالاسم أو الهاتف أو رقم الهوية أو الرقم الموحد"
-          buttonLabel="تصفية"
+          placeholder="ابحث بالرقم الموحد أو الاسم أو رقم الهاتف"
         />
+
+        <div className="filter-grid">
+          <label className="field">
+            <span>المركز</span>
+            <select value={centerFilter} onChange={(event) => setCenterFilter(event.target.value)}>
+              <option value="">كل المراكز</option>
+              {centerOptions.map((center) => (
+                <option key={center.id} value={center.id}>
+                  {center.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>حالة النشاط</span>
+            <select value={activityFilter} onChange={(event) => setActivityFilter(event.target.value)}>
+              <option value="">كل الحالات</option>
+              <option value="active">لديه نشاط</option>
+              <option value="quiet">لا يوجد نشاط حديث</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>الزيارات</span>
+            <select value={visitsFilter} onChange={(event) => setVisitsFilter(event.target.value)}>
+              <option value="">الكل</option>
+              <option value="with">لديه زيارات</option>
+              <option value="without">لا توجد زيارات</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>الإحالات</span>
+            <select value={referralsFilter} onChange={(event) => setReferralsFilter(event.target.value)}>
+              <option value="">الكل</option>
+              <option value="with">لديه إحالات</option>
+              <option value="without">لا توجد إحالات</option>
+            </select>
+          </label>
+        </div>
 
         {error ? <ErrorState message={error} onRetry={() => retryLoadPatients(query)} /> : null}
 
         {loading ? (
-          <LoadingState text="جار تحميل المرضى المحليين..." />
-        ) : localPatients.length === 0 ? (
+          <LoadingState text="جاري تحميل سجل المرضى..." />
+        ) : visiblePatients.length === 0 ? (
           <EmptyState
-            title="لا توجد ملفات محلية"
-            description="أنشئ ملفًا جديدًا أو امسح التصفية إذا كنت تبحث عن نتيجة محددة."
+            title="لا توجد ملفات مطابقة"
+            description="غيّر كلمات البحث أو امسح الفلاتر لعرض كل المرضى المسجلين."
           />
         ) : (
           <>
-            <ResultSummary count={localPatients.length} label="ملف محلي" query={query.trim() || undefined} />
+            <ResultSummary count={visiblePatients.length} label="ملف مريض" query={query.trim() || undefined} />
             <div className="card-grid">
-              {localPatients.map((patient, index) => (
-                <Link key={patient.id} to={`/patients/${patient.id}`} className="profile-tile interactive-card">
-                  <p className="eyebrow">{patient.unifiedId ?? "سجل محلي فقط"}</p>
-                  <h3>{getPatientDisplayName(patient.fullName, index)}</h3>
-                  <p>{joinMeta([patient.nationalId ?? "بدون هوية", patient.phone])}</p>
+              {visiblePatients.map((patient, index) => (
+                <Link key={patient.id} to={`/patients/${patient.id}`} className="profile-tile interactive-card wide">
+                  <div className="tile-heading">
+                    <div>
+                      <p className="eyebrow">{safeDisplay(patient.unifiedId, "لا يوجد رقم موحد")}</p>
+                      <h3>{getPatientDisplayName(patient.fullName, index)}</h3>
+                    </div>
+                    <span className="status-badge neutral">{patient.visitCount + patient.referralCount > 0 ? "نشط" : "لا يوجد نشاط"}</span>
+                  </div>
+                  <p>{joinMeta([patient.nationalId ?? "بدون هوية", patient.primaryPhone, toArabicLabel(patient.gender)])}</p>
                   <div className="tile-stats">
-                    <span>{patient.visitCount} زيارات</span>
-                    <span>{toArabicLabel(patient.billingStatus)}</span>
-                    <span>{patient.bloodType ?? "فصيلة الدم غير مسجلة"}</span>
+                    <span>{formatCount(patient.visitCount)} زيارات</span>
+                    <span>{formatCount(patient.referralCount)} إحالات</span>
+                    <span>{formatCount(patient.centersSeenAt.length)} مراكز مرتبطة</span>
                   </div>
                   <p className="muted">{getChronicDiseasesLabel(patient.chronicDiseases)}</p>
-                  <span className="action-hint">عرض أو تعديل ملف المريض</span>
+                  <div className="chip-row">
+                    {patient.centersSeenAt.length > 0 ? (
+                      patient.centersSeenAt.map((center) => (
+                        <span key={center.centerId} className="tag">
+                          {center.centerName}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="tag">لا يوجد مركز مرتبط</span>
+                    )}
+                  </div>
+                  {patient.recentVisits[0] ? (
+                    <p className="muted">
+                      آخر زيارة: {safeDisplay(patient.recentVisits[0].primaryDiagnosis)} • {formatDateTime(patient.recentVisits[0].visitDate)}
+                    </p>
+                  ) : null}
+                  <span className="action-hint">عرض ملف المريض</span>
                 </Link>
               ))}
             </div>
