@@ -17,7 +17,7 @@ export function notFound(_req: Request, res: Response) {
 
 export function errorHandler(
   error: unknown,
-  _req: Request,
+  req: Request,
   res: Response,
   _next: NextFunction
 ) {
@@ -39,6 +39,6 @@ export function errorHandler(
     return res.status(error.statusCode).json({ message: error.message, ...details });
   }
 
-  console.error(error);
+  console.error(`[api] Unhandled error while handling ${req.method} ${req.originalUrl}`, error);
   return res.status(500).json({ message: "حدث خطأ داخلي في الخادم." });
 }
