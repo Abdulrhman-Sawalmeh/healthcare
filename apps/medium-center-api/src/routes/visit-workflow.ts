@@ -222,7 +222,7 @@ function taskTypeForRole(role: CenterUserRole, workflowStatus?: VisitWorkflowSta
 
 router.get(
   "/",
-  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE", "PHARMACIST"),
+  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE"),
   asyncHandler(async (req, res) => {
     const centerId = centerIdFromRequest(req);
     const role = req.auth!.role as CenterUserRole;
@@ -268,14 +268,6 @@ router.get(
       );
     }
 
-    if (role === "PHARMACIST") {
-      return res.json(
-        visits
-          .filter((visit) => visit.prescriptions.length > 0)
-          .map(({ nursingAssessments: _assessments, labRequests: _labRequests, ...visit }) => visit)
-      );
-    }
-
     if (role === "LAB_TECH") {
       return res.json(
         visits
@@ -290,7 +282,7 @@ router.get(
 
 router.get(
   "/catalogs",
-  authorize("CENTER_MANAGER", "DOCTOR", "LAB_TECH", "PHARMACIST"),
+  authorize("CENTER_MANAGER", "DOCTOR", "LAB_TECH"),
   asyncHandler(async (req, res) => {
     const centerId = centerIdFromRequest(req);
     const [medicines, labTests, diseases] = await Promise.all([
@@ -362,7 +354,7 @@ router.get(
 
 router.patch(
   "/:visitId/start-stage",
-  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE", "LAB_TECH", "PHARMACIST"),
+  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE", "LAB_TECH"),
   asyncHandler(async (req, res) => {
     const centerId = centerIdFromRequest(req);
     const visitId = Number(req.params.visitId);
@@ -1076,14 +1068,55 @@ router.patch(
     }
 
     if (payload.prescriptions.length > 0) {
+      const createdPrescriptions = await prisma.localPrescription.findMany({
+        where: { visitId },
+        select: {
+          id: true,
+          verificationCode: true,
+          medicineId: true,
+          medicineName: true,
+          visit: {
+            select: {
+              patientId: true,
+              patient: {
+                select: {
+                  fullName: true
+                }
+              }
+            }
+          }
+        },
+        orderBy: { id: "asc" }
+      });
+      const firstPrescription = createdPrescriptions[0];
+
       await notifyRole({
         centerId,
         role: "PHARMACIST",
-        type: "PRESCRIPTION_WAITING",
-        title: "وصفة بانتظار الصرف",
-        message: `زيارة رقم ${visitId} لديها وصفة دوائية بانتظار الصيدلية.`,
-        severity: "INFO"
+        type: payload.prescriptions.length > 0 && result.priority === "URGENT"
+          ? "URGENT_PRESCRIPTION_RECEIVED"
+          : "PRESCRIPTION_RECEIVED",
+        title: result.priority === "URGENT" ? "وصفة عاجلة جديدة" : "وصفة جديدة",
+        message: `${firstPrescription?.visit.patient.fullName ?? `زيارة رقم ${visitId}`} لديها ${createdPrescriptions.length} وصفة دوائية جديدة. [[target:/pharmacy/prescriptions${firstPrescription ? `?highlight=prescription-${firstPrescription.id}` : ""}]]`,
+        severity: result.priority === "URGENT" ? "WARNING" : "INFO"
       });
+
+      await Promise.all(
+        createdPrescriptions.map((prescription) =>
+          recordAuditLog(req, {
+            action: "PRESCRIPTION_RECEIVED",
+            entityType: "LocalPrescription",
+            entityId: prescription.id,
+            centerId,
+            newValue: {
+              prescriptionCode: prescription.verificationCode,
+              patientId: prescription.visit.patientId,
+              medicineId: prescription.medicineId,
+              medicineName: prescription.medicineName
+            }
+          })
+        )
+      );
     }
 
     res.json(result);
@@ -1137,51 +1170,12 @@ router.patch(
 
 router.patch(
   "/prescriptions/:prescriptionId/dispense",
-  authorize("CENTER_MANAGER", "PHARMACIST"),
-  asyncHandler(async (req, res) => {
-    const centerId = centerIdFromRequest(req);
-    const prescriptionId = Number(req.params.prescriptionId);
-    const prescription = await prisma.localPrescription.findFirst({
-      where: { id: prescriptionId, visit: { centerId } }
-    });
-
-    if (!prescription) {
-      return res.status(404).json({ message: "الوصفة غير موجودة." });
-    }
-
-    const result = await prisma.$transaction(async (tx) => {
-      const updated = await tx.localPrescription.update({
-        where: { id: prescriptionId },
-        data: {
-          dispensed: true,
-          dispensedById: Number(req.auth!.sub),
-          dispensedAt: new Date()
-        }
-      });
-
-      const remaining = await tx.localPrescription.count({
-        where: { visitId: prescription.visitId, id: { not: prescriptionId }, dispensed: false }
-      });
-      if (remaining === 0) {
-        await completePendingTask(tx, prescription.visitId, "PHARMACY_DISPENSING", Number(req.auth!.sub));
-      }
-      await refreshVisitStatus(tx, prescription.visitId);
-      return updated;
-    });
-
-    await recordAuditLog(req, {
-      action: "DISPENSE_MEDICINE",
-      entityType: "LocalPrescription",
-      entityId: result.id,
-      centerId,
-      newValue: {
-        medicineName: result.medicineName,
-        quantity: result.quantity,
-        dispensed: result.dispensed
-      }
-    });
-
-    res.json(result);
+  authorize("PHARMACIST"),
+  asyncHandler(async (_req, _res) => {
+    throw new AppError(
+      "استخدم إجراء الصرف من صفحة الصيدلية لضمان فحص المخزون وتسجيل حالة الوصفة.",
+      409
+    );
   })
 );
 

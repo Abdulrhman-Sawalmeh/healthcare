@@ -916,17 +916,20 @@ export async function getCenterPharmacyData(centerId: number) {
     expiryDate: item.expiryDate,
     sellingPrice: item.sellingPrice,
     reorderLevel: item.reorderLevel,
-    isLowStock: item.quantity <= item.reorderLevel
+    isLowStock: item.quantity <= item.reorderLevel,
+    updatedAt: item.updatedAt
   }));
 }
 
 export async function getCenterNotifications(centerId: number, role?: CenterUserRole) {
-  if (role === "LAB_TECH") {
+  if (role === "LAB_TECH" || role === "PHARMACIST") {
+    const rolePrefix =
+      role === "LAB_TECH" ? "ROLE_LAB_TECH_LAB" : "ROLE_PHARMACIST_";
     const alerts = await prisma.centerSystemAlert.findMany({
       where: {
         centerId,
         alertType: {
-          startsWith: "ROLE_LAB_TECH_LAB"
+          startsWith: rolePrefix
         }
       },
       orderBy: {
@@ -969,7 +972,27 @@ export async function getCenterNotifications(centerId: number, role?: CenterUser
       take: 20
     }),
     prisma.centerSystemAlert.findMany({
-      where: { centerId },
+      where: {
+        centerId,
+        ...(role
+          ? {
+              OR: [
+                {
+                  alertType: {
+                    startsWith: `ROLE_${role}_`
+                  }
+                },
+                {
+                  alertType: {
+                    not: {
+                      startsWith: "ROLE_"
+                    }
+                  }
+                }
+              ]
+            }
+          : {})
+      },
       orderBy: {
         createdAt: "desc"
       },

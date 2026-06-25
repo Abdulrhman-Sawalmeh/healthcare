@@ -66,6 +66,14 @@ export function resolveNotificationPath(input: NotificationRouteInput) {
 
   const haystack = buildHaystack([input.type, input.title, input.body]);
 
+  if (input.role === "PHARMACIST") {
+    if (includesAny(haystack, ["inventory", "stock", "مخزون"])) {
+      return "/pharmacy/inventory";
+    }
+
+    return "/pharmacy/prescriptions";
+  }
+
   if (
     input.role === "LAB_TECH" &&
     includesAny(haystack, ["lab", "result", "sample", "مختبر", "نتيجة", "عينة"])

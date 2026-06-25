@@ -33,6 +33,15 @@ import {
   getCenterVisits,
   getCenterWorkspaceData
 } from "../services/network-queries";
+import {
+  getPharmacyDashboard,
+  getPharmacyPrescriptions,
+  mapPharmacyPrescription,
+  pharmacyAuditActions,
+  pharmacyPrescriptionInclude,
+  pharmacyPrescriptionStatuses,
+  PharmacyPrescriptionStatus
+} from "../services/pharmacy-workflow";
 import { ensurePatientPortalAccount, prepareDemoPatientPortalLogin } from "../services/patient-accounts";
 import {
   buildPrescriptionQrValue,
@@ -326,6 +335,68 @@ const labApprovalSchema = z.object({
   doctorNotes: z.string().trim().max(1200).optional()
 });
 
+const pharmacyPrescriptionActionSchema = z
+  .object({
+    action: z.enum([
+      "START_REVIEW",
+      "START_PREPARATION",
+      "MARK_READY",
+      "DISPENSE",
+      "MARK_UNAVAILABLE",
+      "REQUEST_DOCTOR_REVIEW"
+    ]),
+    reason: z.string().trim().max(1000).optional(),
+    notes: z.string().trim().max(1000).optional()
+  })
+  .superRefine((payload, context) => {
+    if (
+      ["MARK_UNAVAILABLE", "REQUEST_DOCTOR_REVIEW"].includes(payload.action) &&
+      !payload.reason
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "يجب إدخال سبب واضح لهذا الإجراء."
+      });
+    }
+  });
+
+const pharmacyDoctorReviewSchema = z
+  .object({
+    decision: z.enum(["APPROVE", "UPDATE", "CANCEL"]),
+    response: z.string().trim().min(3).max(1000),
+    medicineId: z.coerce.number().int().positive().optional(),
+    medicineName: z.string().trim().min(2).max(200).optional(),
+    dosage: z.string().trim().min(1).max(200).optional(),
+    duration: z.string().trim().min(1).max(200).optional(),
+    quantity: z.coerce.number().int().positive().optional(),
+    instructions: z.string().trim().max(1000).optional()
+  })
+  .superRefine((payload, context) => {
+    if (
+      payload.decision === "UPDATE" &&
+      !payload.medicineId &&
+      !payload.medicineName &&
+      !payload.dosage &&
+      !payload.duration &&
+      !payload.quantity &&
+      payload.instructions === undefined
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "أدخل تعديلاً واحداً على الأقل قبل إرسال رد الطبيب."
+      });
+    }
+  });
+
+const pharmacyInventoryUpdateSchema = z
+  .object({
+    quantity: z.coerce.number().int().min(0).optional(),
+    reorderLevel: z.coerce.number().int().min(0).optional()
+  })
+  .refine((payload) => payload.quantity !== undefined || payload.reorderLevel !== undefined, {
+    message: "أدخل الكمية أو حد إعادة الطلب."
+  });
+
 const labRequestDetailInclude = {
   patient: true,
   doctor: {
@@ -386,7 +457,32 @@ function centerAlertWhere(centerId: number, role: CenterUserRole): Prisma.Center
     };
   }
 
-  return { centerId };
+  if (role === "PHARMACIST") {
+    return {
+      centerId,
+      alertType: {
+        startsWith: "ROLE_PHARMACIST_"
+      }
+    };
+  }
+
+  return {
+    centerId,
+    OR: [
+      {
+        alertType: {
+          startsWith: `ROLE_${role}_`
+        }
+      },
+      {
+        alertType: {
+          not: {
+            startsWith: "ROLE_"
+          }
+        }
+      }
+    ]
+  };
 }
 
 function assertDoctorCanUseLabRequest(req: Parameters<typeof asyncHandler>[0] extends never ? never : any, request: Awaited<ReturnType<typeof findLabRequest>>) {
@@ -584,6 +680,7 @@ const doctorAccountSchema = z.object({
 
 router.get(
   "/dashboard",
+  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "NURSE"),
   asyncHandler(async (req, res) => {
     res.json(await getCenterWorkspaceData(getCenterId(req), req.auth!.role));
   })
@@ -624,7 +721,7 @@ router.get(
 
 router.get(
   "/prescriptions/verify/:code",
-  authorize("CENTER_MANAGER", "DOCTOR", "PHARMACIST", "LAB_TECH", "NURSE"),
+  authorize("CENTER_MANAGER", "DOCTOR", "PHARMACIST", "NURSE"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const rawCode = String(req.params.code ?? "").trim();
@@ -661,7 +758,7 @@ router.get(
     );
 
     await recordAuditLog(req, {
-      action: "VERIFY_PRESCRIPTION",
+      action: "PRESCRIPTION_VERIFIED",
       entityType: "LocalPrescription",
       entityId: prescription?.id,
       centerId,
@@ -685,10 +782,10 @@ router.get(
             quantity: prescription.quantity,
             instructions: prescription.instructions,
             dispensed: prescription.dispensed,
+            pharmacyStatus: prescription.pharmacyStatus,
             visit: {
               id: prescription.visit.id,
               visitDate: prescription.visit.visitDate,
-              diagnosis: prescription.visit.diagnosis,
               patientName: prescription.visit.patient.fullName,
               patientUnifiedId: prescription.visit.patient.unifiedId,
               doctorName: prescription.visit.doctor?.fullName ?? "غير محدد",
@@ -913,7 +1010,7 @@ router.get(
 
 router.get(
   "/patients/:patientId/card",
-  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE", "LAB_TECH", "PHARMACIST"),
+  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE", "LAB_TECH"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const patientId = Number(req.params.patientId);
@@ -940,7 +1037,7 @@ router.get(
 
 router.get(
   "/patients/qr/:qrToken",
-  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE", "LAB_TECH", "PHARMACIST"),
+  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE", "LAB_TECH"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const qrToken = parsePatientQrToken(String(req.params.qrToken ?? ""));
@@ -1451,6 +1548,50 @@ router.post(
         prescriptionCount: payload.prescriptions.length
       }
     });
+
+    if (payload.prescriptions.length > 0) {
+      const createdPrescriptions = await prisma.localPrescription.findMany({
+        where: { visitId: visit.id },
+        select: {
+          id: true,
+          verificationCode: true,
+          medicineId: true,
+          medicineName: true
+        },
+        orderBy: { id: "asc" }
+      });
+      const patient = await prisma.localPatient.findUnique({
+        where: { id: payload.patientId },
+        select: { fullName: true }
+      });
+      const firstPrescription = createdPrescriptions[0];
+
+      await notifyRole({
+        centerId,
+        role: "PHARMACIST",
+        type: "PRESCRIPTION_RECEIVED",
+        title: "وصفة جديدة",
+        message: `${patient?.fullName ?? `زيارة رقم ${visit.id}`} لديه ${createdPrescriptions.length} وصفة دوائية جديدة. [[target:/pharmacy/prescriptions${firstPrescription ? `?highlight=prescription-${firstPrescription.id}` : ""}]]`,
+        severity: "INFO"
+      });
+
+      await Promise.all(
+        createdPrescriptions.map((prescription) =>
+          recordAuditLog(req, {
+            action: "PRESCRIPTION_RECEIVED",
+            entityType: "LocalPrescription",
+            entityId: prescription.id,
+            centerId,
+            newValue: {
+              prescriptionCode: prescription.verificationCode,
+              patientId: payload.patientId,
+              medicineId: prescription.medicineId,
+              medicineName: prescription.medicineName
+            }
+          })
+        )
+      );
+    }
 
     res.status(201).json(visit);
   })
@@ -3409,6 +3550,586 @@ router.patch(
     });
 
     res.json(record);
+  })
+);
+
+router.get(
+  "/pharmacy/dashboard",
+  authorize("PHARMACIST"),
+  asyncHandler(async (req, res) => {
+    res.json(await getPharmacyDashboard(getCenterId(req)));
+  })
+);
+
+router.get(
+  "/pharmacy/prescriptions",
+  authorize("PHARMACIST", "DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const requestedStatus =
+      typeof req.query.status === "string" ? req.query.status : undefined;
+    const status = requestedStatus
+      ? (z.enum(pharmacyPrescriptionStatuses).parse(requestedStatus) as PharmacyPrescriptionStatus)
+      : undefined;
+    const prescriptions = await getPharmacyPrescriptions({
+      centerId: getCenterId(req),
+      status,
+      doctorId: req.auth?.role === "DOCTOR" ? getActorCenterUserId(req) : undefined
+    });
+
+    res.json(prescriptions);
+  })
+);
+
+router.patch(
+  "/pharmacy/prescriptions/:prescriptionId/action",
+  authorize("PHARMACIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const prescriptionId = parsePositiveParam(req.params.prescriptionId, "Prescription ID");
+    const payload = pharmacyPrescriptionActionSchema.parse(req.body);
+    const prescription = await prisma.localPrescription.findFirst({
+      where: {
+        id: prescriptionId,
+        visit: {
+          centerId
+        }
+      },
+      include: pharmacyPrescriptionInclude
+    });
+
+    if (!prescription) {
+      throw new AppError("الوصفة غير موجودة داخل هذا المركز.", 404);
+    }
+
+    const currentStatus = prescription.pharmacyStatus as PharmacyPrescriptionStatus;
+    const allowedActions: Record<PharmacyPrescriptionStatus, string[]> = {
+      NEW: ["START_REVIEW", "START_PREPARATION", "MARK_UNAVAILABLE", "REQUEST_DOCTOR_REVIEW"],
+      UNDER_REVIEW: ["START_PREPARATION", "MARK_UNAVAILABLE", "REQUEST_DOCTOR_REVIEW"],
+      PREPARING: ["MARK_READY", "MARK_UNAVAILABLE", "REQUEST_DOCTOR_REVIEW"],
+      READY_FOR_PICKUP: ["DISPENSE", "MARK_UNAVAILABLE", "REQUEST_DOCTOR_REVIEW"],
+      DISPENSED: [],
+      UNAVAILABLE: ["REQUEST_DOCTOR_REVIEW"],
+      NEEDS_DOCTOR_REVIEW: [],
+      CANCELLED: []
+    };
+
+    if (!(allowedActions[currentStatus] ?? []).includes(payload.action)) {
+      throw new AppError("لا يمكن تنفيذ هذا الإجراء في حالة الوصفة الحالية.", 409);
+    }
+
+    const inventory = prescription.medicineId
+      ? await prisma.pharmacyInventoryLocal.findFirst({
+          where: {
+            id: prescription.medicineId,
+            centerId
+          }
+        })
+      : null;
+
+    if (
+      ["MARK_READY", "DISPENSE"].includes(payload.action) &&
+      inventory &&
+      inventory.quantity < prescription.quantity
+    ) {
+      throw new AppError("الكمية المتوفرة في المخزون لا تكفي لصرف هذه الوصفة.", 409);
+    }
+
+    const now = new Date();
+    const nextStatus: Record<string, PharmacyPrescriptionStatus> = {
+      START_REVIEW: "UNDER_REVIEW",
+      START_PREPARATION: "PREPARING",
+      MARK_READY: "READY_FOR_PICKUP",
+      DISPENSE: "DISPENSED",
+      MARK_UNAVAILABLE: "UNAVAILABLE",
+      REQUEST_DOCTOR_REVIEW: "NEEDS_DOCTOR_REVIEW"
+    };
+    const status = nextStatus[payload.action];
+    const quantityAfterDispense =
+      payload.action === "DISPENSE" && inventory
+        ? inventory.quantity - prescription.quantity
+        : inventory?.quantity;
+    const result = await prisma.$transaction(async (tx) => {
+      if (payload.action === "DISPENSE" && inventory) {
+        await tx.pharmacyInventoryLocal.update({
+          where: {
+            id: inventory.id
+          },
+          data: {
+            quantity: {
+              decrement: prescription.quantity
+            }
+          }
+        });
+      }
+
+      const updated = await tx.localPrescription.update({
+        where: {
+          id: prescription.id
+        },
+        data: {
+          pharmacyStatus: status,
+          pharmacyUpdatedAt: now,
+          pharmacistNotes: payload.notes ?? prescription.pharmacistNotes,
+          availabilityStatus:
+            payload.action === "MARK_UNAVAILABLE"
+              ? "UNAVAILABLE"
+              : payload.action === "REQUEST_DOCTOR_REVIEW"
+                ? "NEEDS_DOCTOR_REVIEW"
+                : inventory &&
+                    (quantityAfterDispense ?? inventory.quantity) <= inventory.reorderLevel
+                  ? "LOW_STOCK"
+                  : "AVAILABLE",
+          unavailableReason:
+            payload.action === "MARK_UNAVAILABLE"
+              ? payload.reason
+              : payload.action === "START_PREPARATION"
+                ? null
+                : prescription.unavailableReason,
+          doctorReviewReason:
+            payload.action === "REQUEST_DOCTOR_REVIEW"
+              ? payload.reason
+              : prescription.doctorReviewReason,
+          doctorReviewRequestedAt:
+            payload.action === "REQUEST_DOCTOR_REVIEW"
+              ? now
+              : prescription.doctorReviewRequestedAt,
+          preparationStartedAt:
+            payload.action === "START_PREPARATION"
+              ? now
+              : prescription.preparationStartedAt,
+          readyForPickupAt:
+            payload.action === "MARK_READY" ? now : prescription.readyForPickupAt,
+          dispensed: payload.action === "DISPENSE" ? true : prescription.dispensed,
+          dispensedById: payload.action === "DISPENSE" ? actorId : prescription.dispensedById,
+          dispensedAt: payload.action === "DISPENSE" ? now : prescription.dispensedAt
+        },
+        include: pharmacyPrescriptionInclude
+      });
+
+      if (payload.action === "DISPENSE") {
+        const remaining = await tx.localPrescription.count({
+          where: {
+            visitId: prescription.visitId,
+            pharmacyStatus: {
+              notIn: ["DISPENSED", "CANCELLED"]
+            }
+          }
+        });
+
+        if (remaining === 0) {
+          const task = await tx.visitWorkflowTask.findFirst({
+            where: {
+              visitId: prescription.visitId,
+              taskType: "PHARMACY_DISPENSING",
+              status: {
+                in: ["PENDING", "IN_PROGRESS"]
+              }
+            }
+          });
+
+          if (task) {
+            await tx.visitWorkflowTask.update({
+              where: { id: task.id },
+              data: {
+                status: "COMPLETED",
+                completedById: actorId,
+                completedAt: now,
+                resultSummary: "تم استكمال صرف الوصفة."
+              }
+            });
+          }
+
+          const pendingLabRequests = await tx.labRequestLocal.count({
+            where: {
+              visitId: prescription.visitId,
+              status: {
+                notIn: [
+                  "SENT_TO_DOCTOR",
+                  "PUBLISHED_TO_PATIENT",
+                  "COMPLETED",
+                  "CANCELLED",
+                  "INVALID_SAMPLE"
+                ]
+              }
+            }
+          });
+
+          if (pendingLabRequests === 0) {
+            await tx.localVisit.update({
+              where: { id: prescription.visitId },
+              data: {
+                workflowStatus: "READY_TO_UPLOAD",
+                uploadStatus: "NOT_READY"
+              }
+            });
+          }
+        }
+      }
+
+      return updated;
+    });
+
+    const auditAction: Record<string, string> = {
+      START_REVIEW: "PRESCRIPTION_VIEWED_BY_PHARMACIST",
+      START_PREPARATION: "PRESCRIPTION_PREPARATION_STARTED",
+      MARK_READY: "PRESCRIPTION_READY_FOR_PICKUP",
+      DISPENSE: "PRESCRIPTION_DISPENSED",
+      MARK_UNAVAILABLE: "PRESCRIPTION_MEDICATION_UNAVAILABLE",
+      REQUEST_DOCTOR_REVIEW: "PRESCRIPTION_DOCTOR_REVIEW_REQUESTED"
+    };
+    const targetPath = `/pharmacy/prescriptions?highlight=prescription-${prescription.id}`;
+
+    if (payload.action === "MARK_READY") {
+      await Promise.all([
+        notifyLocalPatient({
+          centerId,
+          patientId: prescription.visit.patientId,
+          title: "الوصفة جاهزة للصرف",
+          body: `وصفة ${prescription.medicineName} جاهزة للاستلام من صيدلية المركز.`,
+          type: "SYSTEM"
+        }),
+        notifyRole({
+          centerId,
+          role: "PHARMACIST",
+          type: "PRESCRIPTION_READY_FOR_PICKUP",
+          title: "وصفة جاهزة للصرف",
+          message: `${prescription.visit.patient.fullName} - ${prescription.medicineName}. [[target:${targetPath}]]`
+        })
+      ]);
+    }
+
+    if (payload.action === "DISPENSE") {
+      await Promise.all([
+        notifyLocalPatient({
+          centerId,
+          patientId: prescription.visit.patientId,
+          title: "تم صرف الوصفة",
+          body: `تم صرف دواء ${prescription.medicineName} من صيدلية المركز.`,
+          type: "SYSTEM"
+        }),
+        notifyRole({
+          centerId,
+          role: "DOCTOR",
+          type: "PRESCRIPTION_DISPENSED",
+          title: "تم صرف وصفة",
+          message: `تم صرف ${prescription.medicineName} للمريض ${prescription.visit.patient.fullName}. [[target:/visit-workflow?highlight=prescription-${prescription.id}]]`
+        }),
+        notifyRole({
+          centerId,
+          role: "PHARMACIST",
+          type: "PRESCRIPTION_DISPENSED",
+          title: "تم صرف الوصفة",
+          message: `${prescription.visit.patient.fullName} - ${prescription.medicineName}. [[target:${targetPath}]]`
+        })
+      ]);
+
+      if (
+        inventory &&
+        quantityAfterDispense !== undefined &&
+        quantityAfterDispense <= inventory.reorderLevel
+      ) {
+        await Promise.all([
+          notifyRole({
+            centerId,
+            role: "PHARMACIST",
+            type: "INVENTORY_LOW_STOCK",
+            title: "مخزون دواء منخفض",
+            message: `${inventory.medicineName}: المتوفر ${quantityAfterDispense} ${inventory.unit}. [[target:/pharmacy/inventory?highlight=inventory-${inventory.id}]]`,
+            severity: quantityAfterDispense === 0 ? "ERROR" : "WARNING"
+          }),
+          recordAuditLog(req, {
+            action: "INVENTORY_LOW_STOCK",
+            entityType: "PharmacyInventoryLocal",
+            entityId: inventory.id,
+            centerId,
+            oldValue: {
+              quantity: inventory.quantity
+            },
+            newValue: {
+              medicineName: inventory.medicineName,
+              quantity: quantityAfterDispense,
+              reorderLevel: inventory.reorderLevel
+            }
+          })
+        ]);
+      }
+    }
+
+    if (payload.action === "MARK_UNAVAILABLE" || payload.action === "REQUEST_DOCTOR_REVIEW") {
+      const needsReview = payload.action === "REQUEST_DOCTOR_REVIEW";
+      await Promise.all([
+        notifyRole({
+          centerId,
+          role: "DOCTOR",
+          type: needsReview
+            ? "PRESCRIPTION_DOCTOR_REVIEW_REQUESTED"
+            : "PRESCRIPTION_MEDICATION_UNAVAILABLE",
+          title: needsReview ? "وصفة تحتاج مراجعة الطبيب" : "دواء غير متوفر",
+          message: `${prescription.visit.patient.fullName} - ${prescription.medicineName}: ${payload.reason}. [[target:/visit-workflow?highlight=prescription-${prescription.id}]]`,
+          severity: "WARNING"
+        }),
+        notifyLocalPatient({
+          centerId,
+          patientId: prescription.visit.patientId,
+          title: needsReview ? "الوصفة تحت مراجعة الطبيب" : "تحديث توفر الدواء",
+          body: needsReview
+            ? "الوصفة تحتاج مراجعة من الطبيب بسبب توفر الدواء."
+            : "بعض الأدوية غير متوفرة حالياً، سيتم تحديث الحالة لاحقاً.",
+          type: "SYSTEM"
+        }),
+        notifyRole({
+          centerId,
+          role: "PHARMACIST",
+          type: needsReview
+            ? "PRESCRIPTION_DOCTOR_REVIEW_REQUESTED"
+            : "PRESCRIPTION_MEDICATION_UNAVAILABLE",
+          title: needsReview ? "تم طلب مراجعة الطبيب" : "دواء غير متوفر",
+          message: `${prescription.visit.patient.fullName} - ${prescription.medicineName}. [[target:${targetPath}]]`,
+          severity: "WARNING"
+        })
+      ]);
+    }
+
+    await recordAuditLog(req, {
+      action: auditAction[payload.action],
+      entityType: "LocalPrescription",
+      entityId: prescription.id,
+      centerId,
+      oldValue: {
+        status: currentStatus
+      },
+      newValue: {
+        status,
+        patientId: prescription.visit.patientId,
+        medicineId: prescription.medicineId,
+        medicineName: prescription.medicineName
+      }
+    });
+
+    const updatedInventory = result.medicineId
+      ? await prisma.pharmacyInventoryLocal.findFirst({
+          where: {
+            id: result.medicineId,
+            centerId
+          }
+        })
+      : null;
+
+    res.json(mapPharmacyPrescription(result, updatedInventory));
+  })
+);
+
+router.patch(
+  "/pharmacy/prescriptions/:prescriptionId/doctor-review",
+  authorize("DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
+    const prescriptionId = parsePositiveParam(req.params.prescriptionId, "Prescription ID");
+    const payload = pharmacyDoctorReviewSchema.parse(req.body);
+    const prescription = await prisma.localPrescription.findFirst({
+      where: {
+        id: prescriptionId,
+        visit: {
+          centerId,
+          doctorId: actorId
+        }
+      },
+      include: pharmacyPrescriptionInclude
+    });
+
+    if (!prescription) {
+      throw new AppError("الوصفة غير موجودة أو ليست ضمن وصفات هذا الطبيب.", 404);
+    }
+
+    if (prescription.pharmacyStatus !== "NEEDS_DOCTOR_REVIEW") {
+      throw new AppError("هذه الوصفة لا تنتظر مراجعة الطبيب.", 409);
+    }
+
+    const inventoryItem = payload.medicineId
+      ? await prisma.pharmacyInventoryLocal.findFirst({
+          where: {
+            id: payload.medicineId,
+            centerId
+          }
+        })
+      : null;
+
+    if (payload.medicineId && !inventoryItem) {
+      throw new AppError("الدواء المحدد غير موجود في مخزون المركز.", 404);
+    }
+
+    const now = new Date();
+    const updated = await prisma.localPrescription.update({
+      where: {
+        id: prescription.id
+      },
+      data: {
+        pharmacyStatus: payload.decision === "CANCEL" ? "CANCELLED" : "UNDER_REVIEW",
+        availabilityStatus:
+          payload.decision === "CANCEL"
+            ? prescription.availabilityStatus
+            : inventoryItem && inventoryItem.quantity <= inventoryItem.reorderLevel
+              ? "LOW_STOCK"
+              : "AVAILABLE",
+        doctorReviewResponse: payload.response,
+        doctorReviewedAt: now,
+        pharmacyUpdatedAt: now,
+        cancelledAt: payload.decision === "CANCEL" ? now : null,
+        medicineId:
+          payload.decision === "UPDATE"
+            ? payload.medicineId ??
+              (payload.medicineName ? null : prescription.medicineId)
+            : prescription.medicineId,
+        medicineName:
+          payload.decision === "UPDATE"
+            ? inventoryItem?.medicineName ?? payload.medicineName ?? prescription.medicineName
+            : prescription.medicineName,
+        dosage:
+          payload.decision === "UPDATE"
+            ? payload.dosage ?? prescription.dosage
+            : prescription.dosage,
+        duration:
+          payload.decision === "UPDATE"
+            ? payload.duration ?? prescription.duration
+            : prescription.duration,
+        quantity:
+          payload.decision === "UPDATE"
+            ? payload.quantity ?? prescription.quantity
+            : prescription.quantity,
+        instructions:
+          payload.decision === "UPDATE" && payload.instructions !== undefined
+            ? payload.instructions
+            : prescription.instructions
+      },
+      include: pharmacyPrescriptionInclude
+    });
+
+    await Promise.all([
+      notifyRole({
+        centerId,
+        role: "PHARMACIST",
+        type: "PRESCRIPTION_DOCTOR_REVIEW_RESPONDED",
+        title: "رد الطبيب على مراجعة الوصفة",
+        message: `${prescription.visit.patient.fullName} - ${updated.medicineName}: ${payload.response}. [[target:/pharmacy/prescriptions?highlight=prescription-${prescription.id}]]`
+      }),
+      payload.decision === "CANCEL"
+        ? notifyLocalPatient({
+            centerId,
+            patientId: prescription.visit.patientId,
+            title: "تم تحديث الوصفة",
+            body: "ألغى الطبيب الدواء بعد مراجعة طلب الصيدلية.",
+            type: "SYSTEM"
+          })
+        : Promise.resolve(),
+      recordAuditLog(req, {
+        action: "PRESCRIPTION_DOCTOR_REVIEW_RESPONDED",
+        entityType: "LocalPrescription",
+        entityId: prescription.id,
+        centerId,
+        oldValue: {
+          status: prescription.pharmacyStatus
+        },
+        newValue: {
+          status: updated.pharmacyStatus,
+          decision: payload.decision,
+          patientId: prescription.visit.patientId,
+          medicineId: updated.medicineId,
+          medicineName: updated.medicineName
+        }
+      })
+    ]);
+
+    res.json(mapPharmacyPrescription(updated, inventoryItem));
+  })
+);
+
+router.patch(
+  "/pharmacy/inventory/:itemId",
+  authorize("PHARMACIST", "CENTER_MANAGER"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const itemId = parsePositiveParam(req.params.itemId, "Inventory item ID");
+    const payload = pharmacyInventoryUpdateSchema.parse(req.body);
+    const existing = await prisma.pharmacyInventoryLocal.findFirst({
+      where: {
+        id: itemId,
+        centerId
+      }
+    });
+
+    if (!existing) {
+      throw new AppError("الصنف الدوائي غير موجود في مخزون المركز.", 404);
+    }
+
+    const updated = await prisma.pharmacyInventoryLocal.update({
+      where: {
+        id: existing.id
+      },
+      data: {
+        quantity: payload.quantity ?? existing.quantity,
+        reorderLevel: payload.reorderLevel ?? existing.reorderLevel
+      }
+    });
+    const isLowStock = updated.quantity <= updated.reorderLevel;
+
+    if (isLowStock) {
+      await notifyRole({
+        centerId,
+        role: "PHARMACIST",
+        type: "INVENTORY_LOW_STOCK",
+        title: "مخزون دواء منخفض",
+        message: `${updated.medicineName}: المتوفر ${updated.quantity} ${updated.unit}. [[target:/pharmacy/inventory?highlight=inventory-${updated.id}]]`,
+        severity: updated.quantity === 0 ? "ERROR" : "WARNING"
+      });
+    }
+
+    await recordAuditLog(req, {
+      action: isLowStock ? "INVENTORY_LOW_STOCK" : "INVENTORY_UPDATED",
+      entityType: "PharmacyInventoryLocal",
+      entityId: updated.id,
+      centerId,
+      oldValue: {
+        quantity: existing.quantity,
+        reorderLevel: existing.reorderLevel
+      },
+      newValue: {
+        medicineName: updated.medicineName,
+        quantity: updated.quantity,
+        reorderLevel: updated.reorderLevel
+      }
+    });
+
+    res.json({
+      ...updated,
+      isLowStock
+    });
+  })
+);
+
+router.get(
+  "/pharmacy/audit",
+  authorize("PHARMACIST"),
+  asyncHandler(async (req, res) => {
+    const requestedLimit = Number(req.query.limit ?? 100);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 200)
+      : 100;
+    const logs = await prisma.auditLog.findMany({
+      where: {
+        centerId: getCenterId(req),
+        action: {
+          in: [...pharmacyAuditActions]
+        }
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: limit
+    });
+
+    res.json(logs);
   })
 );
 

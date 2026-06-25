@@ -23,6 +23,7 @@ import { PatientProfilePage } from "./pages/PatientProfilePage";
 import { PatientQrCardPage } from "./pages/PatientQrCardPage";
 import { PatientTimelinePage } from "./pages/PatientTimelinePage";
 import { PatientsPage } from "./pages/PatientsPage";
+import { PharmacyPage } from "./pages/PharmacyPage";
 import { PrescriptionVerificationPage } from "./pages/PrescriptionVerificationPage";
 import { ReferralsPage } from "./pages/ReferralsPage";
 import { ReportsPage } from "./pages/ReportsPage";
@@ -147,7 +148,7 @@ export function App() {
             <Route
               path="/ai-assistant"
               element={
-                <ProtectedRoute roles={["PATIENT", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE", "LAB_TECH", "PHARMACIST"]}>
+                <ProtectedRoute roles={["PATIENT", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE", "LAB_TECH"]}>
                   <CareAssistantPage />
                 </ProtectedRoute>
               }
@@ -187,7 +188,7 @@ export function App() {
             <Route
               path="/patients/:patientId/card"
               element={
-                <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE", "LAB_TECH", "PHARMACIST"]}>
+                <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE", "LAB_TECH"]}>
                   <PatientQrCardPage />
                 </ProtectedRoute>
               }
@@ -197,7 +198,7 @@ export function App() {
             <Route
               path="/patients/qr/:qrToken"
               element={
-                <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE", "LAB_TECH", "PHARMACIST"]}>
+                <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE", "LAB_TECH"]}>
                   <PatientQrCardPage />
                 </ProtectedRoute>
               }
@@ -226,8 +227,48 @@ export function App() {
           <Route
             path="/visit-workflow"
             element={
-              <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE", "PHARMACIST"]}>
+              <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE"]}>
                 <VisitWorkflowPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/pharmacy/prescriptions"
+            element={
+              <ProtectedRoute roles={["PHARMACIST"]}>
+                <PharmacyPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/pharmacy/dispensing"
+            element={
+              <ProtectedRoute roles={["PHARMACIST"]}>
+                <PharmacyPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/pharmacy/inventory"
+            element={
+              <ProtectedRoute roles={["PHARMACIST"]}>
+                <PharmacyPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/pharmacy/audit"
+            element={
+              <ProtectedRoute roles={["PHARMACIST"]}>
+                <PharmacyPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/pharmacy/notifications"
+            element={
+              <ProtectedRoute roles={["PHARMACIST"]}>
+                <NotificationsPage />
               </ProtectedRoute>
             }
           />
@@ -281,7 +322,16 @@ export function App() {
               }
             />
           ) : null}
-          {isRouteEnabled("/notifications") ? <Route path="/notifications" element={<NotificationsRoute />} /> : null}
+          {isRouteEnabled("/notifications") ? (
+            <Route
+              path="/notifications"
+              element={
+                <ProtectedRoute roles={["PATIENT", "CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "NURSE"]}>
+                  <NotificationsRoute />
+                </ProtectedRoute>
+              }
+            />
+          ) : null}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

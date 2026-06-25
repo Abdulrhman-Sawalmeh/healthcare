@@ -39,6 +39,17 @@ function normalizeReportHighlight(value: string | null) {
   return null;
 }
 
+const prescriptionStatusLabels: Record<string, string> = {
+  NEW: "تم استلام الوصفة",
+  UNDER_REVIEW: "قيد المراجعة",
+  PREPARING: "قيد التجهيز",
+  READY_FOR_PICKUP: "جاهزة للاستلام",
+  DISPENSED: "تم الصرف",
+  UNAVAILABLE: "دواء غير متوفر",
+  NEEDS_DOCTOR_REVIEW: "تحت مراجعة الطبيب",
+  CANCELLED: "ملغاة"
+};
+
 const reportPageSizeOptions = [10, 25, 50, 100];
 
 function getReportRequestedAt(report: PortalClinicalReportRecord) {
@@ -544,6 +555,38 @@ export function PatientMedicalRecordPage() {
           {filteredReports.length === 0 ? <div className="empty-state compact">لا توجد تقارير مطابقة للبحث الحالي.</div> : null}
         </div>
       </section>
+
+      <article className="section-card">
+        <div className="section-header">
+          <div><p className="eyebrow">الوصفات الدوائية</p><h3>حالة الوصفات والصرف</h3></div>
+        </div>
+        <div className="stack-list compact">
+          {(record.prescriptions ?? []).map((prescription) => (
+            <article className="stack-item" key={prescription.id}>
+              <div className="info-row">
+                <div>
+                  <strong>{prescription.medicineName}</strong>
+                  <p className="muted">
+                    {joinMeta([prescription.dosage, prescription.duration, prescription.instructions])}
+                  </p>
+                </div>
+                <StatusBadge status={prescription.pharmacyStatus ?? (prescription.dispensed ? "DISPENSED" : "NEW")} />
+              </div>
+              <p className="muted">
+                {prescription.safeStatusMessage ?? "يجري تحديث حالة الوصفة."}
+              </p>
+              <div className="tile-stats">
+                <span>{prescriptionStatusLabels[prescription.pharmacyStatus ?? "NEW"] ?? "قيد المتابعة"}</span>
+                <span>{formatDateTime(prescription.pharmacyUpdatedAt ?? prescription.issuedAt)}</span>
+                <span>{prescription.doctorName ?? "الطبيب المعالج"}</span>
+              </div>
+            </article>
+          ))}
+          {(record.prescriptions ?? []).length === 0 ? (
+            <div className="empty-state compact">لا توجد وصفات دوائية مسجلة.</div>
+          ) : null}
+        </div>
+      </article>
 
       <section className="split-grid">
         <article className="section-card">

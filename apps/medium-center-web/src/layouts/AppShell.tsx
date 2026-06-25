@@ -382,17 +382,33 @@ export function AppShell() {
   }
 
   const labNavigationOrder = ["/", "/lab", "/notifications"];
+  const pharmacyNavigationOrder = [
+    "/",
+    "/pharmacy/prescriptions",
+    "/pharmacy/dispensing",
+    "/pharmacy/inventory",
+    "/prescription-verification",
+    "/pharmacy/notifications",
+    "/pharmacy/audit"
+  ];
   const visibleNavigation = navigationItems
     .filter((item) => item.roles.includes(user.role) && systemConfig.allowedRoutes.includes(item.to))
     .filter((item) => user.role !== "LAB_TECH" || labNavigationOrder.includes(item.to))
+    .filter((item) => user.role !== "PHARMACIST" || pharmacyNavigationOrder.includes(item.to))
     .sort((first, second) =>
       user.role === "LAB_TECH"
         ? labNavigationOrder.indexOf(first.to) - labNavigationOrder.indexOf(second.to)
+        : user.role === "PHARMACIST"
+          ? pharmacyNavigationOrder.indexOf(first.to) - pharmacyNavigationOrder.indexOf(second.to)
         : 0
     );
   const displayNavigation = visibleNavigation.map((item) => {
     if (item.to === "/" && user.role === "LAB_TECH") {
       return { ...item, label: "لوحة المختبر" };
+    }
+
+    if (item.to === "/" && user.role === "PHARMACIST") {
+      return { ...item, label: "لوحة الصيدلية" };
     }
 
     return (

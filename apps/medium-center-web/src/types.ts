@@ -391,6 +391,11 @@ export interface EligiblePrescriptionRecord {
   instructions?: string | null;
   issuedAt: string;
   dispensed: boolean;
+  pharmacyStatus?: PharmacyPrescriptionStatus;
+  pharmacyUpdatedAt?: string;
+  readyForPickupAt?: string | null;
+  dispensedAt?: string | null;
+  safeStatusMessage?: string;
   doctorId?: number | null;
   doctorName?: string | null;
   visitDate: string;
@@ -679,6 +684,95 @@ export interface PharmacyItem {
   sellingPrice: number;
   reorderLevel: number;
   isLowStock: boolean;
+  updatedAt: string;
+}
+
+export type PharmacyPrescriptionStatus =
+  | "NEW"
+  | "UNDER_REVIEW"
+  | "PREPARING"
+  | "READY_FOR_PICKUP"
+  | "DISPENSED"
+  | "UNAVAILABLE"
+  | "NEEDS_DOCTOR_REVIEW"
+  | "CANCELLED";
+
+export interface PharmacyPrescriptionRecord {
+  id: number;
+  prescriptionCode: string;
+  visitId: number;
+  patientId: number;
+  patientName: string;
+  patientFileNumber: string;
+  patientGender: string;
+  patientDateOfBirth: string;
+  patientAllergies?: string | null;
+  doctorId?: number | null;
+  doctorName: string;
+  priority: string;
+  issuedAt: string;
+  medicineId?: number | null;
+  medicineName: string;
+  dosage: string;
+  duration: string;
+  quantity: number;
+  instructions?: string | null;
+  status: PharmacyPrescriptionStatus;
+  availabilityStatus: string;
+  pharmacistNotes?: string | null;
+  unavailableReason?: string | null;
+  doctorReviewReason?: string | null;
+  doctorReviewResponse?: string | null;
+  preparationStartedAt?: string | null;
+  readyForPickupAt?: string | null;
+  doctorReviewRequestedAt?: string | null;
+  doctorReviewedAt?: string | null;
+  dispensed: boolean;
+  dispensedAt?: string | null;
+  dispensedByName?: string | null;
+  cancelledAt?: string | null;
+  updatedAt: string;
+  inventory?: {
+    id: number;
+    quantity: number;
+    unit: string;
+    reorderLevel: number;
+    isLowStock: boolean;
+    updatedAt: string;
+  } | null;
+  warnings: Array<{
+    id: number;
+    type: string;
+    severity: string;
+    message: string;
+    overridden: boolean;
+  }>;
+}
+
+export interface PharmacyDashboardData {
+  stats: {
+    newPrescriptions: number;
+    waitingReview: number;
+    preparing: number;
+    readyForPickup: number;
+    dispensedToday: number;
+    unavailable: number;
+    needsDoctorReview: number;
+    lowStock: number;
+  };
+  recentPrescriptions: PharmacyPrescriptionRecord[];
+  recentActivity: PharmacyAuditLogRecord[];
+}
+
+export interface PharmacyAuditLogRecord {
+  id: number;
+  action: string;
+  entityType: string;
+  entityId?: string | null;
+  actorUsername?: string | null;
+  actorRole?: string | null;
+  createdAt: string;
+  newValue?: unknown;
 }
 
 export interface CenterNotificationsBundle {
@@ -1112,6 +1206,7 @@ export interface PortalMedicalRecord {
   referrals: PortalReferralRecord[];
   subscriptions: PortalSubscriptionRecord[];
   medicationRefills?: MedicationRefillRequestRecord[];
+  prescriptions?: EligiblePrescriptionRecord[];
   eligiblePrescriptions?: EligiblePrescriptionRecord[];
   followUpReminders?: FollowUpReminderRecord[];
 }

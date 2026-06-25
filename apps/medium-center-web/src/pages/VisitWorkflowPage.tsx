@@ -57,6 +57,11 @@ type WorkflowVisit = {
     instructions?: string | null;
     dispensed: boolean;
     dispensedAt?: string | null;
+    pharmacyStatus?: string;
+    availabilityStatus?: string;
+    doctorReviewReason?: string | null;
+    doctorReviewResponse?: string | null;
+    pharmacyUpdatedAt?: string | null;
   }>;
   labRequests?: Array<{
     id: number;
@@ -333,10 +338,9 @@ export function VisitWorkflowPage() {
   const canViewNursing = hasRole(role, ["CENTER_MANAGER", "DOCTOR", "NURSE"]);
   const canViewDoctor = hasRole(role, ["CENTER_MANAGER", "DOCTOR"]);
   const canViewLab = hasRole(role, ["CENTER_MANAGER", "DOCTOR", "LAB_TECH"]);
-  const canViewPharmacy = hasRole(role, ["CENTER_MANAGER", "DOCTOR", "PHARMACIST"]);
+  const canViewPharmacy = hasRole(role, ["CENTER_MANAGER", "DOCTOR"]);
   const canEditNursing = hasRole(role, ["NURSE"]);
   const canEditLab = hasRole(role, ["LAB_TECH"]);
-  const canEditPharmacy = hasRole(role, ["PHARMACIST"]);
 
   const selectedVisit = useMemo(
     () => visits.find((visit) => visit.id === selectedVisitId) ?? null,
@@ -360,7 +364,7 @@ export function VisitWorkflowPage() {
       if (canIntake || canAssess) {
         tasks.push(apiRequest<IntakeOptions>("/center/visit-workflow/intake-options").then(setIntake));
       }
-      if (canAssess || role === "LAB_TECH" || role === "PHARMACIST") {
+      if (canAssess || role === "LAB_TECH") {
         tasks.push(apiRequest<Catalogs>("/center/visit-workflow/catalogs").then(setCatalogs));
       }
       await Promise.all(tasks);
@@ -375,12 +379,14 @@ export function VisitWorkflowPage() {
 
   useEffect(() => {
     const highlight = searchParams.get("highlight");
-    if (!highlight?.startsWith("lab-result-")) {
+    if (!highlight?.startsWith("lab-result-") && !highlight?.startsWith("prescription-")) {
       return;
     }
 
-    const requestId = Number(highlight.replace("lab-result-", ""));
-    const visit = visits.find((item) => item.labRequests?.some((request) => request.id === requestId));
+    const targetId = Number(highlight.replace("lab-result-", "").replace("prescription-", ""));
+    const visit = highlight.startsWith("lab-result-")
+      ? visits.find((item) => item.labRequests?.some((request) => request.id === targetId))
+      : visits.find((item) => item.prescriptions?.some((prescription) => prescription.id === targetId));
 
     if (!visit) {
       return;
@@ -627,6 +633,46 @@ export function VisitWorkflowPage() {
           })
         }),
       "تم نشر تقرير المختبر للمريض."
+    );
+  }
+
+  async function respondToPharmacyReview(
+    visitId: number,
+    prescription: NonNullable<WorkflowVisit["prescriptions"]>[number],
+    decision: "APPROVE" | "UPDATE" | "CANCEL"
+  ) {
+    const response = window.prompt(
+      decision === "APPROVE"
+        ? "أدخل رد الطبيب بالموافقة:"
+        : decision === "CANCEL"
+          ? "أدخل سبب إلغاء الدواء:"
+          : "أدخل توضيح التعديل:"
+    )?.trim();
+    if (!response) return;
+
+    const payload: Record<string, unknown> = { decision, response };
+    if (decision === "UPDATE") {
+      const medicineName = window.prompt("اسم الدواء:", prescription.medicineName)?.trim();
+      const dosage = window.prompt("الجرعة:", prescription.dosage)?.trim();
+      const duration = window.prompt("المدة:", prescription.duration ?? "")?.trim();
+      const quantity = Number(window.prompt("الكمية:", String(prescription.quantity)));
+      const instructions = window.prompt("تعليمات الاستخدام:", prescription.instructions ?? "")?.trim();
+
+      if (!medicineName || !dosage || !duration || !Number.isInteger(quantity) || quantity < 1) {
+        setError("يجب إدخال اسم الدواء والجرعة والمدة والكمية بشكل صحيح.");
+        return;
+      }
+      Object.assign(payload, { medicineName, dosage, duration, quantity, instructions });
+    }
+
+    await runAction(
+      visitId,
+      () =>
+        apiRequest(`/center/pharmacy/prescriptions/${prescription.id}/doctor-review`, {
+          method: "PATCH",
+          body: JSON.stringify(payload)
+        }),
+      decision === "CANCEL" ? "تم إلغاء الدواء وإبلاغ الصيدلية." : "تم إرسال رد الطبيب إلى الصيدلية."
     );
   }
 
@@ -1427,31 +1473,32 @@ export function VisitWorkflowPage() {
                       </thead>
                       <tbody>
                         {selectedVisit.prescriptions?.map((prescription) => (
-                          <tr key={prescription.id}>
+                          <tr
+                            className={searchParams.get("highlight") === `prescription-${prescription.id}` ? "target-highlight" : undefined}
+                            id={`prescription-${prescription.id}`}
+                            key={prescription.id}
+                          >
                             <td>{prescription.medicineName}</td>
                             <td>{prescription.dosage}</td>
                             <td>{valueOrDash(prescription.duration)}</td>
                             <td>{prescription.quantity}</td>
-                            <td>{prescription.dispensed ? "تم إعطاء الدواء" : "بانتظار الصرف"}</td>
                             <td>
-                              {canEditPharmacy && !prescription.dispensed ? (
-                                <button
-                                  className="primary-button"
-                                  disabled={busyId === selectedVisit.id}
-                                  type="button"
-                                  onClick={() =>
-                                    void runAction(
-                                      selectedVisit.id,
-                                      () =>
-                                        apiRequest(`/center/visit-workflow/prescriptions/${prescription.id}/dispense`, {
-                                          method: "PATCH"
-                                        }),
-                                      "تم تأكيد تسليم الدواء للمريض."
-                                    )
-                                  }
-                                >
-                                  تم التسليم
-                                </button>
+                              <StatusBadge status={prescription.pharmacyStatus ?? (prescription.dispensed ? "DISPENSED" : "NEW")} />
+                              {prescription.doctorReviewReason ? <span>{prescription.doctorReviewReason}</span> : null}
+                            </td>
+                            <td>
+                              {role === "DOCTOR" && prescription.pharmacyStatus === "NEEDS_DOCTOR_REVIEW" ? (
+                                <div className="table-actions">
+                                  <button className="primary-button" disabled={busyId === selectedVisit.id} onClick={() => void respondToPharmacyReview(selectedVisit.id, prescription, "APPROVE")} type="button">
+                                    اعتماد
+                                  </button>
+                                  <button className="ghost-button" disabled={busyId === selectedVisit.id} onClick={() => void respondToPharmacyReview(selectedVisit.id, prescription, "UPDATE")} type="button">
+                                    تعديل الوصفة
+                                  </button>
+                                  <button className="danger-button" disabled={busyId === selectedVisit.id} onClick={() => void respondToPharmacyReview(selectedVisit.id, prescription, "CANCEL")} type="button">
+                                    إلغاء الدواء
+                                  </button>
+                                </div>
                               ) : (
                                 <span className="muted">قراءة فقط</span>
                               )}

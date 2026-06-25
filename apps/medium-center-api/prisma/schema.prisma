@@ -1091,6 +1091,18 @@ model LocalPrescription {
   quantity         Int                       @default(1)
   unitPrice        Float?
   instructions     String?
+  pharmacyStatus   String                     @default("NEW")
+  availabilityStatus String                   @default("AVAILABLE")
+  pharmacistNotes  String?
+  unavailableReason String?
+  doctorReviewReason String?
+  doctorReviewResponse String?
+  preparationStartedAt DateTime?
+  readyForPickupAt DateTime?
+  doctorReviewRequestedAt DateTime?
+  doctorReviewedAt DateTime?
+  cancelledAt      DateTime?
+  pharmacyUpdatedAt DateTime                  @default(now())
   dispensed        Boolean                   @default(false)
   dispensedById    Int?
   dispensedAt      DateTime?
@@ -1104,6 +1116,7 @@ model LocalPrescription {
 
   @@index([visitId, dispensed])
   @@index([verificationCode])
+  @@index([pharmacyStatus, pharmacyUpdatedAt])
 }
 
 model DrugConflict {
@@ -1349,6 +1362,7 @@ model PharmacyInventoryLocal {
   expiryDate   DateTime
   sellingPrice Float
   reorderLevel Int
+  updatedAt    DateTime      @default(now()) @updatedAt
   center       CentralCenter @relation(fields: [centerId], references: [id], onDelete: Cascade)
 
   @@index([centerId, quantity, expiryDate])

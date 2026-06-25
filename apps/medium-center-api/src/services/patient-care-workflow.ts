@@ -141,6 +141,16 @@ export function mapMedicationRefillRequest(request: MedicationRefillRequestWithD
 
 export function mapEligiblePrescription(prescription: EligiblePrescriptionWithDetails) {
   const latestRefillRequest = prescription.refillRequests[0] ?? null;
+  const safeStatusMessage: Record<string, string> = {
+    NEW: "تم استلام الوصفة في الصيدلية.",
+    UNDER_REVIEW: "الوصفة قيد المراجعة في الصيدلية.",
+    PREPARING: "يجري تجهيز الوصفة.",
+    READY_FOR_PICKUP: "الوصفة جاهزة للاستلام من صيدلية المركز.",
+    DISPENSED: "تم صرف الوصفة.",
+    UNAVAILABLE: "بعض الأدوية غير متوفرة حالياً، وسيتم تحديث الحالة لاحقاً.",
+    NEEDS_DOCTOR_REVIEW: "الوصفة تحتاج مراجعة من الطبيب بسبب توفر الدواء.",
+    CANCELLED: "تم إلغاء الوصفة من الطبيب."
+  };
 
   return {
     id: prescription.id,
@@ -151,6 +161,12 @@ export function mapEligiblePrescription(prescription: EligiblePrescriptionWithDe
     instructions: prescription.instructions,
     issuedAt: prescription.issuedAt,
     dispensed: prescription.dispensed,
+    pharmacyStatus: prescription.pharmacyStatus,
+    pharmacyUpdatedAt: prescription.pharmacyUpdatedAt,
+    readyForPickupAt: prescription.readyForPickupAt,
+    dispensedAt: prescription.dispensedAt,
+    safeStatusMessage:
+      safeStatusMessage[prescription.pharmacyStatus] ?? "يجري تحديث حالة الوصفة.",
     doctorId: prescription.visit.doctorId,
     doctorName: prescription.visit.doctor?.fullName ?? null,
     visitDate: prescription.visit.visitDate,
@@ -247,6 +263,7 @@ export async function getPortalMedicationRefillBundle(patientProfileId: string) 
   if (!scope?.centerId || !scope.localPatient) {
     return {
       requests: [],
+      prescriptions: [],
       eligiblePrescriptions: []
     };
   }
@@ -300,6 +317,7 @@ export async function getPortalMedicationRefillBundle(patientProfileId: string) 
 
   return {
     requests: requests.map(mapMedicationRefillRequest),
+    prescriptions: prescriptions.map(mapEligiblePrescription),
     eligiblePrescriptions: prescriptions
       .filter((prescription) => !activePrescriptionIds.has(prescription.id))
       .map(mapEligiblePrescription)

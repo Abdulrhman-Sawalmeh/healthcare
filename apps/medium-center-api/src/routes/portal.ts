@@ -770,6 +770,7 @@ router.get(
       referrals: patient.referrals.map(mapReferral),
       subscriptions: patient.subscriptions.map(mapSubscription),
       medicationRefills: refillBundle.requests,
+      prescriptions: refillBundle.prescriptions,
       eligiblePrescriptions: refillBundle.eligiblePrescriptions,
       followUpReminders
     });

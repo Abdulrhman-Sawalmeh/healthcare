@@ -52,6 +52,11 @@ export const systemConfig: FrontendSystemConfig = {
     "/visits",
     "/visit-workflow",
     "/lab",
+    "/pharmacy/prescriptions",
+    "/pharmacy/dispensing",
+    "/pharmacy/inventory",
+    "/pharmacy/notifications",
+    "/pharmacy/audit",
     "/referrals",
     "/prescription-verification",
     "/notifications"

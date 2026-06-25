@@ -24,6 +24,39 @@ const centerNotificationFilters: Array<{ value: CenterNotificationFilter; label:
   { value: "ERROR", label: "الأخطاء" }
 ];
 
+type PharmacyNotificationFilter =
+  | "ALL"
+  | "NEW"
+  | "READY"
+  | "DISPENSED"
+  | "UNAVAILABLE"
+  | "REVIEW"
+  | "LOW_STOCK"
+  | "ERROR";
+
+const pharmacyNotificationFilters: Array<{ value: PharmacyNotificationFilter; label: string }> = [
+  { value: "ALL", label: "الكل" },
+  { value: "NEW", label: "وصفات جديدة" },
+  { value: "READY", label: "جاهزة للصرف" },
+  { value: "DISPENSED", label: "تم الصرف" },
+  { value: "UNAVAILABLE", label: "غير متوفر" },
+  { value: "REVIEW", label: "مراجعة الطبيب" },
+  { value: "LOW_STOCK", label: "مخزون منخفض" },
+  { value: "ERROR", label: "أخطاء" }
+];
+
+function matchesPharmacyFilter(value: PharmacyNotificationFilter, source: string) {
+  const haystack = source.toUpperCase();
+  if (value === "ALL") return true;
+  if (value === "NEW") return haystack.includes("PRESCRIPTION_RECEIVED");
+  if (value === "READY") return haystack.includes("READY_FOR_PICKUP");
+  if (value === "DISPENSED") return haystack.includes("PRESCRIPTION_DISPENSED");
+  if (value === "UNAVAILABLE") return haystack.includes("UNAVAILABLE");
+  if (value === "REVIEW") return haystack.includes("DOCTOR_REVIEW");
+  if (value === "LOW_STOCK") return haystack.includes("LOW_STOCK");
+  return ["ERROR", "FAILED", "SYNC"].some((term) => haystack.includes(term));
+}
+
 function matchesCenterFilter(value: CenterNotificationFilter, source: string) {
   const haystack = source.toLowerCase();
 
@@ -40,6 +73,7 @@ export function NotificationsPage() {
   const [centralBundle, setCentralBundle] = useState<CentralNotificationsBundle | null>(null);
   const [centerBundle, setCenterBundle] = useState<CenterNotificationsBundle | null>(null);
   const [centerFilter, setCenterFilter] = useState<CenterNotificationFilter>("ALL");
+  const [pharmacyFilter, setPharmacyFilter] = useState<PharmacyNotificationFilter>("ALL");
   const [error, setError] = useState("");
   const [processing, setProcessing] = useState(false);
 
@@ -92,7 +126,7 @@ export function NotificationsPage() {
     }
   }
 
-  async function openLabAlert(alert: CenterNotificationsBundle["alerts"][number]) {
+  async function openCenterAlert(alert: CenterNotificationsBundle["alerts"][number]) {
     try {
       if (!alert.isResolved) {
         await apiRequest(`/center/notifications/${alert.id}/read`, { method: "PATCH" });
@@ -108,17 +142,17 @@ export function NotificationsPage() {
       window.dispatchEvent(new Event("healthcare-notifications-updated"));
       navigate(path);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذر فتح إشعار المختبر.");
+      setError(cause instanceof Error ? cause.message : "تعذر فتح الإشعار.");
     }
   }
 
-  async function markAllLabAlertsRead() {
+  async function markAllRoleAlertsRead() {
     try {
       await apiRequest("/center/notifications/read-all", { method: "PATCH" });
       await loadData();
       window.dispatchEvent(new Event("healthcare-notifications-updated"));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذر تحديث إشعارات المختبر.");
+      setError(cause instanceof Error ? cause.message : "تعذر تحديث الإشعارات.");
     }
   }
 
@@ -289,6 +323,75 @@ export function NotificationsPage() {
     return <div className="empty-state">جارٍ تحميل الإشعارات...</div>;
   }
 
+  if (user?.role === "PHARMACIST") {
+    const unreadAlerts = centerBundle.alerts.filter((alert) => !alert.isResolved).length;
+    const filteredAlerts = centerBundle.alerts.filter((alert) =>
+      matchesPharmacyFilter(
+        pharmacyFilter,
+        `${alert.alertType} ${alert.severity} ${alert.title} ${alert.message}`
+      )
+    );
+
+    return (
+      <div className="page-stack">
+        <SectionCard
+          title="إشعارات الصيدلية"
+          subtitle={`تنبيهات الوصفات والمخزون الخاصة بالصيدلية فقط. غير المقروء: ${unreadAlerts}`}
+          action={
+            unreadAlerts > 0 ? (
+              <button className="ghost-button" type="button" onClick={() => void markAllRoleAlertsRead()}>
+                تعليم الكل كمقروء
+              </button>
+            ) : null
+          }
+        >
+          {error ? <div className="error-banner">{error}</div> : null}
+          <div className="chip-row">
+            {pharmacyNotificationFilters.map((filter) => (
+              <button
+                className={pharmacyFilter === filter.value ? "primary-button" : "ghost-button"}
+                key={filter.value}
+                onClick={() => setPharmacyFilter(filter.value)}
+                type="button"
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+          <div className="stack-list">
+            {filteredAlerts.map((alert) => (
+              <article
+                className={`stack-item interactive-card${alert.isResolved ? " is-read" : ""}`}
+                key={alert.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => void openCenterAlert(alert)}
+                onKeyDown={(event) => {
+                  if (isActivationKey(event)) {
+                    event.preventDefault();
+                    void openCenterAlert(alert);
+                  }
+                }}
+              >
+                <div className="info-row">
+                  <div>
+                    <strong>{alert.title}</strong>
+                    <p className="muted">{alert.message}</p>
+                    <span className="muted">{formatDateTime(alert.createdAt)}</span>
+                  </div>
+                  <StatusBadge status={alert.severity} />
+                </div>
+              </article>
+            ))}
+            {filteredAlerts.length === 0 ? (
+              <div className="empty-state">لا توجد إشعارات مطابقة لهذا التصنيف.</div>
+            ) : null}
+          </div>
+        </SectionCard>
+      </div>
+    );
+  }
+
   if (user?.role === "LAB_TECH") {
     const unreadLabAlerts = centerBundle.alerts.filter((alert) => !alert.isResolved).length;
 
@@ -299,7 +402,7 @@ export function NotificationsPage() {
           subtitle={`إشعارات مرتبطة بطلبات العينات والنتائج فقط. غير المقروء: ${unreadLabAlerts}`}
           action={
             unreadLabAlerts > 0 ? (
-              <button className="ghost-button" type="button" onClick={() => void markAllLabAlertsRead()}>
+              <button className="ghost-button" type="button" onClick={() => void markAllRoleAlertsRead()}>
                 تعليم الكل كمقروء
               </button>
             ) : null
@@ -313,11 +416,11 @@ export function NotificationsPage() {
                 key={alert.id}
                 role="button"
                 tabIndex={0}
-                onClick={() => void openLabAlert(alert)}
+                onClick={() => void openCenterAlert(alert)}
                 onKeyDown={(event) => {
                   if (isActivationKey(event)) {
                     event.preventDefault();
-                    void openLabAlert(alert);
+                    void openCenterAlert(alert);
                   }
                 }}
               >

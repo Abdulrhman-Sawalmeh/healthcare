@@ -7,7 +7,14 @@ import { SectionCard } from "../components/SectionCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAuth } from "../context/AuthContext";
 import { formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
-import { CenterWorkspaceData, CentralDashboardData, LabBundle, ReferralRecord, Role } from "../types";
+import {
+  CenterWorkspaceData,
+  CentralDashboardData,
+  LabBundle,
+  PharmacyDashboardData,
+  ReferralRecord,
+  Role
+} from "../types";
 
 type WorkflowVisitSummary = {
   id: number;
@@ -562,9 +569,96 @@ function LabDashboard({ labData }: { labData: LabBundle | null }) {
   );
 }
 
+function PharmacyDashboard({ data }: { data: PharmacyDashboardData }) {
+  const cards = [
+    ["وصفات جديدة", data.stats.newPrescriptions, "/pharmacy/prescriptions?status=NEW"],
+    ["بانتظار المراجعة", data.stats.waitingReview, "/pharmacy/prescriptions?status=UNDER_REVIEW"],
+    ["قيد التجهيز", data.stats.preparing, "/pharmacy/dispensing?status=PREPARING"],
+    ["جاهزة للصرف", data.stats.readyForPickup, "/pharmacy/dispensing?status=READY_FOR_PICKUP"],
+    ["تم صرفها اليوم", data.stats.dispensedToday, "/pharmacy/prescriptions?status=DISPENSED"],
+    ["دواء غير متوفر", data.stats.unavailable, "/pharmacy/prescriptions?status=UNAVAILABLE"],
+    ["تحتاج مراجعة الطبيب", data.stats.needsDoctorReview, "/pharmacy/prescriptions?status=NEEDS_DOCTOR_REVIEW"],
+    ["تنبيهات مخزون منخفض", data.stats.lowStock, "/pharmacy/inventory"]
+  ] as const;
+
+  return (
+    <div className="page-stack pharmacy-dashboard">
+      <section className="hero-strip">
+        <div>
+          <p className="eyebrow">واجهة الصيدلي</p>
+          <h1>لوحة الصيدلية</h1>
+          <p className="muted">
+            متابعة الوصفات، تجهيز الأدوية، صرف العلاج، ومراقبة المخزون داخل المركز.
+          </p>
+        </div>
+        <div className="button-row hero-actions">
+          <Link className="primary-button" to="/pharmacy/prescriptions">فتح الوصفات الواردة</Link>
+          <Link className="ghost-button" to="/pharmacy/inventory">فتح المخزون</Link>
+          <Link className="ghost-button" to="/pharmacy/notifications">إشعارات الصيدلية</Link>
+          <Link className="ghost-button" to="/prescription-verification">التحقق من وصفة</Link>
+        </div>
+      </section>
+
+      <div className="metric-grid compact-metrics">
+        {cards.map(([label, value, to]) => (
+          <MetricCard
+            actionHint="فتح القائمة"
+            helper="حالة محدثة من مسار الصيدلية."
+            key={label}
+            label={label}
+            to={to}
+            value={value}
+          />
+        ))}
+      </div>
+
+      <div className="split-grid dashboard-focus-grid">
+        <SectionCard title="أحدث الوصفات" subtitle="وصفات حديثة تحتاج متابعة الصيدلية فقط.">
+          <div className="stack-list compact">
+            {data.recentPrescriptions.map((prescription) => (
+              <Link
+                className="stack-item interactive-card"
+                key={prescription.id}
+                to={`/pharmacy/prescriptions?highlight=prescription-${prescription.id}`}
+              >
+                <div>
+                  <strong>{prescription.patientName}</strong>
+                  <p className="muted">
+                    {joinMeta([prescription.medicineName, prescription.doctorName, formatDateTime(prescription.issuedAt)])}
+                  </p>
+                </div>
+                <StatusBadge status={prescription.status} />
+              </Link>
+            ))}
+            {data.recentPrescriptions.length === 0 ? (
+              <div className="empty-state compact">لا توجد وصفات واردة بعد.</div>
+            ) : null}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="النشاط الأخير" subtitle="أحدث أحداث الصرف والمخزون المسجلة.">
+          <div className="stack-list compact">
+            {data.recentActivity.map((activity) => (
+              <div className="stack-item" key={activity.id}>
+                <strong>{toArabicLabel(activity.action)}</strong>
+                <span className="muted">{formatDateTime(activity.createdAt)}</span>
+              </div>
+            ))}
+            {data.recentActivity.length === 0 ? (
+              <div className="empty-state compact">لا توجد أحداث صيدلية مسجلة بعد.</div>
+            ) : null}
+          </div>
+        </SectionCard>
+      </div>
+    </div>
+  );
+}
+
 export function DashboardPage() {
   const { user } = useAuth();
-  const [dashboardData, setDashboardData] = useState<CentralDashboardData | CenterWorkspaceData | null>(null);
+  const [dashboardData, setDashboardData] = useState<
+    CentralDashboardData | CenterWorkspaceData | PharmacyDashboardData | null
+  >(null);
   const [assignedReferrals, setAssignedReferrals] = useState<ReferralRecord[]>([]);
   const [waitingVisits, setWaitingVisits] = useState<WorkflowVisitSummary[]>([]);
   const [inTreatmentVisits, setInTreatmentVisits] = useState<WorkflowVisitSummary[]>([]);
@@ -582,14 +676,21 @@ export function DashboardPage() {
 
     let isActive = true;
     const currentUser = user;
-    const path = user.workspace === "central" ? "/central/dashboard" : "/center/dashboard";
+    const path =
+      user.role === "PHARMACIST"
+        ? "/center/pharmacy/dashboard"
+        : user.workspace === "central"
+          ? "/central/dashboard"
+          : "/center/dashboard";
 
     async function loadDashboard() {
       setLoading(true);
       setError("");
 
       try {
-        const payload = await apiRequest<CentralDashboardData | CenterWorkspaceData>(path);
+        const payload = await apiRequest<
+          CentralDashboardData | CenterWorkspaceData | PharmacyDashboardData
+        >(path);
         const tasks: Array<Promise<void>> = [];
 
         if (currentUser.role === "DOCTOR") {
@@ -655,6 +756,10 @@ export function DashboardPage() {
 
   if (!dashboardData) {
     return <div className="empty-state">لا توجد بيانات متاحة لهذه الواجهة.</div>;
+  }
+
+  if (user?.role === "PHARMACIST") {
+    return <PharmacyDashboard data={dashboardData as PharmacyDashboardData} />;
   }
 
   if ("stats" in dashboardData && !("center" in dashboardData)) {

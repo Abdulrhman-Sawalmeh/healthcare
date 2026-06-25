@@ -3,7 +3,8 @@ import { FormEvent, useEffect, useState } from "react";
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
 import { StatusBadge } from "../components/StatusBadge";
-import { formatDate } from "../lib/arabic";
+import { useAuth } from "../context/AuthContext";
+import { formatDate, toArabicLabel } from "../lib/arabic";
 
 interface PrescriptionVerificationResult {
   authentic: boolean;
@@ -18,10 +19,10 @@ interface PrescriptionVerificationResult {
     quantity: number;
     instructions?: string | null;
     dispensed: boolean;
+    pharmacyStatus?: string;
     visit: {
       id: number;
       visitDate: string;
-      diagnosis: string;
       patientName: string;
       patientUnifiedId?: string | null;
       doctorName: string;
@@ -46,6 +47,7 @@ interface AuditLogRecord {
 }
 
 export function PrescriptionVerificationPage() {
+  const { user } = useAuth();
   const [code, setCode] = useState("");
   const [result, setResult] = useState<PrescriptionVerificationResult | null>(null);
   const [logs, setLogs] = useState<AuditLogRecord[]>([]);
@@ -53,13 +55,20 @@ export function PrescriptionVerificationPage() {
   const [loading, setLoading] = useState(false);
 
   async function loadAuditLogs() {
-    const payload = await apiRequest<AuditLogRecord[]>("/center/audit-logs?limit=12");
+    if (!["CENTER_MANAGER", "PHARMACIST"].includes(user?.role ?? "")) {
+      setLogs([]);
+      return;
+    }
+
+    const payload = await apiRequest<AuditLogRecord[]>(
+      user?.role === "PHARMACIST" ? "/center/pharmacy/audit?limit=12" : "/center/audit-logs?limit=12"
+    );
     setLogs(payload);
   }
 
   useEffect(() => {
     loadAuditLogs().catch(() => setLogs([]));
-  }, []);
+  }, [user?.role]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -108,7 +117,7 @@ export function PrescriptionVerificationPage() {
               <input
                 value={code}
                 onChange={(event) => setCode(event.target.value)}
-                placeholder="RX-2-25-1-..."
+                placeholder="RX-2026-000123"
               />
             </label>
             <div className="field-span-2 button-row">
@@ -135,6 +144,7 @@ export function PrescriptionVerificationPage() {
                   <span>الطبيب: {result.prescription.visit.doctorName}</span>
                   <span>المركز: {result.prescription.visit.centerName}</span>
                   <span>تاريخ الإصدار: {formatDate(result.prescription.issuedAt)}</span>
+                  <span>حالة الصرف: {toArabicLabel(result.prescription.pharmacyStatus ?? (result.prescription.dispensed ? "DISPENSED" : "NEW"))}</span>
                   <code>{result.qrValue}</code>
                 </>
               ) : (
@@ -145,7 +155,8 @@ export function PrescriptionVerificationPage() {
         </SectionCard>
       </div>
 
-      <SectionCard title="آخر أحداث التدقيق" subtitle="أحدث العمليات الحساسة المسجلة في هذا المركز.">
+      {["CENTER_MANAGER", "PHARMACIST"].includes(user?.role ?? "") ? (
+      <SectionCard title="آخر أحداث التدقيق" subtitle={user?.role === "PHARMACIST" ? "أحدث أحداث الصيدلية فقط." : "أحدث العمليات الحساسة المسجلة في هذا المركز."}>
         <div className="table-wrapper">
           <table>
             <thead>
@@ -170,6 +181,7 @@ export function PrescriptionVerificationPage() {
         </div>
         {logs.length === 0 ? <div className="empty-state compact">لا توجد أحداث تدقيق بعد.</div> : null}
       </SectionCard>
+      ) : null}
     </div>
   );
 }
