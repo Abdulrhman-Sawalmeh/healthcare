@@ -702,6 +702,7 @@ export interface CenterNotificationsBundle {
   }>;
   alerts: Array<{
     id: number;
+    alertType: string;
     title: string;
     message: string;
     severity: string;

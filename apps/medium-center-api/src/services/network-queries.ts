@@ -920,7 +920,39 @@ export async function getCenterPharmacyData(centerId: number) {
   }));
 }
 
-export async function getCenterNotifications(centerId: number) {
+export async function getCenterNotifications(centerId: number, role?: CenterUserRole) {
+  if (role === "LAB_TECH") {
+    const alerts = await prisma.centerSystemAlert.findMany({
+      where: {
+        centerId,
+        alertType: {
+          startsWith: "ROLE_LAB_TECH_LAB"
+        }
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: 50
+    });
+
+    const targetPattern = /\[\[target:([^\]]+)\]\]/;
+
+    return {
+      incoming: [],
+      outgoing: [],
+      alerts: alerts.map((alert) => {
+        const match = alert.message.match(targetPattern);
+
+        return {
+          ...alert,
+          message: alert.message.replace(targetPattern, "").trim(),
+          targetUrl: match?.[1] ?? null
+        };
+      }),
+      logs: []
+    };
+  }
+
   const [incoming, outgoing, alerts, logs] = await Promise.all([
     prisma.incomingNotification.findMany({
       where: { centerId },

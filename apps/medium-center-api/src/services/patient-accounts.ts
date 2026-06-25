@@ -44,6 +44,23 @@ export interface SyncPatientPortalProfileInput {
   chronicDiseases: string[];
 }
 
+export interface PrepareDemoPatientPortalLoginInput {
+  centerId: number;
+  fullName: string;
+  nationalId: string;
+  primaryPhone: string;
+  dateOfBirth: Date;
+  gender: Gender;
+  emergencyContact?: string;
+  chronicDiseases: string[];
+}
+
+export interface PrepareDemoPatientPortalLoginResult {
+  loginIdentifier: string;
+  demoPassword: string;
+  accountStatus: "CREATED" | "RESET";
+}
+
 function normalizeNationalId(value: string) {
   return value.replace(/\s+/g, "");
 }
@@ -431,6 +448,132 @@ export async function ensurePatientPortalAccount(
     deliveryMethod,
     email: requestedEmail ?? null,
     emailDeliveryMethod,
+    accountStatus: "CREATED"
+  };
+}
+
+// Demo/local testing only. This returns a predictable password to the authorized caller
+// and must remain disabled outside controlled development environments.
+export async function prepareDemoPatientPortalLogin(
+  input: PrepareDemoPatientPortalLoginInput
+): Promise<PrepareDemoPatientPortalLoginResult> {
+  const normalizedNationalId = normalizeNationalId(input.nationalId);
+  const demoPassword = `Demo@${normalizedNationalId}`;
+  const passwordHash = await bcrypt.hash(demoPassword, 10);
+
+  const center = await prisma.centralCenter.findUnique({
+    where: { id: input.centerId },
+    select: {
+      centerCode: true,
+      centerName: true
+    }
+  });
+
+  if (!center) {
+    throw new AppError("تعذر تحديد المركز الصحي المرتبط بحساب المريض.", 404);
+  }
+
+  const legacyCenter = await prisma.center.findUnique({
+    where: { code: center.centerCode },
+    select: {
+      id: true
+    }
+  });
+
+  if (!legacyCenter) {
+    throw new AppError("تعذر العثور على بوابة المرضى الخاصة بهذا المركز.", 404);
+  }
+
+  const existingUser = await prisma.user.findFirst({
+    where: {
+      role: UserRole.PATIENT,
+      OR: [
+        {
+          email: {
+            startsWith: `${normalizedNationalId}@`
+          }
+        },
+        {
+          phone: input.primaryPhone,
+          patientProfile: {
+            is: {
+              centerId: legacyCenter.id
+            }
+          }
+        }
+      ]
+    },
+    include: {
+      patientProfile: true
+    }
+  });
+
+  if (existingUser) {
+    await prisma.user.update({
+      where: { id: existingUser.id },
+      data: {
+        passwordHash,
+        isActive: true
+      }
+    });
+
+    if (!existingUser.patientProfile) {
+      await prisma.patientProfile.create({
+        data: {
+          userId: existingUser.id,
+          centerId: legacyCenter.id,
+          medicalRecordNumber: buildMedicalRecordNumber(center.centerCode),
+          dateOfBirth: input.dateOfBirth,
+          gender: input.gender,
+          chronicConditions: formatChronicConditions(input.chronicDiseases),
+          emergencyContact: input.emergencyContact
+        }
+      });
+    }
+
+    return {
+      loginIdentifier: normalizedNationalId,
+      demoPassword,
+      accountStatus: "RESET"
+    };
+  }
+
+  const email = buildCenterEmailAddress(normalizedNationalId, center.centerName);
+  const emailOwner = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true }
+  });
+
+  if (emailOwner) {
+    throw new AppError("تعذر تجهيز حساب تجريبي لأن معرف الدخول مرتبط بحساب آخر.", 409);
+  }
+
+  const user = await prisma.user.create({
+    data: {
+      email,
+      passwordHash,
+      fullName: input.fullName,
+      phone: input.primaryPhone,
+      role: UserRole.PATIENT,
+      isActive: true
+    }
+  });
+
+  await prisma.patientProfile.create({
+    data: {
+      userId: user.id,
+      centerId: legacyCenter.id,
+      medicalRecordNumber: buildMedicalRecordNumber(center.centerCode),
+      dateOfBirth: input.dateOfBirth,
+      gender: input.gender,
+      chronicConditions: formatChronicConditions(input.chronicDiseases),
+      emergencyContact: input.emergencyContact
+    }
+  });
+
+  return {
+    loginIdentifier: normalizedNationalId,
+    demoPassword,
     accountStatus: "CREATED"
   };
 }

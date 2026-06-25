@@ -226,7 +226,7 @@ export function App() {
           <Route
             path="/visit-workflow"
             element={
-              <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE", "LAB_TECH", "PHARMACIST"]}>
+              <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "NURSE", "PHARMACIST"]}>
                 <VisitWorkflowPage />
               </ProtectedRoute>
             }

@@ -180,6 +180,8 @@ export function AppShell() {
                   helper: alert.message,
                   status: alert.severity,
                   createdAt: alert.createdAt,
+                  isRead: alert.isResolved,
+                  markReadPath: `/center/notifications/${alert.id}/read`,
                   to: resolveNotificationPath({
                     role: currentUser.role,
                     workspace: currentUser.workspace,
@@ -211,7 +213,7 @@ export function AppShell() {
           setUnreadMessageCount(summary.unreadMessages);
           setNotificationBadgeCount(
             notifications.filter((item) => !item.isRead).length +
-              centerAlerts.length +
+              centerAlerts.filter((item) => !item.isRead).length +
               (summary.unreadMessages > 0 ? 1 : 0)
           );
           setAlerts(
@@ -268,7 +270,9 @@ export function AppShell() {
         }
 
         const centerPayload = payload as CenterNotificationsBundle;
-        setNotificationBadgeCount(centerPayload.alerts.length + centerPayload.outgoing.length);
+        setNotificationBadgeCount(
+          centerPayload.alerts.filter((alert) => !alert.isResolved).length + centerPayload.outgoing.length
+        );
         setAlerts(
           [
             ...centerPayload.alerts.map((alert) => ({
@@ -277,6 +281,8 @@ export function AppShell() {
               helper: alert.message,
               status: alert.severity,
               createdAt: alert.createdAt,
+              isRead: alert.isResolved,
+              markReadPath: `/center/notifications/${alert.id}/read`,
                 to: resolveNotificationPath({
                   role: currentUser.role,
                   workspace: currentUser.workspace,
@@ -375,7 +381,7 @@ export function AppShell() {
     );
   }
 
-  const labNavigationOrder = ["/", "/lab", "/visit-workflow", "/notifications"];
+  const labNavigationOrder = ["/", "/lab", "/notifications"];
   const visibleNavigation = navigationItems
     .filter((item) => item.roles.includes(user.role) && systemConfig.allowedRoutes.includes(item.to))
     .filter((item) => user.role !== "LAB_TECH" || labNavigationOrder.includes(item.to))
@@ -387,10 +393,6 @@ export function AppShell() {
   const displayNavigation = visibleNavigation.map((item) => {
     if (item.to === "/" && user.role === "LAB_TECH") {
       return { ...item, label: "لوحة المختبر" };
-    }
-
-    if (item.to === "/visit-workflow" && user.role === "LAB_TECH") {
-      return { ...item, label: "ملفات الزيارات" };
     }
 
     return (

@@ -66,6 +66,13 @@ export function resolveNotificationPath(input: NotificationRouteInput) {
 
   const haystack = buildHaystack([input.type, input.title, input.body]);
 
+  if (
+    input.role === "LAB_TECH" &&
+    includesAny(haystack, ["lab", "result", "sample", "مختبر", "نتيجة", "عينة"])
+  ) {
+    return "/lab";
+  }
+
   if (includesAny(haystack, ["message", "chat", "رسالة", "محادثة"])) {
     return input.workspace === "central" ? "/notifications" : "/messages";
   }

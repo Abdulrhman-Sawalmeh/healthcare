@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
+import { DemoPatientLoginButton } from "../components/DemoPatientLoginButton";
 import { SectionCard } from "../components/SectionCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { Breadcrumbs, EmptyState, ErrorState, LoadingState, PageHeader, ResultSummary, SearchBox } from "../components/UiStates";
@@ -610,6 +611,7 @@ export function PatientsPage() {
                     <Link className="primary-button" to={`/patients/${patient.id}`}>
                       عرض الملف
                     </Link>
+                    <DemoPatientLoginButton patientId={patient.id} />
                     {canCreateAccounts ? (
                       <Link className="ghost-button" to={`/patients/${patient.id}?mode=edit`}>
                         تعديل البيانات

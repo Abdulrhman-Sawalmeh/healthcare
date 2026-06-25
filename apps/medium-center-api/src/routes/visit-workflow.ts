@@ -222,7 +222,7 @@ function taskTypeForRole(role: CenterUserRole, workflowStatus?: VisitWorkflowSta
 
 router.get(
   "/",
-  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE", "LAB_TECH", "PHARMACIST"),
+  authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR", "NURSE", "PHARMACIST"),
   asyncHandler(async (req, res) => {
     const centerId = centerIdFromRequest(req);
     const role = req.auth!.role as CenterUserRole;
@@ -1070,7 +1070,7 @@ router.patch(
         role: "LAB_TECH",
         type: "LAB_REQUEST_READY",
         title: "طلب مختبر جديد",
-        message: `زيارة رقم ${visitId} لديها فحوصات مخبرية بانتظار التنفيذ.`,
+        message: `زيارة رقم ${visitId} لديها فحوصات مخبرية بانتظار التنفيذ. [[target:/lab]]`,
         severity: "INFO"
       });
     }
@@ -1092,7 +1092,7 @@ router.patch(
 
 router.patch(
   "/lab/:requestId/result",
-  authorize("CENTER_MANAGER", "LAB_TECH"),
+  authorize("LAB_TECH"),
   asyncHandler(async (req, res) => {
     const centerId = centerIdFromRequest(req);
     const requestId = Number(req.params.requestId);
@@ -1110,25 +1110,11 @@ router.patch(
         where: { id: requestId },
         data: {
           ...payload,
-          status: "COMPLETED",
+          status: "RESULT_READY",
           completedById: Number(req.auth!.sub),
           resultDate: new Date()
         }
       });
-
-      if (requestRecord.visitId) {
-        const remaining = await tx.labRequestLocal.count({
-          where: {
-            visitId: requestRecord.visitId,
-            id: { not: requestId },
-            status: { in: ["PENDING", "IN_PROGRESS"] }
-          }
-        });
-        if (remaining === 0) {
-          await completePendingTask(tx, requestRecord.visitId, "LAB_TEST", Number(req.auth!.sub), payload.resultNotes);
-        }
-        await refreshVisitStatus(tx, requestRecord.visitId);
-      }
 
       return updated;
     });
@@ -1144,17 +1130,6 @@ router.patch(
         resultNotes: result.resultNotes
       }
     });
-
-    if (requestRecord.visitId) {
-      await notifyRole({
-        centerId,
-        role: "DOCTOR",
-        type: "LAB_RESULT_READY",
-        title: "نتيجة مختبر جاهزة",
-        message: `نتيجة مختبر لزيارة رقم ${requestRecord.visitId} أصبحت جاهزة للمراجعة.`,
-        severity: "INFO"
-      });
-    }
 
     res.json(result);
   })

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { ApiError, apiDownload, apiRequest } from "../api/client";
+import { DemoPatientLoginButton } from "../components/DemoPatientLoginButton";
 import { SectionCard } from "../components/SectionCard";
 import { Breadcrumbs, EmptyState, LoadingState, PageHeader } from "../components/UiStates";
 import { useAuth } from "../context/AuthContext";
@@ -435,6 +436,7 @@ export function PatientProfilePage() {
                 بطاقة QR
               </Link>
             ) : null}
+            <DemoPatientLoginButton patientId={bundle.patient.id} />
           </div>
         }
       />

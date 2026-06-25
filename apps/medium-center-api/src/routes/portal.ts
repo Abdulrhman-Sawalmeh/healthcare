@@ -136,6 +136,11 @@ const localResultReportInclude = {
     include: {
       doctorProfile: true
     }
+  },
+  labRequest: {
+    include: {
+      test: true
+    }
   }
 } as const;
 
@@ -317,7 +322,17 @@ async function getPatientLocalResultReports(
     where: {
       centerId: centralCenter.id,
       patientId: localPatient.id,
-      shareWithPatient: true
+      shareWithPatient: true,
+      OR: [
+        {
+          labRequest: null
+        },
+        {
+          labRequest: {
+            status: "PUBLISHED_TO_PATIENT"
+          }
+        }
+      ]
     },
     include: localResultReportInclude,
     orderBy: {

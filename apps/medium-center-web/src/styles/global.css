@@ -2818,6 +2818,307 @@ textarea:focus-visible {
   animation: targetPulse 2.2s ease;
 }
 
+.lab-toolbar,
+.lab-detail-grid,
+.lab-quality-row {
+  display: grid;
+  gap: 1rem;
+}
+
+.lab-toolbar {
+  margin-bottom: 1rem;
+}
+
+.lab-status-guide {
+  margin-bottom: 1rem;
+  border-block: 1px solid var(--border);
+  padding: 0.85rem 0;
+}
+
+.lab-status-guide summary {
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.lab-status-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+}
+
+.lab-status-guide-grid > div {
+  min-width: 0;
+  border-inline-start: 3px solid var(--border);
+  padding-inline-start: 0.75rem;
+}
+
+.lab-status-guide-grid p {
+  margin: 0.45rem 0 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.lab-table-shell {
+  max-width: 100%;
+}
+
+.lab-requests-table {
+  min-width: 1760px;
+}
+
+.lab-requests-table th,
+.lab-requests-table td {
+  padding: 0.75rem;
+}
+
+.lab-actions {
+  min-width: 170px;
+}
+
+.lab-current-status {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  max-width: 1180px;
+  margin: 0 auto 1rem;
+  border-block-end: 1px solid var(--border);
+  padding-bottom: 0.85rem;
+}
+
+.lab-current-status p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.lab-detail-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  max-width: 1180px;
+  min-width: 0;
+  margin-inline: auto;
+  margin-bottom: 1rem;
+}
+
+.lab-detail-grid > section {
+  min-width: 0;
+  padding: 0.25rem 0.75rem;
+}
+
+.lab-result-form,
+.lab-quality-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  padding: 1rem;
+}
+
+.lab-result-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+  width: 100%;
+  max-width: 1100px;
+  min-width: 0;
+  margin: 1rem auto 0;
+  overflow: hidden;
+}
+
+.lab-result-form .field {
+  min-width: 0;
+}
+
+.lab-result-form .field input,
+.lab-result-form .field select,
+.lab-result-form .field textarea {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.lab-result-form .field textarea {
+  min-height: 84px;
+  max-height: 220px;
+}
+
+.lab-field-span-2 {
+  grid-column: span 2;
+}
+
+.lab-field-full {
+  grid-column: 1 / -1;
+}
+
+.lab-correction-note,
+.lab-readonly-result {
+  max-width: 1100px;
+  margin-inline: auto;
+  border-inline-start: 4px solid var(--warning);
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface-strong));
+  padding: 0.85rem 1rem;
+}
+
+.lab-correction-note p,
+.lab-readonly-result p {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.lab-readonly-result {
+  width: 100%;
+  border-inline-start-color: var(--accent);
+}
+
+.lab-facts {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.lab-facts > div {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.35fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.55rem;
+}
+
+.lab-facts dt {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.lab-facts dd {
+  margin: 0;
+}
+
+.lab-timeline {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lab-timeline li {
+  position: relative;
+  display: grid;
+  gap: 0.2rem;
+  padding-inline-start: 1.5rem;
+  color: var(--muted);
+}
+
+.lab-timeline li::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0.2rem;
+  inset-block-start: 0.35rem;
+  width: 0.65rem;
+  height: 0.65rem;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-strong);
+}
+
+.lab-timeline li.is-done {
+  color: var(--text);
+}
+
+.lab-timeline li.is-done::before {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.lab-timeline span {
+  font-size: 0.85rem;
+}
+
+.lab-quality-row {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  align-items: end;
+  width: 100%;
+  max-width: 1100px;
+  min-width: 0;
+  margin: 1rem auto 0;
+}
+
+.lab-quality-row .field {
+  min-width: 0;
+}
+
+.lab-quality-row button {
+  min-height: 48px;
+}
+
+.lab-analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.interactive-card.is-read {
+  opacity: 0.72;
+}
+
+.demo-login-error {
+  align-self: center;
+  color: var(--danger);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.demo-login-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(18, 42, 38, 0.48);
+  padding: 1rem;
+}
+
+.demo-login-dialog {
+  display: grid;
+  gap: 1rem;
+  width: min(100%, 560px);
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  padding: 1.25rem;
+  box-shadow: 0 24px 64px rgba(18, 42, 38, 0.24);
+}
+
+.demo-login-credential {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem 0.75rem;
+  align-items: center;
+  border-block-end: 1px solid var(--border);
+  padding-bottom: 0.85rem;
+}
+
+.demo-login-credential span {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.demo-login-credential strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 1.05rem;
+  letter-spacing: 0;
+}
+
+.demo-login-dialog .warning-panel {
+  padding: 0.85rem 1rem;
+}
+
 @keyframes targetPulse {
   0%,
   100% {
@@ -2838,12 +3139,49 @@ textarea:focus-visible {
 
   .dashboard-focus-grid,
   .filter-strip,
-  .form-section {
+  .form-section,
+  .lab-detail-grid,
+  .lab-quality-row,
+  .lab-analytics-grid {
     grid-template-columns: 1fr;
+  }
+
+  .lab-status-guide-grid,
+  .lab-result-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lab-field-full {
+    grid-column: span 2;
   }
 
   .patient-card-facts {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .lab-status-guide-grid,
+  .lab-result-form {
+    grid-template-columns: 1fr;
+  }
+
+  .lab-field-span-2,
+  .lab-field-full {
+    grid-column: span 1;
+  }
+
+  .lab-current-status {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .demo-login-credential {
+    grid-template-columns: 1fr;
+  }
+
+  .demo-login-credential span {
+    grid-column: span 1;
   }
 }
 

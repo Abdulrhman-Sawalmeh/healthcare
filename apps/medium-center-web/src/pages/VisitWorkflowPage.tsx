@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { ApiError, apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
+import { StatusBadge } from "../components/StatusBadge";
 import { useAuth } from "../context/AuthContext";
 import { PrescriptionSafetyWarningRecord } from "../types";
 
@@ -22,7 +23,7 @@ type WorkflowVisit = {
   uploadStatus: string;
   uploadError?: string | null;
   diagnosis?: string | null;
-  patient: { fullName: string; phone: string; unifiedId?: string | null };
+  patient: { id: number; fullName: string; phone: string; unifiedId?: string | null };
   doctor?: { id?: number; fullName: string } | null;
   invoice?: { amount: number; paidAmount: number; status?: string | null } | null;
   workflowTasks?: Array<{
@@ -180,11 +181,11 @@ const labStatusLabels: Record<string, string> = {
   NEW: "جديد",
   PENDING: "قيد الانتظار",
   PENDING_SAMPLE: "بانتظار العينة",
-  SAMPLE_RECEIVED: "تم استلام العينة",
+  SAMPLE_RECEIVED: "العينة مستلمة",
   IN_PROGRESS: "قيد الفحص",
-  RESULT_READY: "جاهزة للإرسال",
-  SENT_TO_DOCTOR: "مرسلة للطبيب",
-  NEEDS_CORRECTION: "بحاجة تصحيح",
+  RESULT_READY: "النتيجة جاهزة",
+  SENT_TO_DOCTOR: "أُرسلت للطبيب",
+  NEEDS_CORRECTION: "تحتاج تصحيح",
   PUBLISHED_TO_PATIENT: "منشورة للمريض",
   INVALID_SAMPLE: "عينة غير صالحة",
   COMPLETED: "مكتملة",
@@ -195,8 +196,8 @@ const labStatusLabels: Record<string, string> = {
   ABNORMAL: "غير طبيعي"
 };
 
-const labPublishableStatuses = new Set(["SENT_TO_DOCTOR", "COMPLETED"]);
-const labReturnableStatuses = new Set(["SENT_TO_DOCTOR", "RESULT_READY", "COMPLETED"]);
+const labPublishableStatuses = new Set(["COMPLETED"]);
+const labReturnableStatuses = new Set(["SENT_TO_DOCTOR", "COMPLETED"]);
 
 function labStatusLabel(status: string) {
   return labStatusLabels[status] ?? status;
@@ -595,9 +596,11 @@ export function VisitWorkflowPage() {
     void runAction(
       visitId,
       () =>
-        apiRequest(`/center/visit-workflow/${visitId}/lab-requests`, {
+        apiRequest("/center/lab/requests", {
           method: "POST",
           body: JSON.stringify({
+            patientId: selectedVisit?.patient.id,
+            visitId,
             testId: Number(form.get("testId")),
             priority: form.get("priority") || "NORMAL",
             reason: form.get("reason") || undefined,
@@ -624,6 +627,22 @@ export function VisitWorkflowPage() {
           })
         }),
       "تم نشر تقرير المختبر للمريض."
+    );
+  }
+
+  function approveLabResult(visitId: number, requestId: number) {
+    const doctorNotes = window.prompt("ملاحظة اعتماد للطبيب (اختياري)") ?? "";
+
+    void runAction(
+      visitId,
+      () =>
+        apiRequest(`/center/lab/requests/${requestId}/approve`, {
+          method: "POST",
+          body: JSON.stringify({
+            doctorNotes: doctorNotes.trim() || undefined
+          })
+        }),
+      "تم اعتماد نتيجة المختبر."
     );
   }
 
@@ -1292,8 +1311,9 @@ export function VisitWorkflowPage() {
                           const details = labRequestDetails(request);
                           const canPublish = canAssess && canPublishLabRequest(request);
                           const canReturnForCorrection = canAssess && canReturnLabRequestForCorrection(request);
+                          const canApprove = canAssess && request.status === "SENT_TO_DOCTOR";
                           const hasVisibleAction =
-                            canEditLab || canPublish || canReturnForCorrection || Boolean(request.publishedToPatientAt);
+                            canEditLab || canApprove || canPublish || canReturnForCorrection || Boolean(request.publishedToPatientAt);
 
                           return (
                             <tr key={request.id} id={`lab-result-${request.id}`} className={highlighted ? "target-highlight" : undefined}>
@@ -1308,6 +1328,9 @@ export function VisitWorkflowPage() {
                               </td>
                               <td>
                                 <strong>{labResultSummary(request)}</strong>
+                                {request.abnormalFlag && request.abnormalFlag !== "NORMAL" ? (
+                                  <StatusBadge status={request.abnormalFlag} />
+                                ) : null}
                                 <div className="button-row">
                                   {request.reportUrl ? (
                                     <a className="ghost-button" href={request.reportUrl} rel="noreferrer" target="_blank">
@@ -1342,6 +1365,16 @@ export function VisitWorkflowPage() {
                                       onClick={() => publishLabResult(selectedVisit.id, request.id)}
                                     >
                                       نشر للمريض
+                                    </button>
+                                  ) : null}
+                                  {canApprove ? (
+                                    <button
+                                      className="primary-button"
+                                      disabled={busyId === selectedVisit.id}
+                                      type="button"
+                                      onClick={() => approveLabResult(selectedVisit.id, request.id)}
+                                    >
+                                      اعتماد النتيجة
                                     </button>
                                   ) : null}
                                   {canReturnForCorrection ? (

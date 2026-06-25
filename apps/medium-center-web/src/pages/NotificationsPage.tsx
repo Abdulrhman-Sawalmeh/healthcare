@@ -92,6 +92,36 @@ export function NotificationsPage() {
     }
   }
 
+  async function openLabAlert(alert: CenterNotificationsBundle["alerts"][number]) {
+    try {
+      if (!alert.isResolved) {
+        await apiRequest(`/center/notifications/${alert.id}/read`, { method: "PATCH" });
+      }
+      const path = resolveNotificationPath({
+        role: user?.role,
+        workspace: user?.workspace,
+        type: alert.alertType,
+        title: alert.title,
+        body: alert.message,
+        targetUrl: alert.targetUrl
+      });
+      window.dispatchEvent(new Event("healthcare-notifications-updated"));
+      navigate(path);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "تعذر فتح إشعار المختبر.");
+    }
+  }
+
+  async function markAllLabAlertsRead() {
+    try {
+      await apiRequest("/center/notifications/read-all", { method: "PATCH" });
+      await loadData();
+      window.dispatchEvent(new Event("healthcare-notifications-updated"));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "تعذر تحديث إشعارات المختبر.");
+    }
+  }
+
   function handleCardNavigation(path: string) {
     if (path !== "/notifications") {
       navigate(path);
@@ -257,6 +287,57 @@ export function NotificationsPage() {
 
   if (!centerBundle) {
     return <div className="empty-state">جارٍ تحميل الإشعارات...</div>;
+  }
+
+  if (user?.role === "LAB_TECH") {
+    const unreadLabAlerts = centerBundle.alerts.filter((alert) => !alert.isResolved).length;
+
+    return (
+      <div className="page-stack">
+        <SectionCard
+          title="إشعارات المختبر"
+          subtitle={`إشعارات مرتبطة بطلبات العينات والنتائج فقط. غير المقروء: ${unreadLabAlerts}`}
+          action={
+            unreadLabAlerts > 0 ? (
+              <button className="ghost-button" type="button" onClick={() => void markAllLabAlertsRead()}>
+                تعليم الكل كمقروء
+              </button>
+            ) : null
+          }
+        >
+          {error ? <div className="error-banner">{error}</div> : null}
+          <div className="stack-list">
+            {centerBundle.alerts.map((alert) => (
+              <article
+                className={`stack-item interactive-card${alert.isResolved ? " is-read" : ""}`}
+                key={alert.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => void openLabAlert(alert)}
+                onKeyDown={(event) => {
+                  if (isActivationKey(event)) {
+                    event.preventDefault();
+                    void openLabAlert(alert);
+                  }
+                }}
+              >
+                <div className="info-row">
+                  <div>
+                    <strong>{alert.title}</strong>
+                    <p className="muted">{alert.message}</p>
+                    <span className="muted">{formatDateTime(alert.createdAt)}</span>
+                  </div>
+                  <StatusBadge status={alert.severity} />
+                </div>
+              </article>
+            ))}
+            {centerBundle.alerts.length === 0 ? (
+              <div className="empty-state">لا توجد إشعارات مختبر حاليًا.</div>
+            ) : null}
+          </div>
+        </SectionCard>
+      </div>
+    );
   }
 
   const filteredCenterIncoming = centerBundle.incoming.filter((item) =>

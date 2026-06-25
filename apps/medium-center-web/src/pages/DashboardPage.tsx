@@ -28,6 +28,7 @@ type WorkflowVisitSummary = {
     fullName: string;
   } | null;
   labRequests?: Array<{
+    id: number;
     status: string;
     resultValue?: string | null;
     resultDate?: string | null;
@@ -49,7 +50,7 @@ function roleRoute(role: Role) {
     case "RECEPTIONIST":
       return "/visit-workflow?status=WAITING_RECEPTION";
     case "LAB_TECH":
-      return "/visit-workflow?status=WAITING_LAB";
+      return "/lab";
     case "PHARMACIST":
       return "/visit-workflow?status=WAITING_PHARMACY";
     case "NURSE":
@@ -318,6 +319,36 @@ function DoctorDashboard({
           })}
         </SectionCard>
       </div>
+
+      <SectionCard
+        title="نتائج مختبر بانتظار المراجعة"
+        subtitle="نتائج أرسلها المختبر وتحتاج اعتمادًا أو طلب تصحيح قبل نشرها للمريض."
+      >
+        <div className="stack-list compact">
+          {labReviewVisits.flatMap((visit) =>
+            (visit.labRequests ?? [])
+              .filter((request) => ["SENT_TO_DOCTOR", "COMPLETED"].includes(request.status))
+              .map((request) => (
+                <Link
+                  className="stack-item interactive-card"
+                  key={request.id}
+                  to={`/visit-workflow?highlight=lab-result-${request.id}`}
+                >
+                  <div className="info-row">
+                    <div>
+                      <strong>{visit.patient.fullName}</strong>
+                      <p className="muted">{joinMeta([request.test.testName, request.resultValue, formatDateTime(request.resultDate)])}</p>
+                    </div>
+                    <StatusBadge status={request.status} />
+                  </div>
+                </Link>
+              ))
+          )}
+          {labReviewVisits.length === 0 ? (
+            <div className="empty-state compact">لا توجد نتائج مختبر بانتظار المراجعة.</div>
+          ) : null}
+        </div>
+      </SectionCard>
     </div>
   );
 }
@@ -417,6 +448,8 @@ function ReceptionDashboard({
 
 function LabDashboard({ labData }: { labData: LabBundle | null }) {
   const requests = labData?.requests ?? [];
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const recentRequests = requests.filter((request) => new Date(request.requestDate).getTime() >= thirtyDaysAgo);
   const criticalRequests = requests.filter((request) => request.priority === "CRITICAL" || request.abnormalFlag === "CRITICAL");
   const overdueRequests = requests.filter((request) => {
     if (["SENT_TO_DOCTOR", "PUBLISHED_TO_PATIENT", "CANCELLED", "INVALID_SAMPLE", "COMPLETED"].includes(request.status)) {
@@ -431,6 +464,28 @@ function LabDashboard({ labData }: { labData: LabBundle | null }) {
       (request.sentToDoctorAt && isToday(request.sentToDoctorAt)) ||
       (request.publishedToPatientAt && isToday(request.publishedToPatientAt))
   );
+  const topTests = Object.entries(
+    recentRequests.reduce<Record<string, number>>((summary, request) => {
+      summary[request.testName] = (summary[request.testName] ?? 0) + 1;
+      return summary;
+    }, {})
+  )
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 5);
+  const statusSummary = Object.entries(
+    requests.reduce<Record<string, number>>((summary, request) => {
+      summary[request.status] = (summary[request.status] ?? 0) + 1;
+      return summary;
+    }, {})
+  ).sort((left, right) => right[1] - left[1]);
+  const turnaroundHours = requests
+    .filter((request) => request.sentToDoctorAt)
+    .map((request) => (new Date(request.sentToDoctorAt!).getTime() - new Date(request.requestDate).getTime()) / 3_600_000)
+    .filter((hours) => Number.isFinite(hours) && hours >= 0);
+  const averageTurnaround =
+    turnaroundHours.length > 0
+      ? `${(turnaroundHours.reduce((sum, hours) => sum + hours, 0) / turnaroundHours.length).toFixed(1)} ساعة`
+      : "لا توجد بيانات";
 
   return (
     <div className="page-stack">
@@ -454,11 +509,39 @@ function LabDashboard({ labData }: { labData: LabBundle | null }) {
         <MetricCard label="طلبات جديدة" value={requests.filter((request) => ["NEW", "PENDING"].includes(request.status)).length} helper="طلبات لم تبدأ بعد" to="/lab?status=NEW" actionHint="عرض" />
         <MetricCard label="بانتظار العينة" value={requests.filter((request) => request.status === "PENDING_SAMPLE").length} helper="تحتاج استلام عينة" to="/lab?status=PENDING_SAMPLE" actionHint="عرض" />
         <MetricCard label="العينة مستلمة" value={requests.filter((request) => request.status === "SAMPLE_RECEIVED").length} helper="جاهزة للفحص" to="/lab?status=SAMPLE_RECEIVED" actionHint="عرض" />
-        <MetricCard label="قيد الفحص" value={requests.filter((request) => ["IN_PROGRESS", "NEEDS_CORRECTION"].includes(request.status)).length} helper="قيد الإدخال أو التصحيح" to="/lab?status=IN_PROGRESS" actionHint="عرض" />
-        <MetricCard label="جاهزة للإرسال" value={requests.filter((request) => ["RESULT_READY", "COMPLETED"].includes(request.status)).length} helper="تحتاج إرسال للطبيب" to="/lab?status=RESULT_READY" actionHint="عرض" />
+        <MetricCard label="قيد الفحص" value={requests.filter((request) => request.status === "IN_PROGRESS").length} helper="قيد إدخال النتيجة" to="/lab?status=IN_PROGRESS" actionHint="عرض" />
+        <MetricCard label="جاهزة للإرسال" value={requests.filter((request) => request.status === "RESULT_READY").length} helper="تحتاج إرسال للطبيب" to="/lab?status=RESULT_READY" actionHint="عرض" />
+        <MetricCard label="أُرسلت للطبيب" value={requests.filter((request) => request.status === "SENT_TO_DOCTOR").length} helper="بانتظار مراجعة الطبيب" to="/lab?status=SENT_TO_DOCTOR" actionHint="عرض" />
         <MetricCard label="نتائج حرجة" value={criticalRequests.length} helper="تنبيهات عاجلة للطبيب" to="/lab?critical=1" actionHint="عرض" />
-        <MetricCard label="طلبات متأخرة" value={overdueRequests.length} helper="أكثر من 24 ساعة" />
-        <MetricCard label="تقارير اليوم" value={todayReports.length} helper="نتائج أُنجزت اليوم" />
+        <MetricCard label="طلبات متأخرة" value={overdueRequests.length} helper="أكثر من 24 ساعة" to="/lab?overdue=1" actionHint="عرض" />
+        <MetricCard label="تقارير اليوم" value={todayReports.length} helper="نتائج أُنجزت اليوم" to="/lab?today=1" actionHint="عرض" />
+      </div>
+
+      <div className="split-grid dashboard-focus-grid">
+        <SectionCard title="أكثر الفحوص طلبًا" subtitle="آخر 30 يومًا من بيانات المختبر الفعلية.">
+          <div className="stack-list compact">
+            {topTests.map(([testName, count]) => (
+              <div className="stack-item" key={testName}>
+                <strong>{testName}</strong>
+                <span className="tag">{count} طلب</span>
+              </div>
+            ))}
+            {topTests.length === 0 ? <div className="empty-state compact">لا توجد طلبات خلال آخر 30 يومًا.</div> : null}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="مؤشرات التشغيل" subtitle="ملخص الحالات وسرعة إرسال النتائج للطبيب.">
+          <div className="lab-analytics-grid">
+            <div className="stat-pill"><span>متوسط زمن الإنجاز</span><strong>{averageTurnaround}</strong></div>
+            <div className="stat-pill"><span>الطلبات المتأخرة</span><strong>{overdueRequests.length}</strong></div>
+            <div className="stat-pill"><span>النتائج الحرجة</span><strong>{criticalRequests.length}</strong></div>
+          </div>
+          <div className="chip-row">
+            {statusSummary.map(([status, count]) => (
+              <span className="tag" key={status}>{toArabicLabel(status)}: {count}</span>
+            ))}
+          </div>
+        </SectionCard>
       </div>
 
       <SectionCard title="أحدث طلبات المختبر" subtitle="قائمة مختصرة للمتابعة السريعة.">
@@ -518,7 +601,7 @@ export function DashboardPage() {
               setLabReviewVisits(
                 visits.filter((visit) =>
                   visit.labRequests?.some((request) =>
-                    ["SENT_TO_DOCTOR", "RESULT_READY", "COMPLETED"].includes(request.status)
+                    ["SENT_TO_DOCTOR", "COMPLETED"].includes(request.status)
                   )
                 )
               );
