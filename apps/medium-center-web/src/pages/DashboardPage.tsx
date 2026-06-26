@@ -275,8 +275,8 @@ function DoctorDashboard({
           <Link className="primary-button" to="/visit-workflow?status=WAITING_DOCTOR">فتح الحالة التالية</Link>
           <Link className="ghost-button" to="/referrals?view=assigned">مراجعة الإحالات المسندة</Link>
           <Link className="ghost-button" to="/patients">إنشاء تذكير متابعة</Link>
-          <Link className="ghost-button" to="/visit-workflow">طلب مختبر</Link>
-          <Link className="ghost-button" to="/visit-workflow">إنشاء وصفة</Link>
+          <Link className="ghost-button" to="/visit-workflow?action=request-lab">طلب مختبر</Link>
+          <Link className="ghost-button" to="/visit-workflow?action=create-prescription">إنشاء وصفة</Link>
         </div>
       </section>
 
@@ -571,14 +571,14 @@ function LabDashboard({ labData }: { labData: LabBundle | null }) {
 
 function PharmacyDashboard({ data }: { data: PharmacyDashboardData }) {
   const cards = [
-    ["وصفات جديدة", data.stats.newPrescriptions, "/pharmacy/prescriptions?status=NEW"],
-    ["بانتظار المراجعة", data.stats.waitingReview, "/pharmacy/prescriptions?status=UNDER_REVIEW"],
-    ["قيد التجهيز", data.stats.preparing, "/pharmacy/dispensing?status=PREPARING"],
-    ["جاهزة للصرف", data.stats.readyForPickup, "/pharmacy/dispensing?status=READY_FOR_PICKUP"],
-    ["تم صرفها اليوم", data.stats.dispensedToday, "/pharmacy/prescriptions?status=DISPENSED"],
-    ["دواء غير متوفر", data.stats.unavailable, "/pharmacy/prescriptions?status=UNAVAILABLE"],
-    ["تحتاج مراجعة الطبيب", data.stats.needsDoctorReview, "/pharmacy/prescriptions?status=NEEDS_DOCTOR_REVIEW"],
-    ["تنبيهات مخزون منخفض", data.stats.lowStock, "/pharmacy/inventory"]
+    ["وصفات جديدة", data.stats.newPrescriptions, "/pharmacy/prescriptions?status=NEW", "وصفات لم تتم مراجعتها بعد.", "فتح الوصفات الجديدة"],
+    ["بانتظار المراجعة", data.stats.waitingReview, "/pharmacy/prescriptions?status=UNDER_REVIEW", "وصفات راجعها الصيدلي وتنتظر التجهيز.", "فتح قيد المراجعة"],
+    ["قيد التجهيز", data.stats.preparing, "/pharmacy/dispensing?status=PREPARING", "وصفات يتم تجهيزها حاليًا.", "فتح قيد التجهيز"],
+    ["جاهزة للاستلام", data.stats.readyForPickup, "/pharmacy/dispensing?status=READY_FOR_PICKUP", "وصفات جاهزة لاستلام المريض.", "فتح الجاهزة للاستلام"],
+    ["تم صرفها اليوم", data.stats.dispensedToday, "/pharmacy/prescriptions?status=DISPENSED", "وصفات تم صرفها اليوم.", "فتح المصروفة اليوم"],
+    ["دواء غير متوفر", data.stats.unavailable, "/pharmacy/prescriptions?status=UNAVAILABLE", "أدوية تحتاج متابعة التوفر.", "فتح غير المتوفر"],
+    ["تحتاج مراجعة الطبيب", data.stats.needsDoctorReview, "/pharmacy/prescriptions?status=NEEDS_DOCTOR_REVIEW", "طلبات تنتظر قرار الطبيب.", "فتح طلبات المراجعة"],
+    ["مخزون منخفض", data.stats.lowStock, "/pharmacy/inventory", "أصناف وصلت إلى الحد الأدنى.", "فتح المخزون"]
   ] as const;
 
   return (
@@ -600,10 +600,10 @@ function PharmacyDashboard({ data }: { data: PharmacyDashboardData }) {
       </section>
 
       <div className="metric-grid compact-metrics">
-        {cards.map(([label, value, to]) => (
+        {cards.map(([label, value, to, helper, actionHint]) => (
           <MetricCard
-            actionHint="فتح القائمة"
-            helper="حالة محدثة من مسار الصيدلية."
+            actionHint={actionHint}
+            helper={helper}
             key={label}
             label={label}
             to={to}

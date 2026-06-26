@@ -120,6 +120,57 @@ type Catalogs = {
   diseases: Array<{ id: number; name: string; category: string }>;
 };
 
+type PrescriptionDraft = {
+  key: number;
+  medicineId?: number;
+  medicineName: string;
+  dosage: string;
+  quantity: number;
+  duration: string;
+  instructions: string;
+  note: string;
+};
+
+type LabRequestDraft = {
+  key: number;
+  testId: number | "";
+  reason: string;
+  clinicalNotes: string;
+};
+
+function createPrescriptionDraft(): PrescriptionDraft {
+  return {
+    key: Date.now() + Math.random(),
+    medicineId: undefined,
+    medicineName: "",
+    dosage: "",
+    quantity: 1,
+    duration: "",
+    instructions: "",
+    note: ""
+  };
+}
+
+function createLabRequestDraft(): LabRequestDraft {
+  return {
+    key: Date.now() + Math.random(),
+    testId: "",
+    reason: "",
+    clinicalNotes: ""
+  };
+}
+
+const pharmacyStatusLabels: Record<string, string> = {
+  NEW: "وصفة جديدة",
+  UNDER_REVIEW: "قيد المراجعة",
+  PREPARING: "قيد التجهيز",
+  READY_FOR_PICKUP: "جاهزة للاستلام",
+  DISPENSED: "تم الصرف",
+  UNAVAILABLE: "غير متوفر",
+  NEEDS_DOCTOR_REVIEW: "تحتاج مراجعة الطبيب",
+  CANCELLED: "ملغاة"
+};
+
 const statusLabels: Record<string, string> = {
   WAITING_RECEPTION: "بانتظار الاستقبال",
   WAITING_TRIAGE: "بانتظار التقييم التمريضي",
@@ -327,6 +378,8 @@ export function VisitWorkflowPage() {
   const [reportLinkForm, setReportLinkForm] = useState(defaultReportLinkForm);
   const [prescriptionWarnings, setPrescriptionWarnings] = useState<PrescriptionSafetyWarningRecord[]>([]);
   const [overrideReason, setOverrideReason] = useState("");
+  const [doctorPrescriptionRows, setDoctorPrescriptionRows] = useState<PrescriptionDraft[]>([]);
+  const [doctorLabRows, setDoctorLabRows] = useState<LabRequestDraft[]>([]);
   const [pendingDoctorSubmission, setPendingDoctorSubmission] = useState<{
     visitId: number;
     payload: Record<string, unknown>;
@@ -346,6 +399,19 @@ export function VisitWorkflowPage() {
     () => visits.find((visit) => visit.id === selectedVisitId) ?? null,
     [selectedVisitId, visits]
   );
+  const guidedAction = searchParams.get("action");
+  const guidedFocus =
+    searchParams.get("focus") === "prescription" || guidedAction === "create-prescription"
+      ? "prescription"
+      : searchParams.get("focus") === "lab" || guidedAction === "request-lab"
+        ? "lab"
+        : null;
+  const guidedMessage =
+    guidedFocus === "prescription"
+      ? "اختر ملف المريض الذي تريد إنشاء وصفة له."
+      : guidedFocus === "lab"
+        ? "اختر ملف المريض الذي تريد طلب فحص مخبري له."
+        : "";
 
   const canAddReportLink =
     Boolean(selectedVisit?.diagnosis) && selectedVisit?.diagnosis !== "بانتظار تقييم الطبيب";
@@ -378,6 +444,11 @@ export function VisitWorkflowPage() {
   }, [loadPage]);
 
   useEffect(() => {
+    setDoctorPrescriptionRows([]);
+    setDoctorLabRows([]);
+  }, [selectedVisitId]);
+
+  useEffect(() => {
     const highlight = searchParams.get("highlight");
     if (!highlight?.startsWith("lab-result-") && !highlight?.startsWith("prescription-")) {
       return;
@@ -397,6 +468,31 @@ export function VisitWorkflowPage() {
       document.getElementById(highlight)?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 150);
   }, [searchParams, visits]);
+
+  useEffect(() => {
+    const requestedVisitId = Number(searchParams.get("visitId"));
+    if (!Number.isInteger(requestedVisitId) || requestedVisitId <= 0) {
+      return;
+    }
+
+    if (visits.some((visit) => visit.id === requestedVisitId)) {
+      setSelectedVisitId(requestedVisitId);
+    }
+  }, [searchParams, visits]);
+
+  useEffect(() => {
+    if (!selectedVisitId || !guidedFocus) {
+      return;
+    }
+
+    const sectionId = guidedFocus === "prescription" ? "doctor-prescription-section" : "doctor-lab-section";
+    const controlId = guidedFocus === "prescription" ? "add-prescription-button" : "add-lab-request-button";
+
+    window.setTimeout(() => {
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      document.getElementById(controlId)?.focus();
+    }, 180);
+  }, [guidedFocus, selectedVisitId]);
 
   async function runAction(visitId: number, action: () => Promise<unknown>, successMessage = "تم حفظ التغييرات.") {
     try {
@@ -429,6 +525,7 @@ export function VisitWorkflowPage() {
       setPrescriptionWarnings([]);
       setPendingDoctorSubmission(null);
       setOverrideReason("");
+      setDoctorPrescriptionRows([]);
       setMessage(successMessage);
       await loadVisits();
     } catch (cause) {
@@ -519,43 +616,64 @@ export function VisitWorkflowPage() {
   function submitDoctorAssessment(event: FormEvent<HTMLFormElement>, visitId: number) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const medicineId = optionalNumber(form.get("medicineId"));
-    const prescriptions = medicineId
-      ? [
-          {
-            medicineId,
-            dosage: String(form.get("dosage") || ""),
-            duration: String(form.get("duration") || ""),
-            quantity: Number(form.get("quantity") || 1),
-            instructions: form.get("instructions") || undefined
-          }
-        ]
-      : [];
+    const invalidRow = doctorPrescriptionRows.find(
+      (row) =>
+        !row.medicineName.trim() ||
+        !row.dosage.trim() ||
+        !row.duration.trim() ||
+        !Number.isInteger(row.quantity) ||
+        row.quantity < 1
+    );
+
+    if (invalidRow) {
+      setError("أكمل اسم الدواء والجرعة والمدة والكمية لكل دواء مضاف، أو احذف الصف غير المكتمل.");
+      return;
+    }
+
+    const invalidLabRow = doctorLabRows.find((row) => !row.testId);
+
+    if (invalidLabRow) {
+      setError("اختر فحصًا مخبريًا لكل طلب مضاف، أو احذف الصف غير المكتمل.");
+      return;
+    }
+
+    const prescriptions = doctorPrescriptionRows.map((row) => {
+      const inventoryItem =
+        (row.medicineId
+          ? catalogs.medicines.find((medicine) => medicine.id === row.medicineId)
+          : undefined) ??
+        catalogs.medicines.find(
+          (medicine) => medicine.medicineName.trim().toLowerCase() === row.medicineName.trim().toLowerCase()
+        );
+      const instructions = [
+        row.instructions.trim(),
+        row.note.trim() ? `ملاحظة الطبيب: ${row.note.trim()}` : ""
+      ].filter(Boolean).join(" | ");
+
+      return {
+        medicineId: inventoryItem?.id,
+        medicineName: inventoryItem?.medicineName ?? row.medicineName.trim(),
+        dosage: row.dosage.trim(),
+        duration: row.duration.trim(),
+        quantity: row.quantity,
+        instructions: instructions || undefined
+      };
+    });
+    const labRequests = doctorLabRows.map((row) => ({
+      testId: Number(row.testId),
+      reason: row.reason.trim() || undefined,
+      clinicalNotes: row.clinicalNotes.trim() || undefined
+    }));
 
     void submitDoctorPayload(visitId, {
       diagnosis: form.get("diagnosis"),
       symptoms: form.get("symptoms") || undefined,
       notes: form.get("notes") || undefined,
       prescriptions,
-      labTestIds: form.getAll("labTestIds").map(Number)
-    });
-    return;
-
-    void runAction(
-      visitId,
-      () =>
-        apiRequest(`/center/visit-workflow/${visitId}/doctor`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            diagnosis: form.get("diagnosis"),
-            symptoms: form.get("symptoms") || undefined,
-            notes: form.get("notes") || undefined,
-            prescriptions,
-            labTestIds: form.getAll("labTestIds").map(Number)
-          })
-        }),
-      "تم حفظ تقييم الطبيب وتحديث ملف الزيارة."
-    );
+      labRequests
+    }, prescriptions.length > 0 || labRequests.length > 0
+      ? "تم حفظ تقييم الطبيب وإرسال الطلبات المحددة إلى الأقسام المختصة."
+      : "تم حفظ تقييم الطبيب دون إنشاء طلب مختبر أو طلب صيدلية.");
   }
 
   function submitReportLink(event: FormEvent<HTMLFormElement>, visitId: number) {
@@ -592,32 +710,6 @@ export function VisitWorkflowPage() {
     ).then(() => {
       setReportLinkForm(defaultReportLinkForm);
     });
-  }
-
-  function submitVisitLabRequest(event: FormEvent<HTMLFormElement>, visitId: number) {
-    event.preventDefault();
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
-
-    void runAction(
-      visitId,
-      () =>
-        apiRequest("/center/lab/requests", {
-          method: "POST",
-          body: JSON.stringify({
-            patientId: selectedVisit?.patient.id,
-            visitId,
-            testId: Number(form.get("testId")),
-            priority: form.get("priority") || "NORMAL",
-            reason: form.get("reason") || undefined,
-            clinicalNotes: form.get("clinicalNotes") || undefined,
-            sampleType: form.get("sampleType") || undefined,
-            fastingRequired: form.get("fastingRequired") === "on",
-            externalTest: form.get("externalTest") === "on"
-          })
-        }),
-      "تم إرسال طلب الفحص المخبري للمختبر."
-    ).then(() => formElement.reset());
   }
 
   function publishLabResult(visitId: number, requestId: number) {
@@ -857,6 +949,8 @@ export function VisitWorkflowPage() {
         </SectionCard>
       ) : null}
 
+      {guidedMessage ? <div className="inline-note target-highlight">{guidedMessage}</div> : null}
+
       <SectionCard title="جدول ملفات الزيارة" subtitle="اضغط فتح الملف لعرض التفاصيل، ولن تظهر الملفات مفتوحة كلها في نفس الوقت.">
         {visits.length > 0 ? (
           <div className="table-shell">
@@ -997,54 +1091,6 @@ export function VisitWorkflowPage() {
                     </button>
                   </form>
                 ) : null}
-                {canAssess ? (
-                  <form className="form-grid visit-inline-form" onSubmit={(event) => submitVisitLabRequest(event, selectedVisit.id)}>
-                    <label className="field">
-                      <span>طلب فحص مخبري</span>
-                      <select name="testId" required defaultValue="">
-                        <option value="" disabled>
-                          اختر الفحص
-                        </option>
-                        {catalogs.labTests.map((test) => (
-                          <option key={test.id} value={test.id}>
-                            {test.testName} - {test.category}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>الأولوية</span>
-                      <select name="priority" defaultValue="NORMAL">
-                        <option value="NORMAL">عادي</option>
-                        <option value="URGENT">عاجل</option>
-                        <option value="CRITICAL">حرج</option>
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>نوع العينة</span>
-                      <input name="sampleType" placeholder="دم، بول، مسحة..." />
-                    </label>
-                    <label className="field">
-                      <span>سبب الطلب</span>
-                      <input name="reason" placeholder="سبب الفحص أو التشخيص المتوقع" />
-                    </label>
-                    <label className="field field-span-2">
-                      <span>ملاحظات للمختبر</span>
-                      <textarea name="clinicalNotes" />
-                    </label>
-                    <label className="checkbox-field">
-                      <input name="fastingRequired" type="checkbox" />
-                      <span>يتطلب صيام</span>
-                    </label>
-                    <label className="checkbox-field">
-                      <input name="externalTest" type="checkbox" />
-                      <span>فحص خارجي</span>
-                    </label>
-                    <button className="primary-button" disabled={busyId === selectedVisit.id} type="submit">
-                      طلب فحص مخبري
-                    </button>
-                  </form>
-                ) : null}
               </article>
             ) : null}
 
@@ -1160,64 +1206,204 @@ export function VisitWorkflowPage() {
                 </div>
 
                 {canAssess && ["WAITING_DOCTOR", "IN_TREATMENT"].includes(selectedVisit.workflowStatus) ? (
-                  <form className="form-grid visit-inline-form" onSubmit={(event) => submitDoctorAssessment(event, selectedVisit.id)}>
-                    <label className="field">
-                      <span>التشخيص</span>
-                      <input name="diagnosis" required minLength={3} list={`diseases-${selectedVisit.id}`} />
-                      <datalist id={`diseases-${selectedVisit.id}`}>
-                        {catalogs.diseases.map((disease) => (
-                          <option key={disease.id} value={disease.name} />
-                        ))}
-                      </datalist>
-                    </label>
-                    <label className="field">
-                      <span>الأعراض</span>
-                      <textarea name="symptoms" />
-                    </label>
-                    <label className="field">
-                      <span>دواء من المخزون</span>
-                      <select name="medicineId" defaultValue="">
-                        <option value="">دون وصفة دوائية</option>
-                        {catalogs.medicines.map((medicine) => (
-                          <option key={medicine.id} value={medicine.id}>
-                            {medicine.medicineName} - المتاح {medicine.quantity} {medicine.unit}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>الجرعة</span>
-                      <input name="dosage" placeholder="مثال: حبة مرتين يوميًا" />
-                    </label>
-                    <label className="field">
-                      <span>المدة</span>
-                      <input name="duration" placeholder="مثال: 7 أيام" />
-                    </label>
-                    <label className="field">
-                      <span>الكمية</span>
-                      <input name="quantity" type="number" min="1" defaultValue="1" />
-                    </label>
-                    <label className="field">
-                      <span>تعليمات الدواء</span>
-                      <input name="instructions" />
-                    </label>
-                    <label className="field">
-                      <span>ملاحظات الطبيب</span>
-                      <textarea name="notes" />
-                    </label>
-                    <fieldset className="field field-span-2">
-                      <legend>الفحوص المطلوبة</legend>
-                      <div className="workflow-options">
-                        {catalogs.labTests.map((test) => (
-                          <label className="checkbox-field" key={test.id}>
-                            <input type="checkbox" name="labTestIds" value={test.id} />
-                            <span>
-                              {test.testName} - {test.price.toFixed(2)} شيكل
-                            </span>
-                          </label>
-                        ))}
+                  <form className="form-grid visit-inline-form doctor-assessment-form" onSubmit={(event) => submitDoctorAssessment(event, selectedVisit.id)}>
+                    <section className="field-span-2 prescription-editor">
+                      <div className="section-header">
+                        <div>
+                          <p className="eyebrow">التقييم الطبي</p>
+                          <h3>التقييم الطبي</h3>
+                        </div>
                       </div>
-                    </fieldset>
+                      <div className="form-grid">
+                        <label className="field">
+                          <span>التشخيص</span>
+                          <input name="diagnosis" required minLength={3} list={`diseases-${selectedVisit.id}`} />
+                          <datalist id={`diseases-${selectedVisit.id}`}>
+                            {catalogs.diseases.map((disease) => (
+                              <option key={disease.id} value={disease.name} />
+                            ))}
+                          </datalist>
+                        </label>
+                        <label className="field">
+                          <span>الأعراض</span>
+                          <textarea name="symptoms" />
+                        </label>
+                        <label className="field field-span-2">
+                          <span>ملاحظات الطبيب</span>
+                          <textarea name="notes" />
+                        </label>
+                      </div>
+                    </section>
+
+                    <section id="doctor-lab-section" className={`field-span-2 prescription-editor${guidedFocus === "lab" ? " target-highlight" : ""}`}>
+                      <div className="section-header">
+                        <div>
+                          <p className="eyebrow">اختياري</p>
+                          <h3>طلبات المختبر — اختياري</h3>
+                          <p className="muted">يمكن حفظ الزيارة دون طلب مختبر. لا يتم إرسال شيء للمختبر إلا إذا أضاف الطبيب فحصًا واحدًا على الأقل.</p>
+                        </div>
+                        <button
+                          className="ghost-button"
+                          id="add-lab-request-button"
+                          onClick={() => setDoctorLabRows((current) => [...current, createLabRequestDraft()])}
+                          type="button"
+                        >
+                          + طلب فحص مختبر
+                        </button>
+                      </div>
+                      <div className="stack-list compact">
+                        {doctorLabRows.map((row, index) => (
+                          <article className="prescription-draft-row" key={row.key}>
+                            <div className="section-header">
+                              <strong>فحص المختبر {index + 1}</strong>
+                              <button
+                                className="danger-button"
+                                onClick={() => setDoctorLabRows((current) => current.filter((item) => item.key !== row.key))}
+                                type="button"
+                              >
+                                إزالة
+                              </button>
+                            </div>
+                            <div className="form-grid">
+                              <label className="field">
+                                <span>الفحص</span>
+                                <select
+                                  value={row.testId}
+                                  onChange={(event) => setDoctorLabRows((current) => current.map((item) => item.key === row.key ? { ...item, testId: event.target.value ? Number(event.target.value) : "" } : item))}
+                                >
+                                  <option value="">اختر الفحص</option>
+                                  {catalogs.labTests.map((test) => (
+                                    <option key={test.id} value={test.id}>
+                                      {test.testName} - {test.category}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="field">
+                                <span>سبب/ملاحظة اختيارية</span>
+                                <input value={row.reason} onChange={(event) => setDoctorLabRows((current) => current.map((item) => item.key === row.key ? { ...item, reason: event.target.value } : item))} />
+                              </label>
+                              <label className="field field-span-2">
+                                <span>ملاحظات للمختبر</span>
+                                <textarea value={row.clinicalNotes} onChange={(event) => setDoctorLabRows((current) => current.map((item) => item.key === row.key ? { ...item, clinicalNotes: event.target.value } : item))} />
+                              </label>
+                            </div>
+                          </article>
+                        ))}
+                        {doctorLabRows.length === 0 ? (
+                          <div className="empty-state compact">لم تتم إضافة فحوص. ستُحفظ الزيارة دون طلب مختبر.</div>
+                        ) : null}
+                      </div>
+                    </section>
+
+                    <section id="doctor-prescription-section" className={`field-span-2 prescription-editor${guidedFocus === "prescription" ? " target-highlight" : ""}`}>
+                      <div className="section-header">
+                        <div>
+                          <p className="eyebrow">اختياري</p>
+                          <h3>الوصفة الدوائية — اختياري</h3>
+                          <p className="muted">يمكن حفظ الزيارة بدون وصفة. لا يتم إرسال شيء للصيدلية إلا إذا أضاف الطبيب دواءً واحدًا على الأقل.</p>
+                        </div>
+                        <button
+                          className="ghost-button"
+                          id="add-prescription-button"
+                          onClick={() => setDoctorPrescriptionRows((current) => [...current, createPrescriptionDraft()])}
+                          type="button"
+                        >
+                          + إضافة دواء للوصفة
+                        </button>
+                      </div>
+                      <div className="stack-list compact">
+                        {doctorPrescriptionRows.map((row, index) => {
+                          const linkedMedicine =
+                            (row.medicineId
+                              ? catalogs.medicines.find((medicine) => medicine.id === row.medicineId)
+                              : undefined) ??
+                            catalogs.medicines.find(
+                              (medicine) => medicine.medicineName.trim().toLowerCase() === row.medicineName.trim().toLowerCase()
+                            );
+                          return (
+                            <article className="prescription-draft-row" key={row.key}>
+                              <div className="section-header">
+                                <strong>الدواء {index + 1}</strong>
+                                <button
+                                  className="danger-button"
+                                  onClick={() => setDoctorPrescriptionRows((current) => current.filter((item) => item.key !== row.key))}
+                                  type="button"
+                                >
+                                  إزالة
+                                </button>
+                              </div>
+                              <div className="form-grid">
+                                <label className="field">
+                                  <span>اختيار من المخزون</span>
+                                  <select
+                                    value={row.medicineId ?? ""}
+                                    onChange={(event) => {
+                                      const medicine = catalogs.medicines.find((item) => item.id === Number(event.target.value));
+                                      setDoctorPrescriptionRows((current) => current.map((item) => item.key === row.key ? { ...item, medicineId: medicine?.id, medicineName: medicine?.medicineName ?? "" } : item));
+                                    }}
+                                  >
+                                    <option value="">اكتب اسم الدواء يدويًا أو اختر من المخزون</option>
+                                    {catalogs.medicines.map((medicine) => (
+                                      <option key={medicine.id} value={medicine.id}>
+                                        {medicine.medicineName} - المتاح {medicine.quantity} {medicine.unit}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="field">
+                                  <span>اسم الدواء</span>
+                                  <input
+                                    placeholder="ابحث بالعربية أو الإنجليزية"
+                                    value={row.medicineName}
+                                    onChange={(event) => {
+                                      const nextName = event.target.value;
+                                      const matchedMedicine = catalogs.medicines.find(
+                                        (medicine) => medicine.medicineName.trim().toLowerCase() === nextName.trim().toLowerCase()
+                                      );
+                                      setDoctorPrescriptionRows((current) => current.map((item) => item.key === row.key ? { ...item, medicineId: matchedMedicine?.id, medicineName: nextName } : item));
+                                    }}
+                                  />
+                                </label>
+                                <label className="field">
+                                  <span>الجرعة</span>
+                                  <input value={row.dosage} onChange={(event) => setDoctorPrescriptionRows((current) => current.map((item) => item.key === row.key ? { ...item, dosage: event.target.value } : item))} />
+                                </label>
+                                <label className="field">
+                                  <span>الكمية</span>
+                                  <input min="1" type="number" value={row.quantity} onChange={(event) => setDoctorPrescriptionRows((current) => current.map((item) => item.key === row.key ? { ...item, quantity: Number(event.target.value) } : item))} />
+                                </label>
+                                <label className="field">
+                                  <span>المدة العلاجية</span>
+                                  <input value={row.duration} onChange={(event) => setDoctorPrescriptionRows((current) => current.map((item) => item.key === row.key ? { ...item, duration: event.target.value } : item))} />
+                                </label>
+                                <label className="field">
+                                  <span>تعليمات الاستخدام</span>
+                                  <input value={row.instructions} onChange={(event) => setDoctorPrescriptionRows((current) => current.map((item) => item.key === row.key ? { ...item, instructions: event.target.value } : item))} />
+                                </label>
+                                <label className="field">
+                                  <span>ملاحظة اختيارية</span>
+                                  <input value={row.note} onChange={(event) => setDoctorPrescriptionRows((current) => current.map((item) => item.key === row.key ? { ...item, note: event.target.value } : item))} />
+                                </label>
+                              </div>
+                              {row.medicineName && !linkedMedicine ? (
+                                <div className="inline-note">
+                                  هذا الدواء غير مرتبط بالمخزون، ولن يتم خصم الكمية تلقائيًا.
+                                </div>
+                              ) : linkedMedicine ? (
+                                <div className="inline-note">
+                                  مرتبط بالمخزون: المتاح {linkedMedicine.quantity} {linkedMedicine.unit}.
+                                </div>
+                              ) : null}
+                            </article>
+                          );
+                        })}
+                        {doctorPrescriptionRows.length === 0 ? (
+                          <div className="empty-state compact">لم تتم إضافة أدوية. ستُحفظ الزيارة دون طلب صيدلية.</div>
+                        ) : null}
+                      </div>
+                    </section>
+
                     <button className="primary-button" disabled={busyId === selectedVisit.id} type="submit">
                       حفظ تقييم الطبيب
                     </button>
@@ -1467,6 +1653,7 @@ export function VisitWorkflowPage() {
                           <th>الجرعة</th>
                           <th>المدة</th>
                           <th>الكمية</th>
+                          <th>تعليمات الاستخدام</th>
                           <th>حالة الصرف</th>
                           <th>الإجراء</th>
                         </tr>
@@ -1482,8 +1669,9 @@ export function VisitWorkflowPage() {
                             <td>{prescription.dosage}</td>
                             <td>{valueOrDash(prescription.duration)}</td>
                             <td>{prescription.quantity}</td>
+                            <td>{valueOrDash(prescription.instructions)}</td>
                             <td>
-                              <StatusBadge status={prescription.pharmacyStatus ?? (prescription.dispensed ? "DISPENSED" : "NEW")} />
+                              <strong>{pharmacyStatusLabels[prescription.pharmacyStatus ?? (prescription.dispensed ? "DISPENSED" : "NEW")] ?? "قيد المتابعة"}</strong>
                               {prescription.doctorReviewReason ? <span>{prescription.doctorReviewReason}</span> : null}
                             </td>
                             <td>
@@ -1545,13 +1733,6 @@ export function VisitWorkflowPage() {
                   </table>
                 </div>
               </article>
-            ) : null}
-
-            {canViewReception && selectedVisit.invoice ? (
-              <div className="inline-note">
-                قيمة الفاتورة: {selectedVisit.invoice.amount.toFixed(2)} شيكل | المدفوع:{" "}
-                {selectedVisit.invoice.paidAmount.toFixed(2)} شيكل
-              </div>
             ) : null}
 
             {canAssess ? (

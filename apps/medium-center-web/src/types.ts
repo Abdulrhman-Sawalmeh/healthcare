@@ -387,6 +387,7 @@ export interface EligiblePrescriptionRecord {
   visitId: number;
   medicineName: string;
   dosage: string;
+  quantity: number;
   duration: string;
   instructions?: string | null;
   issuedAt: string;
@@ -714,8 +715,8 @@ export interface PharmacyPrescriptionRecord {
   medicineId?: number | null;
   medicineName: string;
   dosage: string;
-  duration: string;
   quantity: number;
+  duration: string;
   instructions?: string | null;
   status: PharmacyPrescriptionStatus;
   availabilityStatus: string;
@@ -772,7 +773,15 @@ export interface PharmacyAuditLogRecord {
   actorUsername?: string | null;
   actorRole?: string | null;
   createdAt: string;
+  oldValue?: Record<string, unknown> | null;
   newValue?: unknown;
+  related?: {
+    kind: "prescription" | "inventory";
+    label: string;
+    patientName?: string;
+    medicineName?: string;
+    targetUrl: string;
+  } | null;
 }
 
 export interface CenterNotificationsBundle {

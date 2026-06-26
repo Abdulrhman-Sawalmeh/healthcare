@@ -1,4 +1,4 @@
-import { type CSSProperties, type WheelEvent as ReactWheelEvent, useEffect, useState } from "react";
+import { type CSSProperties, type WheelEvent as ReactWheelEvent, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
@@ -30,13 +30,24 @@ function BellIcon() {
   );
 }
 
+function userInitials(name: string) {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("");
+}
+
 export function AppShell() {
   const { user, loading, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [alerts, setAlerts] = useState<SidebarAlert[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [contentZoom, setContentZoom] = useState(0.9);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -122,6 +133,32 @@ export function AppShell() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!showAccountMenu) {
+      return;
+    }
+
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (!accountMenuRef.current?.contains(event.target as Node)) {
+        setShowAccountMenu(false);
+      }
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setShowAccountMenu(false);
+      }
+    }
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [showAccountMenu]);
+
   if (loading) {
     return <div className="screen-center">جاري تحميل مساحة العمل...</div>;
   }
@@ -158,6 +195,13 @@ export function AppShell() {
     ["PENDING", "FAILED", "PROCESSING", "WARNING", "ERROR", "pending", "failed"].includes(alert.status)
   ).length;
   const badgeCount = unreadCount || alerts.length;
+  const accountRows = ([
+    ["الاسم", user.fullName],
+    ["الدور", toArabicLabel(user.role)],
+    ["البريد الإلكتروني", user.email],
+    ["المركز", user.center?.name],
+    ["اسم المستخدم", user.username]
+  ] as Array<[string, string | null | undefined]>).filter((row): row is [string, string] => Boolean(row[1]));
 
   return (
     <div className="app-shell">
@@ -189,15 +233,38 @@ export function AppShell() {
           ))}
         </nav>
 
-        <div className="profile-card">
-          <p className="eyebrow">{toArabicLabel(user.role)}</p>
-          <h3>{user.fullName}</h3>
-          <p className="muted">
-            {user.center ? joinMeta([user.center.code, user.center.city]) : user.email ?? "غير متوفر"}
-          </p>
-          <button className="ghost-button" onClick={logout} type="button">
-            تسجيل الخروج
+        <div className="account-menu-wrap" ref={accountMenuRef}>
+          <button
+            className="account-button"
+            type="button"
+            aria-expanded={showAccountMenu}
+            onClick={() => setShowAccountMenu((current) => !current)}
+          >
+            <span className="account-avatar">{userInitials(user.fullName)}</span>
+            <span>حسابي</span>
           </button>
+          {showAccountMenu ? (
+            <div className="account-menu" role="menu">
+              <div className="account-menu-header">
+                <span className="account-avatar">{userInitials(user.fullName)}</span>
+                <div>
+                  <strong>{user.fullName}</strong>
+                  <span>{toArabicLabel(user.role)}</span>
+                </div>
+              </div>
+              <dl className="account-details">
+                {accountRows.map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <button className="ghost-button account-logout-button" onClick={logout} type="button">
+                تسجيل الخروج
+              </button>
+            </div>
+          ) : null}
         </div>
       </aside>
 

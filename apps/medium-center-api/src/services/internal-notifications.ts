@@ -14,6 +14,10 @@ interface RoleNotificationInput extends InternalNotificationInput {
   role: CenterUserRole;
 }
 
+interface UserNotificationInput extends RoleNotificationInput {
+  userId: number;
+}
+
 export async function createInternalNotification(input: InternalNotificationInput) {
   try {
     return await prisma.centerSystemAlert.create({
@@ -35,5 +39,12 @@ export function notifyRole(input: RoleNotificationInput) {
   return createInternalNotification({
     ...input,
     type: `ROLE_${input.role}_${input.type}`
+  });
+}
+
+export function notifyCenterUser(input: UserNotificationInput) {
+  return createInternalNotification({
+    ...input,
+    type: `USER_${input.role}_${input.userId}_${input.type}`
   });
 }

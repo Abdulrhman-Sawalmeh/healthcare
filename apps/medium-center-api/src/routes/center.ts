@@ -17,7 +17,7 @@ import {
   processOutgoingNotifications,
   syncCenterVisitsNow
 } from "../services/notification-processor";
-import { notifyRole } from "../services/internal-notifications";
+import { notifyCenterUser, notifyRole } from "../services/internal-notifications";
 import {
   activeRefillStatuses,
   followUpReminderInclude,
@@ -391,7 +391,11 @@ const pharmacyDoctorReviewSchema = z
 const pharmacyInventoryUpdateSchema = z
   .object({
     quantity: z.coerce.number().int().min(0).optional(),
-    reorderLevel: z.coerce.number().int().min(0).optional()
+    reorderLevel: z.coerce.number().int().min(0).optional(),
+    reason: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      z.string().trim().min(3).max(500).optional()
+    )
   })
   .refine((payload) => payload.quantity !== undefined || payload.reorderLevel !== undefined, {
     message: "أدخل الكمية أو حد إعادة الطلب."
@@ -447,7 +451,11 @@ async function findLabRequest(centerId: number, requestId: number) {
   });
 }
 
-function centerAlertWhere(centerId: number, role: CenterUserRole): Prisma.CenterSystemAlertWhereInput {
+function centerAlertWhere(
+  centerId: number,
+  role: CenterUserRole,
+  actorUserId?: number
+): Prisma.CenterSystemAlertWhereInput {
   if (role === "LAB_TECH") {
     return {
       centerId,
@@ -474,12 +482,32 @@ function centerAlertWhere(centerId: number, role: CenterUserRole): Prisma.Center
           startsWith: `ROLE_${role}_`
         }
       },
+      ...(actorUserId
+        ? [
+            {
+              alertType: {
+                startsWith: `USER_${role}_${actorUserId}_`
+              }
+            }
+          ]
+        : []),
       {
-        alertType: {
-          not: {
-            startsWith: "ROLE_"
+        AND: [
+          {
+            alertType: {
+              not: {
+                startsWith: "ROLE_"
+              }
+            }
+          },
+          {
+            alertType: {
+              not: {
+                startsWith: "USER_"
+              }
+            }
           }
-        }
+        ]
       }
     ]
   };
@@ -3808,13 +3836,16 @@ router.patch(
           body: `تم صرف دواء ${prescription.medicineName} من صيدلية المركز.`,
           type: "SYSTEM"
         }),
-        notifyRole({
-          centerId,
-          role: "DOCTOR",
-          type: "PRESCRIPTION_DISPENSED",
-          title: "تم صرف وصفة",
-          message: `تم صرف ${prescription.medicineName} للمريض ${prescription.visit.patient.fullName}. [[target:/visit-workflow?highlight=prescription-${prescription.id}]]`
-        }),
+        prescription.visit.doctorId
+          ? notifyCenterUser({
+              centerId,
+              role: "DOCTOR",
+              userId: prescription.visit.doctorId,
+              type: "PRESCRIPTION_DISPENSED",
+              title: "تم صرف وصفة للمريض",
+              message: `تم صرف ${prescription.medicineName} للمريض ${prescription.visit.patient.fullName}. [[target:/visit-workflow?highlight=prescription-${prescription.id}]]`
+            })
+          : Promise.resolve(null),
         notifyRole({
           centerId,
           role: "PHARMACIST",
@@ -3859,16 +3890,19 @@ router.patch(
     if (payload.action === "MARK_UNAVAILABLE" || payload.action === "REQUEST_DOCTOR_REVIEW") {
       const needsReview = payload.action === "REQUEST_DOCTOR_REVIEW";
       await Promise.all([
-        notifyRole({
-          centerId,
-          role: "DOCTOR",
-          type: needsReview
-            ? "PRESCRIPTION_DOCTOR_REVIEW_REQUESTED"
-            : "PRESCRIPTION_MEDICATION_UNAVAILABLE",
-          title: needsReview ? "وصفة تحتاج مراجعة الطبيب" : "دواء غير متوفر",
-          message: `${prescription.visit.patient.fullName} - ${prescription.medicineName}: ${payload.reason}. [[target:/visit-workflow?highlight=prescription-${prescription.id}]]`,
-          severity: "WARNING"
-        }),
+        prescription.visit.doctorId
+          ? notifyCenterUser({
+              centerId,
+              role: "DOCTOR",
+              userId: prescription.visit.doctorId,
+              type: needsReview
+                ? "PRESCRIPTION_DOCTOR_REVIEW_REQUESTED"
+                : "PRESCRIPTION_MEDICATION_UNAVAILABLE",
+              title: needsReview ? "وصفة تحتاج مراجعة الطبيب" : "دواء غير متوفر",
+              message: `${prescription.visit.patient.fullName} - ${prescription.medicineName}: ${payload.reason}. [[target:/visit-workflow?highlight=prescription-${prescription.id}]]`,
+              severity: "WARNING"
+            })
+          : Promise.resolve(null),
         notifyLocalPatient({
           centerId,
           patientId: prescription.visit.patientId,
@@ -3903,7 +3937,10 @@ router.patch(
         status,
         patientId: prescription.visit.patientId,
         medicineId: prescription.medicineId,
-        medicineName: prescription.medicineName
+        medicineName: prescription.medicineName,
+        reason: payload.reason,
+        notes: payload.notes,
+        prescriptionCode: prescription.verificationCode
       }
     });
 
@@ -4036,7 +4073,9 @@ router.patch(
           decision: payload.decision,
           patientId: prescription.visit.patientId,
           medicineId: updated.medicineId,
-          medicineName: updated.medicineName
+          medicineName: updated.medicineName,
+          response: payload.response,
+          prescriptionCode: updated.verificationCode
         }
       })
     ]);
@@ -4073,8 +4112,14 @@ router.patch(
       }
     });
     const isLowStock = updated.quantity <= updated.reorderLevel;
+    const wasLowStock = existing.quantity <= existing.reorderLevel;
+    const quantityChanged = updated.quantity !== existing.quantity;
+    const thresholdChanged = updated.reorderLevel !== existing.reorderLevel;
+    const shouldEmitLowStock =
+      isLowStock && (quantityChanged || thresholdChanged) &&
+      (!wasLowStock || updated.quantity < existing.quantity || updated.reorderLevel > existing.reorderLevel);
 
-    if (isLowStock) {
+    if (shouldEmitLowStock) {
       await notifyRole({
         centerId,
         role: "PHARMACIST",
@@ -4086,7 +4131,7 @@ router.patch(
     }
 
     await recordAuditLog(req, {
-      action: isLowStock ? "INVENTORY_LOW_STOCK" : "INVENTORY_UPDATED",
+      action: "INVENTORY_UPDATED",
       entityType: "PharmacyInventoryLocal",
       entityId: updated.id,
       centerId,
@@ -4097,9 +4142,29 @@ router.patch(
       newValue: {
         medicineName: updated.medicineName,
         quantity: updated.quantity,
-        reorderLevel: updated.reorderLevel
+        reorderLevel: updated.reorderLevel,
+        ...(payload.reason ? { reason: payload.reason } : {})
       }
     });
+
+    if (shouldEmitLowStock) {
+      await recordAuditLog(req, {
+        action: "INVENTORY_LOW_STOCK",
+        entityType: "PharmacyInventoryLocal",
+        entityId: updated.id,
+        centerId,
+        oldValue: {
+          quantity: existing.quantity,
+          reorderLevel: existing.reorderLevel
+        },
+        newValue: {
+          medicineName: updated.medicineName,
+          quantity: updated.quantity,
+          reorderLevel: updated.reorderLevel,
+          ...(payload.reason ? { reason: payload.reason } : {})
+        }
+      });
+    }
 
     res.json({
       ...updated,
@@ -4129,7 +4194,80 @@ router.get(
       take: limit
     });
 
-    res.json(logs);
+    const prescriptionIds = logs
+      .filter((log) => log.entityType === "LocalPrescription" && log.entityId)
+      .map((log) => Number(log.entityId))
+      .filter(Number.isFinite);
+    const inventoryIds = logs
+      .filter((log) => log.entityType === "PharmacyInventoryLocal" && log.entityId)
+      .map((log) => Number(log.entityId))
+      .filter(Number.isFinite);
+    const [prescriptions, inventory] = await Promise.all([
+      prisma.localPrescription.findMany({
+        where: {
+          id: { in: prescriptionIds },
+          visit: { centerId: getCenterId(req) }
+        },
+        select: {
+          id: true,
+          verificationCode: true,
+          medicineName: true,
+          visit: {
+            select: {
+              patient: {
+                select: { fullName: true }
+              }
+            }
+          }
+        }
+      }),
+      prisma.pharmacyInventoryLocal.findMany({
+        where: {
+          id: { in: inventoryIds },
+          centerId: getCenterId(req)
+        },
+        select: {
+          id: true,
+          medicineName: true
+        }
+      })
+    ]);
+    const prescriptionById = new Map(prescriptions.map((item) => [item.id, item]));
+    const inventoryById = new Map(inventory.map((item) => [item.id, item]));
+
+    res.json(
+      logs.map((log) => {
+        const entityId = log.entityId ? Number(log.entityId) : null;
+        const prescription =
+          log.entityType === "LocalPrescription" && entityId
+            ? prescriptionById.get(entityId)
+            : null;
+        const inventoryItem =
+          log.entityType === "PharmacyInventoryLocal" && entityId
+            ? inventoryById.get(entityId)
+            : null;
+
+        return {
+          ...log,
+          related: prescription
+            ? {
+                kind: "prescription",
+                label: `وصفة ${prescription.verificationCode ?? `RX-${prescription.id}`}`,
+                patientName: prescription.visit.patient.fullName,
+                medicineName: prescription.medicineName,
+                targetUrl: `/pharmacy/prescriptions?highlight=prescription-${prescription.id}`
+              }
+            : inventoryItem
+              ? {
+                  kind: "inventory",
+                  label: `مخزون دواء ${inventoryItem.medicineName}`,
+                  medicineName: inventoryItem.medicineName,
+                  targetUrl: `/pharmacy/inventory?highlight=inventory-${inventoryItem.id}`
+                }
+              : null
+        };
+      })
+    );
   })
 );
 
@@ -4145,7 +4283,13 @@ router.get(
   "/notifications",
   authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"),
   asyncHandler(async (req, res) => {
-    res.json(await getCenterNotifications(getCenterId(req), req.auth!.role as CenterUserRole));
+    res.json(
+      await getCenterNotifications(
+        getCenterId(req),
+        req.auth!.role as CenterUserRole,
+        getActorCenterUserId(req)
+      )
+    );
   })
 );
 
@@ -4155,7 +4299,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const count = await prisma.centerSystemAlert.count({
       where: {
-        ...centerAlertWhere(getCenterId(req), req.auth!.role as CenterUserRole),
+        ...centerAlertWhere(getCenterId(req), req.auth!.role as CenterUserRole, getActorCenterUserId(req)),
         isResolved: false
       }
     });
@@ -4170,7 +4314,7 @@ router.patch(
   asyncHandler(async (req, res) => {
     const result = await prisma.centerSystemAlert.updateMany({
       where: {
-        ...centerAlertWhere(getCenterId(req), req.auth!.role as CenterUserRole),
+        ...centerAlertWhere(getCenterId(req), req.auth!.role as CenterUserRole, getActorCenterUserId(req)),
         isResolved: false
       },
       data: {
@@ -4190,7 +4334,7 @@ router.patch(
     const alert = await prisma.centerSystemAlert.findFirst({
       where: {
         id: notificationId,
-        ...centerAlertWhere(getCenterId(req), req.auth!.role as CenterUserRole)
+        ...centerAlertWhere(getCenterId(req), req.auth!.role as CenterUserRole, getActorCenterUserId(req))
       }
     });
 
@@ -4215,7 +4359,7 @@ router.patch(
     const alert = await prisma.centerSystemAlert.findFirst({
       where: {
         id: notificationId,
-        ...centerAlertWhere(getCenterId(req), req.auth!.role as CenterUserRole)
+        ...centerAlertWhere(getCenterId(req), req.auth!.role as CenterUserRole, getActorCenterUserId(req))
       }
     });
 

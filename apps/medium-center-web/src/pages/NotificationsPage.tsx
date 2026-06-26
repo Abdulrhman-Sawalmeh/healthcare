@@ -340,7 +340,7 @@ export function NotificationsPage() {
           action={
             unreadAlerts > 0 ? (
               <button className="ghost-button" type="button" onClick={() => void markAllRoleAlertsRead()}>
-                تعليم الكل كمقروء
+                تعيين الكل كمقروء
               </button>
             ) : null
           }

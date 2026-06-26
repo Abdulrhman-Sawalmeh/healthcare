@@ -63,6 +63,15 @@ const doctorAssessmentSchema = z.object({
     )
     .default([]),
   labTestIds: z.array(z.coerce.number().int().positive()).default([]),
+  labRequests: z
+    .array(
+      z.object({
+        testId: z.coerce.number().int().positive(),
+        reason: z.string().trim().max(1000).optional(),
+        clinicalNotes: z.string().trim().max(1000).optional()
+      })
+    )
+    .default([]),
   overridePrescriptionWarnings: z.boolean().optional(),
   overrideReason: z.string().trim().optional()
 });
@@ -885,6 +894,10 @@ router.patch(
     if (!doctorId) {
       return res.status(400).json({ message: "يجب تعيين طبيب للزيارة قبل تسجيل التقييم الطبي." });
     }
+    const requestedLabTestIds = [
+      ...payload.labTestIds,
+      ...payload.labRequests.map((request) => request.testId)
+    ];
 
     const result = await prisma.$transaction(async (tx) => {
       const medicineIds = payload.prescriptions.flatMap((prescription) =>
@@ -895,7 +908,7 @@ router.patch(
           where: { centerId, id: { in: medicineIds } }
         }),
         tx.labTestLocal.findMany({
-          where: { centerId, id: { in: payload.labTestIds } }
+          where: { centerId, id: { in: requestedLabTestIds } }
         })
       ]);
       const medicineById = new Map(medicines.map((medicine) => [medicine.id, medicine]));
@@ -903,7 +916,7 @@ router.patch(
       if (medicines.length !== new Set(medicineIds).size) {
         throw Object.assign(new Error("يتضمن الطلب دواء غير موجود في مخزون هذا المركز."), { statusCode: 400 });
       }
-      if (labTests.length !== new Set(payload.labTestIds).size) {
+      if (labTests.length !== new Set(requestedLabTestIds).size) {
         throw Object.assign(new Error("يتضمن الطلب فحصاً غير موجود في مختبر هذا المركز."), { statusCode: 400 });
       }
 
@@ -1020,15 +1033,26 @@ router.patch(
         });
       }
 
-      if (payload.labTestIds.length > 0) {
+      if (requestedLabTestIds.length > 0) {
         await tx.labRequestLocal.createMany({
-          data: payload.labTestIds.map((testId) => ({
-            centerId,
-            patientId: visit.patientId,
-            doctorId,
-            visitId,
-            testId
-          }))
+          data: [
+            ...payload.labTestIds.map((testId) => ({
+              centerId,
+              patientId: visit.patientId,
+              doctorId,
+              visitId,
+              testId
+            })),
+            ...payload.labRequests.map((request) => ({
+              centerId,
+              patientId: visit.patientId,
+              doctorId,
+              visitId,
+              testId: request.testId,
+              reason: request.reason,
+              clinicalNotes: request.clinicalNotes
+            }))
+          ]
         });
         await tx.visitWorkflowTask.create({
           data: {
@@ -1052,11 +1076,11 @@ router.patch(
       newValue: {
         diagnosis: payload.diagnosis,
         prescriptionCount: payload.prescriptions.length,
-        labRequestCount: payload.labTestIds.length
+        labRequestCount: requestedLabTestIds.length
       }
     });
 
-    if (payload.labTestIds.length > 0) {
+    if (requestedLabTestIds.length > 0) {
       await notifyRole({
         centerId,
         role: "LAB_TECH",

@@ -921,7 +921,11 @@ export async function getCenterPharmacyData(centerId: number) {
   }));
 }
 
-export async function getCenterNotifications(centerId: number, role?: CenterUserRole) {
+export async function getCenterNotifications(
+  centerId: number,
+  role?: CenterUserRole,
+  actorUserId?: number
+) {
   if (role === "LAB_TECH" || role === "PHARMACIST") {
     const rolePrefix =
       role === "LAB_TECH" ? "ROLE_LAB_TECH_LAB" : "ROLE_PHARMACIST_";
@@ -982,12 +986,32 @@ export async function getCenterNotifications(centerId: number, role?: CenterUser
                     startsWith: `ROLE_${role}_`
                   }
                 },
+                ...(actorUserId
+                  ? [
+                      {
+                        alertType: {
+                          startsWith: `USER_${role}_${actorUserId}_`
+                        }
+                      }
+                    ]
+                  : []),
                 {
-                  alertType: {
-                    not: {
-                      startsWith: "ROLE_"
+                  AND: [
+                    {
+                      alertType: {
+                        not: {
+                          startsWith: "ROLE_"
+                        }
+                      }
+                    },
+                    {
+                      alertType: {
+                        not: {
+                          startsWith: "USER_"
+                        }
+                      }
                     }
-                  }
+                  ]
                 }
               ]
             }

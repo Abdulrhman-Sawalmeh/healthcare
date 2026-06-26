@@ -1,5 +1,10 @@
 const labelMap: Record<string, string> = {
-  NEW: "جديد",
+  NEW: "وصفة جديدة",
+  UNDER_REVIEW: "قيد المراجعة",
+  PREPARING: "قيد التجهيز",
+  DISPENSED: "تم الصرف",
+  UNAVAILABLE: "غير متوفر",
+  NEEDS_DOCTOR_REVIEW: "تحتاج مراجعة الطبيب",
   PENDING_SAMPLE: "بانتظار العينة",
   SAMPLE_RECEIVED: "العينة مستلمة",
   IN_PROGRESS: "قيد الفحص",
@@ -130,7 +135,7 @@ const labelMap: Record<string, string> = {
   RETURNED_WITH_REASON: "معادة مع سبب",
   DOCTOR_APPROVED: "وافق الطبيب",
   PHARMACY_PREPARING: "قيد التجهيز",
-  READY_FOR_PICKUP: "جاهز للاستلام",
+  READY_FOR_PICKUP: "جاهزة للاستلام",
   COLLECTED: "تم الاستلام",
   REJECTED: "مرفوض",
   DONE: "منجز",
@@ -148,7 +153,23 @@ const labelMap: Record<string, string> = {
   UPDATE_PATIENT: "تحديث ملف مريض",
   CREATE_DOCTOR: "إنشاء حساب طبيب",
   UPDATE_DOCTOR: "تحديث حساب طبيب",
-  DISABLE_DOCTOR: "تعطيل حساب طبيب"
+  DISABLE_DOCTOR: "تعطيل حساب طبيب",
+  INFO: "معلومة",
+  WARNING: "تنبيه",
+  ERROR: "خطأ",
+  SYSTEM: "النظام الصحي",
+  PRESCRIPTION_RECEIVED: "وصلت وصفة جديدة",
+  PRESCRIPTION_VIEWED_BY_PHARMACIST: "تمت مراجعة الوصفة",
+  PRESCRIPTION_PREPARATION_STARTED: "بدأ تجهيز الوصفة",
+  PRESCRIPTION_READY_FOR_PICKUP: "وصفة جاهزة للاستلام",
+  PRESCRIPTION_DISPENSED: "تم صرف وصفة",
+  PRESCRIPTION_MEDICATION_UNAVAILABLE: "دواء غير متوفر",
+  PRESCRIPTION_DOCTOR_REVIEW_REQUESTED: "طُلبت مراجعة الطبيب",
+  PRESCRIPTION_DOCTOR_REVIEW_RESPONDED: "رد الطبيب على طلب المراجعة",
+  INVENTORY_LOW_STOCK: "مخزون منخفض",
+  INVENTORY_UPDATED: "تم تحديث المخزون",
+  PRESCRIPTION_VERIFIED: "تم التحقق من وصفة",
+  PharmacyInventoryLocal: "مخزون دواء"
 };
 
 function currentLocale() {

@@ -565,12 +565,17 @@ export function PatientMedicalRecordPage() {
             <article className="stack-item" key={prescription.id}>
               <div className="info-row">
                 <div>
-                  <strong>{prescription.medicineName}</strong>
-                  <p className="muted">
-                    {joinMeta([prescription.dosage, prescription.duration, prescription.instructions])}
-                  </p>
+                  <strong>اسم الدواء: {prescription.medicineName}</strong>
+                  <p className="muted">الجرعة: {prescription.dosage}</p>
                 </div>
-                <StatusBadge status={prescription.pharmacyStatus ?? (prescription.dispensed ? "DISPENSED" : "NEW")} />
+                <span className="status-badge neutral">{prescriptionStatusLabels[prescription.pharmacyStatus ?? "NEW"] ?? "قيد المتابعة"}</span>
+              </div>
+              <div className="pharmacy-prescription-details">
+                <div><span>الكمية</span><strong>{prescription.quantity}</strong></div>
+                <div><span>المدة</span><strong>{prescription.duration}</strong></div>
+                <div><span>تعليمات الاستخدام</span><strong>{prescription.instructions || "لا توجد تعليمات إضافية"}</strong></div>
+                <div><span>حالة الوصفة</span><strong>{prescriptionStatusLabels[prescription.pharmacyStatus ?? "NEW"] ?? "قيد المتابعة"}</strong></div>
+                <div><span>تاريخ آخر تحديث</span><strong>{formatDateTime(prescription.pharmacyUpdatedAt ?? prescription.issuedAt)}</strong></div>
               </div>
               <p className="muted">
                 {prescription.safeStatusMessage ?? "يجري تحديث حالة الوصفة."}

@@ -1,4 +1,4 @@
-import { type CSSProperties, type WheelEvent as ReactWheelEvent, useEffect, useState } from "react";
+import { type CSSProperties, type WheelEvent as ReactWheelEvent, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
@@ -34,6 +34,15 @@ function BellIcon() {
       <path d="M13.73 21a2 2 0 0 1-3.46 0" />
     </svg>
   );
+}
+
+function userInitials(name: string) {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("");
 }
 
 function summarizeUnreadMessages(threads: PortalThreadRecord[], currentRole: string) {
@@ -79,7 +88,9 @@ export function AppShell() {
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
   const [notificationBadgeCount, setNotificationBadgeCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [contentZoom, setContentZoom] = useState(0.9);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -361,6 +372,32 @@ export function AppShell() {
       window.removeEventListener("keydown", blockBrowserZoomKeys, { capture: true });
     };
   }, []);
+
+  useEffect(() => {
+    if (!showAccountMenu) {
+      return;
+    }
+
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (!accountMenuRef.current?.contains(event.target as Node)) {
+        setShowAccountMenu(false);
+      }
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setShowAccountMenu(false);
+      }
+    }
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [showAccountMenu]);
   if (loading) {
     return <div className="screen-center">جارٍ تحميل مساحة العمل...</div>;
   }
@@ -423,6 +460,15 @@ export function AppShell() {
       .sort((a, b) => b.to.length - a.to.length)[0] ?? displayNavigation[0];
   const isNestedPage = Boolean(currentNavigationItem && location.pathname !== currentNavigationItem.to);
   const isPatientPortal = user.role === "PATIENT" || user.workspace === "legacy";
+  const accountRows = ([
+    ["الاسم", user.fullName],
+    ["الدور", toArabicLabel(user.role)],
+    ["رقم الهاتف", user.phone],
+    ["البريد الإلكتروني", user.email],
+    ["التخصص", user.departmentName],
+    ["المركز", user.center?.name],
+    ["اسم المستخدم", user.username]
+  ] as Array<[string, string | null | undefined]>).filter((row): row is [string, string] => Boolean(row[1]));
 
   async function openSidebarAlert(alert: SidebarAlert) {
     if (alert.markReadPath && !alert.isRead) {
@@ -484,15 +530,38 @@ export function AppShell() {
             </NavLink>
           ))}
         </nav>
-        <div className="profile-card">
-          <p className="eyebrow">{toArabicLabel(user.role)}</p>
-          <h3>{user.fullName}</h3>
-          <p className="muted">
-            {user.center ? joinMeta([user.center.code, user.center.city]) : user.email ?? "-"}
-          </p>
-          <button className="ghost-button" onClick={logout} type="button">
-            تسجيل الخروج
+        <div className="account-menu-wrap" ref={accountMenuRef}>
+          <button
+            className="account-button"
+            type="button"
+            aria-expanded={showAccountMenu}
+            onClick={() => setShowAccountMenu((current) => !current)}
+          >
+            <span className="account-avatar">{userInitials(user.fullName)}</span>
+            <span>حسابي</span>
           </button>
+          {showAccountMenu ? (
+            <div className="account-menu" role="menu">
+              <div className="account-menu-header">
+                <span className="account-avatar">{userInitials(user.fullName)}</span>
+                <div>
+                  <strong>{user.fullName}</strong>
+                  <span>{toArabicLabel(user.role)}</span>
+                </div>
+              </div>
+              <dl className="account-details">
+                {accountRows.map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <button className="ghost-button account-logout-button" onClick={logout} type="button">
+                تسجيل الخروج
+              </button>
+            </div>
+          ) : null}
         </div>
       </aside>
 
@@ -511,8 +580,8 @@ export function AppShell() {
             className={showNotifications ? "topbar-icon-button active" : "topbar-icon-button"}
             type="button"
             aria-expanded={showNotifications}
-            aria-label={t("��� ��� ���������", "Open notification log")}
-            title={t("��� ���������", "Notification log")}
+            aria-label={t("فتح سجل الإشعارات", "Open notification log")}
+            title={t("سجل الإشعارات", "Notification log")}
             onClick={() => setShowNotifications((current) => !current)}
           >
             <BellIcon />

@@ -16,6 +16,7 @@ function statusClass(status: string) {
       "confirmed",
       "connected",
       "available",
+      "dispensed",
       "success",
       "receiving_manager_accepted",
       "visit_created"
@@ -33,6 +34,12 @@ function statusClass(status: string) {
       "warning",
       "syncing",
       "requested",
+      "new",
+      "under_review",
+      "preparing",
+      "ready_for_pickup",
+      "needs_doctor_review",
+      "low_stock",
       "auto_selected",
       "pending_receiving_manager",
       "assigned_to_doctor"
@@ -49,6 +56,7 @@ function statusClass(status: string) {
       "no_show",
       "expired",
       "error",
+      "unavailable",
       "suspended",
       "permanent_failure",
       "receiving_manager_rejected",
