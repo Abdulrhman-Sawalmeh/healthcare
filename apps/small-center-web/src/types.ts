@@ -121,6 +121,11 @@ export interface CenterWorkspaceData {
     openReferrals: number;
     labOpenRequests: number;
     lowStockItems: number;
+    doctorWaitingFiles?: number;
+    doctorTodayVisits?: number;
+    doctorInTreatment?: number;
+    doctorAssignedReferrals?: number;
+    doctorActionNotifications?: number;
   };
   financial: {
     invoices: {

@@ -8,12 +8,20 @@ import { StatusBadge } from "../components/StatusBadge";
 import { isRouteEnabled } from "../config/system";
 import { useAuth } from "../context/AuthContext";
 import { formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
-import { CenterWorkspaceData, CentralDashboardData, Role } from "../types";
+import { buildDoctorActionNotifications, DoctorVisitFileNotificationSource } from "../lib/doctor-notifications";
+import {
+  CenterNotificationsBundle,
+  CenterWorkspaceData,
+  CentralDashboardData,
+  PortalThreadRecord,
+  Role
+} from "../types";
 
 export function DashboardPage() {
   const { user } = useAuth();
   const [centralData, setCentralData] = useState<CentralDashboardData | null>(null);
   const [centerData, setCenterData] = useState<CenterWorkspaceData | null>(null);
+  const [doctorActionNotificationCount, setDoctorActionNotificationCount] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -22,25 +30,51 @@ export function DashboardPage() {
       return;
     }
 
-    const path = user.workspace === "central" ? "/central/dashboard" : "/center/dashboard";
+    const currentUser = user;
+    const path = currentUser.workspace === "central" ? "/central/dashboard" : "/center/dashboard";
 
-    apiRequest<CentralDashboardData | CenterWorkspaceData>(path)
-      .then((payload) => {
-        if (user.workspace === "central") {
+    async function loadDashboard() {
+      setLoading(true);
+      setDoctorActionNotificationCount(0);
+
+      try {
+        const payload = await apiRequest<CentralDashboardData | CenterWorkspaceData>(path);
+
+        if (currentUser.workspace === "central") {
           setCentralData(payload as CentralDashboardData);
           setCenterData(null);
         } else {
           setCenterData(payload as CenterWorkspaceData);
           setCentralData(null);
         }
+
+        if (currentUser.workspace === "center" && currentUser.role === "DOCTOR") {
+          const [notificationsResult, threadsResult, visitFilesResult] = await Promise.allSettled([
+            apiRequest<CenterNotificationsBundle>("/center/notifications"),
+            apiRequest<PortalThreadRecord[]>("/portal/communications/threads"),
+            apiRequest<DoctorVisitFileNotificationSource[]>("/center/visit-workflow?status=WAITING_DOCTOR")
+          ]);
+
+          const actionItems = buildDoctorActionNotifications({
+            centerBundle: notificationsResult.status === "fulfilled" ? notificationsResult.value : null,
+            threads: threadsResult.status === "fulfilled" ? threadsResult.value : [],
+            visitFiles: visitFilesResult.status === "fulfilled" ? visitFilesResult.value : [],
+            role: currentUser.role,
+            workspace: currentUser.workspace
+          });
+
+          setDoctorActionNotificationCount(actionItems.length);
+        }
+
         setError("");
-      })
-      .catch((cause: Error) => {
-        setError(cause.message);
-      })
-      .finally(() => {
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "تعذر تحميل لوحة المتابعة.");
+      } finally {
         setLoading(false);
-      });
+      }
+    }
+
+    void loadDashboard();
   }, [user]);
 
   const centersRoute = isRouteEnabled("/centers") ? "/centers" : undefined;
@@ -76,10 +110,6 @@ export function DashboardPage() {
       default:
         return notificationsRoute ?? patientsRoute ?? visitsRoute;
     }
-  }
-
-  function formatCurrency(value: number) {
-    return `${Math.round(value).toLocaleString()} شيكل`;
   }
 
   if (loading) {
@@ -305,6 +335,134 @@ export function DashboardPage() {
     return <div className="empty-state">لا توجد بيانات متاحة لهذه الواجهة.</div>;
   }
 
+  if (user?.role === "DOCTOR") {
+    return (
+      <div className="page-stack">
+        <div className="hero-strip">
+          <div>
+            <p className="eyebrow">مساحة الطبيب</p>
+            <h1>متابعة الزيارات والإحالات السريرية</h1>
+          </div>
+          <p className="muted">
+            تعرض هذه اللوحة ملفات الزيارة المرتبطة بك، والإحالات المسندة لك، والتنبيهات التي تحتاج متابعة سريرية.
+          </p>
+        </div>
+
+        <div className="metric-grid">
+          <MetricCard
+            label="ملفات بانتظارك"
+            value={centerData.stats.doctorWaitingFiles ?? 0}
+            helper="زيارات تحتاج بدء المعالجة أو استكمال تقييم الطبيب."
+            to={visitsRoute}
+            actionHint="اضغط لفتح ملفات الزيارة."
+          />
+          <MetricCard
+            label="زيارات اليوم"
+            value={centerData.stats.doctorTodayVisits ?? 0}
+            helper="عدد الزيارات المسجلة لك بتاريخ اليوم."
+            to={visitsRoute}
+            actionHint="اضغط لمراجعة زيارات اليوم."
+          />
+          <MetricCard
+            label="قيد المعالجة"
+            value={centerData.stats.doctorInTreatment ?? 0}
+            helper="ملفات بدأت معالجتها ولم تكتمل بعد."
+            to={visitsRoute}
+            actionHint="اضغط للمتابعة."
+          />
+          <MetricCard
+            label="إحالات مسندة لي"
+            value={centerData.stats.doctorAssignedReferrals ?? 0}
+            helper="إحالات قبلها المركز وتم إسنادها لك."
+            to={referralsRoute ? `${referralsRoute}?view=assigned` : undefined}
+            actionHint="اضغط لفتح إحالاتك."
+          />
+          <MetricCard
+            label="تنبيهات تحتاج إجراء"
+            value={doctorActionNotificationCount}
+            helper="إشعارات سريرية مرتبطة بدور الطبيب."
+            to={notificationsRoute}
+            actionHint="اضغط لفتح الإشعارات."
+          />
+        </div>
+
+        <div className="split-grid">
+          <SectionCard
+            title="زياراتي الأخيرة"
+            subtitle="آخر ملفات الزيارة المسندة للطبيب الحالي."
+            action={renderSectionAction(visitsRoute, "فتح ملفات الزيارة")}
+          >
+            {centerData.recentVisits.length === 0 ? (
+              <div className="empty-state compact">لا توجد زيارات مسندة لك حاليًا.</div>
+            ) : (
+              <div className="stack-list">
+                {centerData.recentVisits.map((visit) =>
+                  visitsRoute ? (
+                    <Link key={visit.id} className="stack-item interactive-card" to={visitsRoute}>
+                      <div className="info-row">
+                        <div>
+                          <strong>{visit.patientName}</strong>
+                          <p className="muted">{joinMeta([toArabicLabel(visit.visitType), visit.diagnosis])}</p>
+                        </div>
+                        <StatusBadge status={visit.syncState} />
+                      </div>
+                      <div className="tile-stats">
+                        <span>{formatDateTime(visit.visitDate)}</span>
+                        <span>{visit.prescriptionCount} وصفات لهذه الزيارة</span>
+                      </div>
+                      <p className="action-hint">اضغط لفتح الزيارة ومراجعة التقارير.</p>
+                    </Link>
+                  ) : (
+                    <article key={visit.id} className="stack-item">
+                      <strong>{visit.patientName}</strong>
+                      <p className="muted">{joinMeta([toArabicLabel(visit.visitType), visit.diagnosis])}</p>
+                    </article>
+                  )
+                )}
+              </div>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="إحالاتي السريرية"
+            subtitle="الإحالات المرتبطة بالطبيب الحالي للبدء أو المتابعة أو الإغلاق."
+            action={renderSectionAction(referralsRoute ? `${referralsRoute}?view=assigned` : undefined, "فتح الإحالات")}
+          >
+            {centerData.referrals.length === 0 ? (
+              <div className="empty-state compact">لا توجد إحالات مسندة لك حاليًا.</div>
+            ) : (
+              <div className="stack-list">
+                {centerData.referrals.map((referral) =>
+                  referralsRoute ? (
+                    <Link
+                      key={referral.id}
+                      className="stack-item interactive-card"
+                      to={`${referralsRoute}?view=assigned&referralId=${referral.id}`}
+                    >
+                      <div className="info-row">
+                        <div>
+                          <strong>{referral.patientName}</strong>
+                          <p className="muted">{joinMeta([referral.requiredSpecialty, toArabicLabel(referral.priority)])}</p>
+                        </div>
+                        <StatusBadge status={referral.status} />
+                      </div>
+                      <p className="muted">{formatDateTime(referral.requestedAt)}</p>
+                    </Link>
+                  ) : (
+                    <article key={referral.id} className="stack-item">
+                      <strong>{referral.patientName}</strong>
+                      <p className="muted">{referral.requiredSpecialty}</p>
+                    </article>
+                  )
+                )}
+              </div>
+            )}
+          </SectionCard>
+        </div>
+      </div>
+    );
+  }
+
   const labOrInventoryRoute = user?.center?.hasLabModule
     ? labRoute ?? notificationsRoute ?? visitsRoute
     : pharmacyRoute ?? notificationsRoute ?? patientsRoute;
@@ -370,69 +528,6 @@ export function DashboardPage() {
           actionHint={user?.center?.hasLabModule ? "اضغط لفتح صفحة المتابعة المناسبة." : "اضغط لفتح صفحة المتابعة المناسبة."}
         />
       </div>
-
-      {user?.role !== "DOCTOR" ? (
-      <SectionCard
-        title="الإدارة المالية"
-        subtitle="الفواتير، واستخدام الميزانية، وتصنيف تكاليف التشغيل داخل هذا المركز."
-      >
-        <div className="metric-grid">
-          <MetricCard
-            label="إجمالي الفواتير"
-            value={formatCurrency(centerData.financial.invoices.total)}
-            helper={`${centerData.financial.invoices.count} فواتير مسجلة للمرضى.`}
-          />
-          <MetricCard
-            label="الفواتير غير المسددة"
-            value={formatCurrency(centerData.financial.invoices.outstanding)}
-            helper={`${centerData.financial.invoices.unpaidCount} فواتير ما زالت غير مدفوعة أو مدفوعة جزئيًا.`}
-          />
-          <MetricCard
-            label="المستخدم من الميزانية"
-            value={`${centerData.financial.budget.utilizationRate}%`}
-            helper={`${formatCurrency(centerData.financial.budget.projectedSpend)} إنفاق متوقع من ميزانية شهرية قدرها ${formatCurrency(centerData.financial.budget.monthlyLimit)}.`}
-          />
-          <MetricCard
-            label="المتبقي من الميزانية"
-            value={formatCurrency(centerData.financial.budget.remaining)}
-            helper="المبلغ المتبقي بعد احتساب الموظفين والأدوية والمعدات وحمل المرضى."
-          />
-        </div>
-        <div className="table-shell">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>الفئة</th>
-                <th>المبلغ</th>
-                <th>أساس الاحتساب</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>الموظفون</td>
-                <td>{formatCurrency(centerData.financial.expenses.staff)}</td>
-                <td>الحسابات النشطة للإدارة والأطباء والاستقبال وفريق الرعاية.</td>
-              </tr>
-              <tr>
-                <td>الأدوية</td>
-                <td>{formatCurrency(centerData.financial.expenses.medications)}</td>
-                <td>قيمة مخزون الصيدلية الحالي.</td>
-              </tr>
-              <tr>
-                <td>المعدات</td>
-                <td>{formatCurrency(centerData.financial.expenses.equipment)}</td>
-                <td>كتالوج المختبر والطاقة المتاحة لغرف العمليات.</td>
-              </tr>
-              <tr>
-                <td>المرضى</td>
-                <td>{formatCurrency(centerData.financial.expenses.patients)}</td>
-                <td>تقدير تكلفة التشغيل لحمل المرضى المحلي.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </SectionCard>
-      ) : null}
 
       <div className="split-grid">
         <SectionCard

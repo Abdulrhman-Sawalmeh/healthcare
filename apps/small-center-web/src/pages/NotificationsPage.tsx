@@ -6,8 +6,22 @@ import { SectionCard } from "../components/SectionCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAuth } from "../context/AuthContext";
 import { formatDateTime, toArabicLabel } from "../lib/arabic";
+import { buildDoctorActionNotifications, DoctorVisitFileNotificationSource } from "../lib/doctor-notifications";
 import { resolveNotificationPath } from "../lib/notification-routing";
-import { CenterNotificationsBundle, CentralNotificationsBundle } from "../types";
+import { CenterNotificationsBundle, CentralNotificationsBundle, PortalThreadRecord } from "../types";
+
+type CenterNotificationView =
+  | "action"
+  | "recent"
+  | "alerts"
+  | "logs"
+  | "referrals"
+  | "visits"
+  | "prescriptions"
+  | "messages"
+  | "completed"
+  | "pending"
+  | "failed";
 
 function isActivationKey(event: KeyboardEvent<HTMLElement>) {
   return event.key === "Enter" || event.key === " ";
@@ -18,8 +32,11 @@ export function NotificationsPage() {
   const navigate = useNavigate();
   const [centralBundle, setCentralBundle] = useState<CentralNotificationsBundle | null>(null);
   const [centerBundle, setCenterBundle] = useState<CenterNotificationsBundle | null>(null);
+  const [doctorThreads, setDoctorThreads] = useState<PortalThreadRecord[]>([]);
+  const [doctorVisitFiles, setDoctorVisitFiles] = useState<DoctorVisitFileNotificationSource[]>([]);
   const [error, setError] = useState("");
   const [processing, setProcessing] = useState(false);
+  const [centerView, setCenterView] = useState<CenterNotificationView>("action");
 
   async function loadData() {
     if (!user) {
@@ -29,10 +46,32 @@ export function NotificationsPage() {
     if (user.workspace === "central") {
       setCentralBundle(await apiRequest<CentralNotificationsBundle>("/central/notifications"));
       setCenterBundle(null);
+      setDoctorThreads([]);
+      setDoctorVisitFiles([]);
+      return;
+    }
+
+    if (user.role === "DOCTOR") {
+      const [notificationsResult, threadsResult, visitFilesResult] = await Promise.allSettled([
+        apiRequest<CenterNotificationsBundle>("/center/notifications"),
+        apiRequest<PortalThreadRecord[]>("/portal/communications/threads"),
+        apiRequest<DoctorVisitFileNotificationSource[]>("/center/visit-workflow?status=WAITING_DOCTOR")
+      ]);
+
+      if (notificationsResult.status === "rejected") {
+        throw notificationsResult.reason;
+      }
+
+      setCenterBundle(notificationsResult.value);
+      setDoctorThreads(threadsResult.status === "fulfilled" ? threadsResult.value : []);
+      setDoctorVisitFiles(visitFilesResult.status === "fulfilled" ? visitFilesResult.value : []);
+      setCentralBundle(null);
       return;
     }
 
     setCenterBundle(await apiRequest<CenterNotificationsBundle>("/center/notifications"));
+    setDoctorThreads([]);
+    setDoctorVisitFiles([]);
     setCentralBundle(null);
   }
 
@@ -237,11 +276,72 @@ export function NotificationsPage() {
     return <div className="empty-state">جارٍ تحميل الإشعارات...</div>;
   }
 
+  const actionIncoming = centerBundle.incoming.filter((item) => item.status !== "COMPLETED");
+  const actionOutgoing = centerBundle.outgoing.filter((item) => item.status !== "COMPLETED");
+  const isDoctor = user?.role === "DOCTOR";
+  const doctorActionItems = isDoctor
+    ? buildDoctorActionNotifications({
+        centerBundle,
+        threads: doctorThreads,
+        visitFiles: doctorVisitFiles,
+        role: user?.role,
+        workspace: user?.workspace
+      })
+    : [];
+  const showDoctorActionList = isDoctor && centerView === "action";
+  const showDoctorMessageList = isDoctor && centerView === "messages";
+  const doctorMessageItems = doctorActionItems.filter((item) => item.id === "doctor-messages");
+  const doctorVisitFileItems = doctorActionItems.filter((item) => item.id.startsWith("visit-file-"));
+  const showDoctorVisitFileList = isDoctor && centerView === "visits";
+  const isPendingStatus = (status: string) => ["PENDING", "PROCESSING", "SENT", "ACKNOWLEDGED"].includes(status);
+  const isFailedStatus = (status: string) => ["FAILED", "PERMANENT_FAILURE"].includes(status);
+  const matchesDoctorView = (type: string, status: string, title = "", message = "") => {
+    const searchable = `${type} ${title} ${message}`.toUpperCase();
+
+    if (centerView === "action") return status !== "COMPLETED";
+    if (centerView === "referrals") return searchable.includes("REFERRAL") || searchable.includes("إحالة");
+    if (centerView === "visits") return searchable.includes("VISIT") || searchable.includes("زيارة");
+    if (centerView === "prescriptions") return searchable.includes("PRESCRIPTION") || searchable.includes("وصفة");
+    if (centerView === "messages") return searchable.includes("MESSAGE") || searchable.includes("رسالة");
+    if (centerView === "completed") return status === "COMPLETED";
+    if (centerView === "pending") return isPendingStatus(status);
+    if (centerView === "failed") return isFailedStatus(status);
+    return true;
+  };
+  const visibleIncoming = isDoctor
+    ? centerBundle.incoming.filter((item) => matchesDoctorView(item.notificationType, item.status))
+    : centerView === "action"
+      ? actionIncoming
+      : centerBundle.incoming;
+  const visibleOutgoing = isDoctor
+    ? centerBundle.outgoing.filter((item) => matchesDoctorView(item.notificationType, item.status))
+    : centerView === "action"
+      ? actionOutgoing
+      : centerBundle.outgoing;
+  const visibleAlerts = isDoctor
+    ? centerBundle.alerts.filter((alert) => matchesDoctorView(alert.severity, alert.isResolved ? "COMPLETED" : "PENDING", alert.title, alert.message))
+    : centerBundle.alerts;
+  const showQueues = isDoctor
+    ? !showDoctorActionList &&
+      !showDoctorMessageList &&
+      !showDoctorVisitFileList &&
+      centerView !== "alerts" &&
+      centerView !== "logs"
+    : centerView === "action" || centerView === "recent";
+  const showAlerts = isDoctor
+    ? !showDoctorActionList && !showDoctorMessageList && !showDoctorVisitFileList && centerView !== "logs"
+    : centerView === "alerts" || centerView === "recent";
+  const showLogs = centerView === "logs";
+
   return (
     <div className="page-stack">
       <SectionCard
-        title="مراقبة الإشعارات المحلية"
-        subtitle="متابعة الإشعارات الواردة من النظام المركزي، والمحاولات الصادرة، والتنبيهات التشغيلية."
+        title={isDoctor ? "إشعارات الطبيب" : "مراقبة الإشعارات المحلية"}
+        subtitle={
+          isDoctor
+            ? "تنبيهات سريرية وإحالات ورسائل تحتاج متابعة من الطبيب."
+            : "متابعة الإشعارات الواردة من النظام المركزي، والمحاولات الصادرة، والتنبيهات التشغيلية."
+        }
         action={
           user?.role === "CENTER_MANAGER" ? (
             <button className="primary-button" type="button" onClick={() => void processQueues()}>
@@ -252,11 +352,101 @@ export function NotificationsPage() {
       >
         {error ? <div className="error-banner">{error}</div> : null}
 
+        {isDoctor ? (
+          <div className="chip-row">
+            <button className={centerView === "action" ? "primary-button" : "ghost-button"} onClick={() => setCenterView("action")} type="button">تحتاج إجراء</button>
+            <button className={centerView === "referrals" ? "primary-button" : "ghost-button"} onClick={() => setCenterView("referrals")} type="button">الإحالات</button>
+            <button className={centerView === "visits" ? "primary-button" : "ghost-button"} onClick={() => setCenterView("visits")} type="button">الزيارات</button>
+            <button className={centerView === "prescriptions" ? "primary-button" : "ghost-button"} onClick={() => setCenterView("prescriptions")} type="button">الوصفات</button>
+            <button className={centerView === "messages" ? "primary-button" : "ghost-button"} onClick={() => setCenterView("messages")} type="button">الرسائل الطبية</button>
+            <button className={centerView === "completed" ? "primary-button" : "ghost-button"} onClick={() => setCenterView("completed")} type="button">مكتمل</button>
+            <button className={centerView === "pending" ? "primary-button" : "ghost-button"} onClick={() => setCenterView("pending")} type="button">قيد الانتظار</button>
+            <button className={centerView === "failed" ? "primary-button" : "ghost-button"} onClick={() => setCenterView("failed")} type="button">فشل</button>
+            <button className={centerView === "logs" ? "primary-button" : "ghost-button"} onClick={() => setCenterView("logs")} type="button">السجل التقني</button>
+          </div>
+        ) : (
+          <div className="chip-row">
+            <button className={centerView === "action" ? "primary-button" : "ghost-button"} onClick={() => setCenterView("action")} type="button">
+              يحتاج متابعة
+            </button>
+            <button className={centerView === "recent" ? "primary-button" : "ghost-button"} onClick={() => setCenterView("recent")} type="button">
+              الأحدث
+            </button>
+            <button className={centerView === "alerts" ? "primary-button" : "ghost-button"} onClick={() => setCenterView("alerts")} type="button">
+              تنبيهات النظام
+            </button>
+            <button className={centerView === "logs" ? "primary-button" : "ghost-button"} onClick={() => setCenterView("logs")} type="button">
+              السجل التقني
+            </button>
+          </div>
+        )}
+
+        {showDoctorActionList ? (
+          <div className="stack-list">
+            {doctorActionItems.map((item) => (
+              <article key={item.id} {...interactiveProps(item.to)}>
+                <div className="info-row">
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p className="muted">{item.helper}</p>
+                  </div>
+                  <StatusBadge status={item.status} />
+                </div>
+                <span className="muted">{formatDateTime(item.createdAt)}</span>
+              </article>
+            ))}
+            {doctorActionItems.length === 0 ? (
+              <div className="empty-state compact">لا توجد إشعارات تحتاج إجراء حاليًا.</div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {showDoctorMessageList ? (
+          <div className="stack-list">
+            {doctorMessageItems.map((item) => (
+              <article key={item.id} {...interactiveProps(item.to)}>
+                <div className="info-row">
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p className="muted">{item.helper}</p>
+                  </div>
+                  <StatusBadge status={item.status} />
+                </div>
+                <span className="muted">{formatDateTime(item.createdAt)}</span>
+              </article>
+            ))}
+            {doctorMessageItems.length === 0 ? (
+              <div className="empty-state compact">لا توجد رسائل طبية تحتاج ردًا حاليًا.</div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {showDoctorVisitFileList ? (
+          <div className="stack-list">
+            {doctorVisitFileItems.map((item) => (
+              <article key={item.id} {...interactiveProps(item.to)}>
+                <div className="info-row">
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p className="muted">{item.helper}</p>
+                  </div>
+                  <StatusBadge status={item.status} />
+                </div>
+                <span className="muted">{formatDateTime(item.createdAt)}</span>
+              </article>
+            ))}
+            {doctorVisitFileItems.length === 0 ? (
+              <div className="empty-state compact">لا توجد ملفات زيارة بانتظارك حاليًا.</div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {showQueues ? (
         <div className="split-grid">
           <div className="section-card inset-card">
             <h3>وارد من النظام المركزي</h3>
             <div className="stack-list">
-              {centerBundle.incoming.map((item) => {
+              {visibleIncoming.map((item) => {
                 const path = resolveNotificationPath({
                   role: user?.role,
                   workspace: user?.workspace,
@@ -277,13 +467,14 @@ export function NotificationsPage() {
                   </article>
                 );
               })}
+              {visibleIncoming.length === 0 ? <div className="empty-state compact">لا توجد إشعارات واردة تحتاج متابعة.</div> : null}
             </div>
           </div>
 
           <div className="section-card inset-card">
             <h3>صادر إلى النظام المركزي</h3>
             <div className="stack-list">
-              {centerBundle.outgoing.map((item) => {
+              {visibleOutgoing.map((item) => {
                 const path = resolveNotificationPath({
                   role: user?.role,
                   workspace: user?.workspace,
@@ -315,15 +506,18 @@ export function NotificationsPage() {
                   </article>
                 );
               })}
+              {visibleOutgoing.length === 0 ? <div className="empty-state compact">لا توجد إشعارات صادرة تحتاج متابعة.</div> : null}
             </div>
           </div>
         </div>
+        ) : null}
       </SectionCard>
 
       <div className="split-grid">
+        {showAlerts ? (
         <SectionCard title="تنبيهات النظام" subtitle="تنبيهات وتحذيرات يراجعها مدير المركز.">
           <div className="stack-list">
-            {centerBundle.alerts.map((alert) => {
+            {visibleAlerts.map((alert) => {
               const path = resolveNotificationPath({
                 role: user?.role,
                 workspace: user?.workspace,
@@ -345,10 +539,13 @@ export function NotificationsPage() {
                 </article>
               );
             })}
+            {visibleAlerts.length === 0 ? <div className="empty-state compact">لا توجد تنبيهات ضمن هذا التصنيف.</div> : null}
           </div>
         </SectionCard>
+        ) : null}
 
-        <SectionCard title="سجل المعالجة" subtitle="آخر الإجراءات التي نُفذت على طوابير الإشعارات داخل المركز.">
+        {showLogs ? (
+        <SectionCard title="السجل التقني" subtitle="سجل مختصر للمراجعة عند الحاجة فقط.">
           <div className="stack-list">
             {centerBundle.logs.map((log) => {
               const path = resolveNotificationPath({
@@ -373,6 +570,7 @@ export function NotificationsPage() {
             })}
           </div>
         </SectionCard>
+        ) : null}
       </div>
     </div>
   );

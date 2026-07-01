@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
@@ -26,27 +26,33 @@ const workDays: Array<{ value: WorkDay; label: string }> = [
   { value: "SATURDAY", label: "السبت" }
 ];
 
-const defaultForm = {
-  username: "",
-  password: "",
-  fullName: "",
-  nationalId: "",
-  phone: "",
-  email: "",
-  gender: "PREFER_NOT_TO_SAY",
-  specialization: "",
-  yearsExperience: "0",
-  licenseNumber: "",
-  qualification: "",
-  shiftDays: [] as WorkDay[],
-  shiftStartTime: "08:00",
-  shiftEndTime: "14:00",
-  consultationRoom: "",
-  hireDate: "",
-  bio: "",
-  notes: "",
-  isActive: true
-};
+function generateTemporaryPassword() {
+  return `Doc@${Math.floor(100000 + Math.random() * 900000)}`;
+}
+
+function createDefaultForm() {
+  return {
+    username: "",
+    password: generateTemporaryPassword(),
+    fullName: "",
+    nationalId: "",
+    phone: "",
+    email: "",
+    gender: "PREFER_NOT_TO_SAY",
+    specialization: "",
+    yearsExperience: "0",
+    licenseNumber: "",
+    qualification: "",
+    shiftDays: [] as WorkDay[],
+    shiftStartTime: "08:00",
+    shiftEndTime: "14:00",
+    consultationRoom: "",
+    hireDate: "",
+    bio: "",
+    notes: "",
+    isActive: true
+  };
+}
 
 function formatShiftSummary(doctor: CenterDoctorAccountRecord) {
   if (!doctor.profile) {
@@ -63,12 +69,16 @@ export function CenterDoctorsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [form, setForm] = useState(defaultForm);
+  const [form, setForm] = useState(createDefaultForm);
   const [editingDoctorId, setEditingDoctorId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [deletingDoctorId, setDeletingDoctorId] = useState<number | null>(null);
+  const [deactivatingDoctorId, setDeactivatingDoctorId] = useState<number | null>(null);
 
   const canManage = user?.role === "CENTER_MANAGER";
+  const specialtyOptions = useMemo(
+    () => Array.from(new Set(bundle?.specialtyOptions.map((specialty) => specialty.trim()).filter(Boolean) ?? [])),
+    [bundle?.specialtyOptions]
+  );
 
   async function loadDoctors() {
     const payload = await apiRequest<CenterDoctorsBundle>("/center/doctors");
@@ -82,8 +92,27 @@ export function CenterDoctorsPage() {
   }, []);
 
   function resetForm() {
-    setForm(defaultForm);
+    setForm(createDefaultForm());
     setEditingDoctorId(null);
+  }
+
+  function regeneratePassword() {
+    setForm((current) => ({ ...current, password: generateTemporaryPassword() }));
+  }
+
+  async function copyText(value: string, success: string) {
+    if (!value) {
+      setError("لا توجد قيمة جاهزة للنسخ.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(value);
+      setError("");
+      setSuccessMessage(success);
+    } catch {
+      setError("تعذر النسخ تلقائيًا. يمكنك تحديد القيمة ونسخها يدويًا.");
+    }
   }
 
   function toggleShiftDay(day: WorkDay) {
@@ -127,6 +156,13 @@ export function CenterDoctorsPage() {
 
     const path = editingDoctorId ? `/center/doctors/${editingDoctorId}` : "/center/doctors";
     const method = editingDoctorId ? "PUT" : "POST";
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (form.email && !emailPattern.test(form.email)) {
+      setError("أدخل بريدًا إلكترونيًا صحيحًا مثل name@example.com.");
+      setSuccessMessage("");
+      return;
+    }
 
     try {
       setSubmitting(true);
@@ -171,27 +207,52 @@ export function CenterDoctorsPage() {
     }
   }
 
-  async function handleDelete(doctor: CenterDoctorAccountRecord) {
-    if (!window.confirm(`هل تريد حذف حساب الطبيب ${doctor.fullName}؟`)) {
+  async function handleDeactivate(doctor: CenterDoctorAccountRecord) {
+    if (!doctor.profile) {
+      setError("لا يمكن تعطيل الحساب قبل اكتمال الملف المهني للطبيب.");
+      return;
+    }
+
+    if (!window.confirm(`سيتم تعطيل دخول الطبيب ${doctor.fullName} مع إبقاء سجلاته القديمة. هل تريد المتابعة؟`)) {
       return;
     }
 
     try {
-      setDeletingDoctorId(doctor.id);
+      setDeactivatingDoctorId(doctor.id);
       await apiRequest(`/center/doctors/${doctor.id}`, {
-        method: "DELETE"
+        method: "PUT",
+        body: JSON.stringify({
+          username: doctor.username,
+          fullName: doctor.fullName,
+          nationalId: doctor.profile.nationalId,
+          phone: doctor.phone ?? "",
+          email: doctor.email || undefined,
+          gender: doctor.profile.gender,
+          specialization: doctor.profile.specialization,
+          yearsExperience: doctor.profile.yearsExperience,
+          licenseNumber: doctor.profile.licenseNumber,
+          qualification: doctor.profile.qualification || undefined,
+          shiftDays: doctor.profile.shiftDays,
+          shiftStartTime: doctor.profile.shiftStartTime,
+          shiftEndTime: doctor.profile.shiftEndTime,
+          consultationRoom: doctor.profile.consultationRoom || undefined,
+          hireDate: doctor.profile.hireDate?.slice(0, 10) || undefined,
+          bio: doctor.profile.bio || undefined,
+          notes: doctor.profile.notes || undefined,
+          isActive: false
+        })
       });
       if (editingDoctorId === doctor.id) {
         resetForm();
       }
       await loadDoctors();
       setError("");
-      setSuccessMessage(`تم حذف حساب الطبيب ${doctor.fullName}.`);
+      setSuccessMessage(`تم تعطيل حساب الطبيب ${doctor.fullName} مع إبقاء السجلات المرتبطة به.`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذر حذف حساب الطبيب.");
+      setError(cause instanceof Error ? cause.message : "تعذر تعطيل حساب الطبيب.");
       setSuccessMessage("");
     } finally {
-      setDeletingDoctorId(null);
+      setDeactivatingDoctorId(null);
     }
   }
 
@@ -235,22 +296,37 @@ export function CenterDoctorsPage() {
             }
           >
             <form className="form-grid" onSubmit={handleSubmit}>
+              <div className="form-section-title field-span-2">بيانات الدخول</div>
               <label className="field">
-                <span>اسم المستخدم</span>
+                <span>رقم الهوية / اسم الدخول</span>
                 <input
                   value={form.username}
                   onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
-                  placeholder="doctor.new"
+                  placeholder="سيُجهز النظام اسم الدخول بعد الحفظ"
                 />
               </label>
               <label className="field">
                 <span>{editingDoctorId ? "كلمة مرور جديدة" : "كلمة المرور المؤقتة"}</span>
-                <input
-                  type="password"
-                  value={form.password}
-                  onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
-                />
+                <div className="inline-field-actions">
+                  <input
+                    dir="ltr"
+                    type="text"
+                    value={form.password}
+                    onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                  />
+                  <button className="ghost-button compact-button" onClick={regeneratePassword} type="button">
+                    توليد
+                  </button>
+                  <button
+                    className="ghost-button compact-button"
+                    onClick={() => void copyText(form.password, "تم نسخ كلمة المرور المؤقتة.")}
+                    type="button"
+                  >
+                    نسخ
+                  </button>
+                </div>
               </label>
+              <div className="form-section-title field-span-2">البيانات الشخصية</div>
               <label className="field">
                 <span>الاسم الكامل</span>
                 <input
@@ -268,15 +344,20 @@ export function CenterDoctorsPage() {
               <label className="field">
                 <span>رقم الهاتف</span>
                 <input
+                  dir="ltr"
                   value={form.phone}
                   onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
+                  placeholder="05X XXX XXXX"
                 />
               </label>
               <label className="field">
                 <span>البريد الإلكتروني</span>
                 <input
+                  dir="ltr"
+                  type="email"
                   value={form.email}
                   onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                  placeholder="name@example.com"
                 />
               </label>
               <label className="field">
@@ -291,6 +372,7 @@ export function CenterDoctorsPage() {
                   <option value="PREFER_NOT_TO_SAY">{toArabicLabel("PREFER_NOT_TO_SAY")}</option>
                 </select>
               </label>
+              <div className="form-section-title field-span-2">الملف المهني والدوام</div>
               <label className="field">
                 <span>التخصص</span>
                 <input
@@ -300,7 +382,7 @@ export function CenterDoctorsPage() {
                   placeholder="اختر أو اكتب تخصصًا جديدًا"
                 />
                 <datalist id="center-doctor-specialties">
-                  {bundle?.specialtyOptions.map((specialty) => <option key={specialty} value={specialty} />)}
+                  {specialtyOptions.map((specialty) => <option key={specialty} value={specialty} />)}
                 </datalist>
               </label>
               <label className="field">
@@ -348,7 +430,7 @@ export function CenterDoctorsPage() {
               </label>
               <label className="field field-span-2">
                 <span>أيام الدوام</span>
-                <div className="checkbox-grid">
+                <div className="checkbox-grid compact-checkbox-grid">
                   {workDays.map((day) => (
                     <label key={day.value} className="checkbox-chip">
                       <input
@@ -429,11 +511,12 @@ export function CenterDoctorsPage() {
           subtitle="أي تخصص جديد تضيفه هنا سيُضاف تلقائيًا إلى قائمة تخصصات المركز."
         >
           <div className="chip-row">
-            {bundle?.specialtyOptions.map((specialty) => (
+            {specialtyOptions.map((specialty) => (
               <span key={specialty} className="tag">
                 {specialty}
               </span>
             ))}
+            {specialtyOptions.length === 0 ? <span className="muted">لم تُسجل تخصصات بعد.</span> : null}
           </div>
         </SectionCard>
       </div>
@@ -453,7 +536,7 @@ export function CenterDoctorsPage() {
                 <StatusBadge status={doctor.isActive ? "active" : "inactive"} />
               </div>
 
-              <p>{joinMeta([doctor.profile?.specialization ?? "بدون تخصص", doctor.profile?.licenseNumber, doctor.phone])}</p>
+              <p>{joinMeta([doctor.profile?.specialization || "لم يُسجل تخصص واضح بعد", doctor.profile?.licenseNumber, doctor.phone])}</p>
 
               <div className="tile-stats">
                 <span>{doctor.profile?.yearsExperience ?? 0} سنوات خبرة</span>
@@ -485,14 +568,18 @@ export function CenterDoctorsPage() {
                   <button className="ghost-button" onClick={() => startEditing(doctor)} type="button">
                     تعديل
                   </button>
-                  <button
-                    className="danger-button"
-                    disabled={deletingDoctorId === doctor.id}
-                    onClick={() => void handleDelete(doctor)}
-                    type="button"
-                  >
-                    {deletingDoctorId === doctor.id ? "جارٍ الحذف..." : "حذف"}
-                  </button>
+                  {doctor.isActive ? (
+                    <button
+                      className="danger-button"
+                      disabled={deactivatingDoctorId === doctor.id}
+                      onClick={() => void handleDeactivate(doctor)}
+                      type="button"
+                    >
+                      {deactivatingDoctorId === doctor.id ? "جارٍ التعطيل..." : "تعطيل الحساب"}
+                    </button>
+                  ) : (
+                    <span className="muted">الحساب معطل</span>
+                  )}
                 </div>
               ) : null}
             </article>

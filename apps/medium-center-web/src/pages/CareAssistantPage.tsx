@@ -145,7 +145,7 @@ export function CareAssistantPage() {
 
       <SectionCard
         title="تحليل حالة أو سؤال صحي"
-        subtitle="يستخدم OpenRouter المجاني عند توفر OPENROUTER_API_KEY، ثم Gemini عند توفره، وإلا يعمل بتحليل محلي احتياطي."
+        subtitle="يستخدم مزود الذكاء الاصطناعي المفعّل في الإعدادات، ومضبوط محليًا على Gemini للأسئلة الطبية فقط."
       >
         <form className="form-grid" onSubmit={submitPrompt}>
           <label className="field field-span-2">

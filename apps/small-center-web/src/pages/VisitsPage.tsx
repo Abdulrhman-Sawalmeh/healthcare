@@ -40,21 +40,18 @@ const defaultReportForm = {
   recommendations: "",
   recommendedFollowUp: "",
   shareWithPatient: true,
+  includeInMedicalRecord: true,
   attachment: null as LocalVisitReportAttachment | null
 };
 
 const reportCategoryOptions = [
-  { value: "GENERAL", label: "تقرير سريري عام" },
-  { value: "LAB", label: "تحاليل مخبرية" },
-  { value: "IMAGING", label: "تصوير طبي" },
-  { value: "RADIOLOGY", label: "أشعة وتشخيص تصويري" },
-  { value: "PATHOLOGY", label: "أنسجة وخزعات" },
-  { value: "CARDIOLOGY", label: "قلب وتخطيط" },
-  { value: "MICROBIOLOGY", label: "زراعة وميكروبيولوجي" },
-  { value: "PROCEDURE", label: "إجراء طبي" },
-  { value: "FOLLOW_UP", label: "خطة متابعة" },
-  { value: "DISCHARGE", label: "خلاصة خروج" }
+  { value: "GENERAL", label: "تقرير سريري" },
+  { value: "FOLLOW_UP", label: "تقرير متابعة" },
+  { value: "RADIOLOGY", label: "رابط تقرير خارجي" },
+  { value: "LAB", label: "نتائج مختبر خارجية" }
 ];
+
+const reportTypesRequiringLink = new Set(["RADIOLOGY", "LAB"]);
 
 const reportTemplates = [
   { category: "GENERAL", label: "ملخص زيارة شامل" },
@@ -170,6 +167,7 @@ function buildStructuredReportDraft(visit: VisitRecord, category: string) {
     recommendations: template.recommendations,
     recommendedFollowUp: template.followUp,
     shareWithPatient: true,
+    includeInMedicalRecord: true,
     reportUrl: "",
     attachment: null as LocalVisitReportAttachment | null
   };
@@ -213,6 +211,7 @@ function buildSmartReportDraft(visit: VisitRecord) {
         : "الالتزام بالتوصيات السريرية والعودة عند حدوث أي تغير مهم.",
     recommendedFollowUp: focus.followUp,
     shareWithPatient: true,
+    includeInMedicalRecord: true,
     reportUrl: "",
     attachment: null as LocalVisitReportAttachment | null
   };
@@ -249,19 +248,16 @@ export function VisitsPage() {
   const [form, setForm] = useState(defaultVisitForm);
   const [reportForm, setReportForm] = useState(defaultReportForm);
 
-  const canCreateVisit = user?.role === "CENTER_MANAGER" || user?.role === "DOCTOR" || user?.role === "NURSE";
-  const canAuthorReports = user?.role === "CENTER_MANAGER" || user?.role === "DOCTOR";
+  const isManager = user?.role === "CENTER_MANAGER";
+  const canCreateVisit = false;
+  const canAuthorReports = !isManager && user?.role === "DOCTOR";
 
   async function loadPage() {
-    const [visitsPayload, patientsPayload, workspacePayload] = await Promise.all([
-      apiRequest<VisitRecord[]>("/center/visits"),
-      apiRequest<LocalPatientRecord[]>("/center/patients"),
-      apiRequest<CenterWorkspaceData>("/center/dashboard")
-    ]);
+    const visitsPayload = await apiRequest<VisitRecord[]>("/center/visits");
 
     setVisits(visitsPayload.map((visit) => ({ ...visit, reports: ensureVisitReports(visit) })));
-    setPatients(patientsPayload);
-    setWorkspace(workspacePayload);
+    setPatients([]);
+    setWorkspace(null);
   }
 
   useEffect(() => {
@@ -293,6 +289,7 @@ export function VisitsPage() {
     }),
     [visits]
   );
+  const selectedReportTypeRequiresLink = reportTypesRequiringLink.has(reportForm.category);
 
   function resetVisitForm() {
     setForm(defaultVisitForm);
@@ -340,6 +337,7 @@ export function VisitsPage() {
       recommendations: report.recommendations ?? "",
       recommendedFollowUp: report.recommendedFollowUp ?? "",
       shareWithPatient: report.shareWithPatient,
+      includeInMedicalRecord: true,
       attachment: report.attachment ?? null
     });
     setEditingReportId(report.id);
@@ -507,19 +505,29 @@ export function VisitsPage() {
       return;
     }
 
-    if (!reportForm.title.trim() || !reportForm.reportUrl.trim()) {
-      setError("أكمل عنوان التقرير ورابط التقرير قبل الحفظ.");
+    if (!reportForm.title.trim() || !reportForm.category.trim()) {
+      setError("فشل حفظ التقرير: يرجى التحقق من الحقول المطلوبة.");
       return;
     }
 
-    try {
-      const reportUrl = new URL(reportForm.reportUrl.trim());
-      if (!["http:", "https:"].includes(reportUrl.protocol)) {
-        throw new Error("Invalid report URL protocol");
-      }
-    } catch {
-      setError("أدخل رابط تقرير صالح يبدأ بـ http أو https.");
+    const reportUrlValue = reportForm.reportUrl.trim();
+    const linkRequired = reportTypesRequiringLink.has(reportForm.category);
+
+    if (linkRequired && !reportUrlValue) {
+      setError("رابط التقرير الخارجي مطلوب لهذا النوع من التقارير.");
       return;
+    }
+
+    if (reportUrlValue) {
+      try {
+        const reportUrl = new URL(reportUrlValue);
+        if (!["http:", "https:"].includes(reportUrl.protocol)) {
+          throw new Error("Invalid report URL protocol");
+        }
+      } catch {
+        setError("أدخل رابط تقرير صالح يبدأ بـ http أو https.");
+        return;
+      }
     }
 
     const method = editingReportId ? "PUT" : "POST";
@@ -534,7 +542,7 @@ export function VisitsPage() {
         body: JSON.stringify({
           title: reportForm.title.trim(),
           category: reportForm.category,
-          reportUrl: reportForm.reportUrl.trim(),
+          reportUrl: reportUrlValue || undefined,
           summary: reportForm.summary.trim() || undefined,
           shareWithPatient: reportForm.shareWithPatient,
           attachment: null
@@ -545,13 +553,9 @@ export function VisitsPage() {
       await loadPage();
       setSelectedVisitId(selectedVisit.id);
       setError("");
-      setSuccessMessage(
-        reportForm.shareWithPatient
-          ? "تم إرسال التقرير للمريض."
-          : "تم حفظ رابط التقرير كداخلي فقط ولن يظهر للمريض."
-      );
+      setSuccessMessage("تم حفظ التقرير بنجاح");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذر حفظ تقرير النتائج.");
+      setError(cause instanceof Error ? cause.message : "فشل حفظ التقرير: يرجى التحقق من الحقول المطلوبة");
       setSuccessMessage("");
     } finally {
       setSubmittingReport(false);
@@ -617,10 +621,10 @@ export function VisitsPage() {
 
       <section className="hero-strip visit-hero-shell">
         <div className="hero-copy-block">
-          <p className="eyebrow">Report Links</p>
-          <h1>إدارة الزيارات وتقارير النتائج</h1>
+          <p className="eyebrow">زيارات الطبيب</p>
+          <h1>زياراتي وتقارير النتائج</h1>
           <p className="muted">
-            مساحة عمل موحّدة لتوثيق الزيارة، ثم مشاركة رابط التقرير الجاهز مع المريض ليُفتح في صفحة مستقلة.
+            أرشيف الزيارات المسندة لك مع حالة المزامنة والتقارير المرتبطة بكل زيارة.
           </p>
         </div>
         <div className="workflow-scene-shell">
@@ -628,31 +632,19 @@ export function VisitsPage() {
             <span>{visitStats.pendingVisits} قيد المزامنة</span>
             <span>{visitStats.reports} تقرير</span>
           </div>
-          <div className="chip-row">
-            <button
-              className="primary-button"
-              type="button"
-              onClick={resetReportForm}
-            >
-              رابط تقرير جديد
-            </button>
-            <button className="ghost-button" type="button" onClick={resetReportForm}>
-              تقرير جديد
-            </button>
-          </div>
         </div>
       </section>
 
       <section className="metric-grid">
         <article className="metric-card">
-          <span className="eyebrow">إجمالي الزيارات</span>
+          <span className="eyebrow">إجمالي زياراتي</span>
           <h3>{visitStats.totalVisits}</h3>
-          <p className="muted">كل الزيارات المحلية الموثقة داخل المركز.</p>
+          <p className="muted">الزيارات المسندة للطبيب الحالي داخل المركز.</p>
         </article>
         <article className="metric-card">
           <span className="eyebrow">زيارات بانتظار المزامنة</span>
           <h3>{visitStats.pendingVisits}</h3>
-          <p className="muted">تحتاج إلى مزامنة مع النظام المركزي أو متابعة تشغيلية.</p>
+          <p className="muted">زياراتك التي لم تكتمل مزامنتها بعد.</p>
         </article>
         <article className="metric-card">
           <span className="eyebrow">تقارير النتائج</span>
@@ -669,7 +661,7 @@ export function VisitsPage() {
       {canCreateVisit ? (
         <SectionCard
           title={editingVisitId ? "تعديل زيارة محلية" : "تسجيل زيارة محلية"}
-          subtitle="احتفظ بتوثيق الزيارة كاملًا ثم أكمل عليها بالتقرير الطبي أو خطة المتابعة."
+          subtitle="أدخل بيانات الزيارة على مراحل واضحة: معلومات الزيارة، العلامات الحيوية، التشخيص، ثم الوصفة."
           action={
             editingVisitId ? (
               <button className="ghost-button" onClick={resetVisitForm} type="button">
@@ -680,6 +672,7 @@ export function VisitsPage() {
           className="visit-builder-card"
         >
           <form className="form-grid" onSubmit={handleVisitSubmit}>
+            <div className="form-section-title field-span-2">بيانات الزيارة</div>
             <label className="field">
               <span>المريض</span>
               <select
@@ -695,22 +688,29 @@ export function VisitsPage() {
                 ))}
               </select>
             </label>
-            <label className="field">
-              <span>المعالج</span>
-              <select
-                value={form.doctorId}
-                onChange={(event) => setForm((current) => ({ ...current, doctorId: event.target.value }))}
-              >
-                <option value="">استخدم المستخدم الحالي</option>
-                {workspace?.team
-                  .filter((member) => member.role === "DOCTOR")
-                  .map((member) => (
-                    <option key={member.id} value={member.id}>
-                      {member.specialization ? `${member.fullName} - ${member.specialization}` : member.fullName}
-                    </option>
-                  ))}
-              </select>
-            </label>
+            {user?.role === "DOCTOR" ? (
+              <label className="field">
+                <span>الطبيب</span>
+                <input value={user.fullName} disabled readOnly />
+              </label>
+            ) : (
+              <label className="field">
+                <span>الطبيب</span>
+                <select
+                  value={form.doctorId}
+                  onChange={(event) => setForm((current) => ({ ...current, doctorId: event.target.value }))}
+                >
+                  <option value="">استخدم المستخدم الحالي</option>
+                  {workspace?.team
+                    .filter((member) => member.role === "DOCTOR")
+                    .map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.specialization ? `${member.fullName} - ${member.specialization}` : member.fullName}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )}
             <label className="field">
               <span>تاريخ ووقت الزيارة</span>
               <input
@@ -741,6 +741,7 @@ export function VisitsPage() {
                 <option value="LAB">{toArabicLabel("LAB")}</option>
               </select>
             </label>
+            <div className="form-section-title field-span-2">العلامات الحيوية والأعراض</div>
             <label className="field">
               <span>الضغط الشرياني</span>
               <input
@@ -772,6 +773,7 @@ export function VisitsPage() {
                 onChange={(event) => setForm((current) => ({ ...current, heartRate: event.target.value }))}
               />
             </label>
+            <div className="form-section-title field-span-2">التشخيص والملاحظات</div>
             <label className="field field-span-2">
               <span>التشخيص</span>
               <input
@@ -787,6 +789,7 @@ export function VisitsPage() {
                 onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
               />
             </label>
+            <div className="form-section-title field-span-2">الوصفة الطبية</div>
             <label className="field">
               <span>الدواء الموصوف</span>
               <input
@@ -837,22 +840,40 @@ export function VisitsPage() {
 
       <section className="split-grid">
         <SectionCard
-          title="روابط تقارير النتائج"
-          subtitle="اختر زيارة من القائمة ثم أضف رابط التقرير الذي سيظهر للمريض ويفتح في صفحة جديدة."
+          title={selectedVisit ? "إضافة تقرير للزيارة" : "إدارة تقارير الزيارة"}
+          subtitle={selectedVisit ? "راجع الزيارة المختارة ثم احفظ التقرير المطلوب." : "اختر زيارة من القائمة لإدارة تقاريرها."}
           className="visit-report-studio"
         >
           {selectedVisit ? (
             <div className="page-stack">
               <div className="profile-tile is-selected visit-report-highlight">
-                <p className="eyebrow">الزيارة المختارة</p>
+                <p className="eyebrow">ملخص الزيارة المختارة</p>
                 <h3>{selectedVisit.patientName}</h3>
-                <p>{selectedVisit.diagnosis}</p>
-                <div className="tile-stats">
-                  <span>{selectedVisit.doctorName}</span>
-                  <span>{formatDateTime(selectedVisit.visitDate)}</span>
-                  <span>{toArabicLabel(selectedVisit.visitType)}</span>
-                  {selectedVisit.visitSource === "REFERRAL" ? <span>زيارة محوّلة</span> : null}
-                  <span>{ensureVisitReports(selectedVisit).length} تقارير</span>
+                <div className="detail-grid">
+                  <div>
+                    <span className="eyebrow">اسم المريض</span>
+                    <strong>{selectedVisit.patientName}</strong>
+                  </div>
+                  <div>
+                    <span className="eyebrow">نوع الزيارة</span>
+                    <strong>{toArabicLabel(selectedVisit.visitType)}</strong>
+                  </div>
+                  <div>
+                    <span className="eyebrow">التشخيص</span>
+                    <strong>{selectedVisit.diagnosis}</strong>
+                  </div>
+                  <div>
+                    <span className="eyebrow">تاريخ الزيارة</span>
+                    <strong>{formatDateTime(selectedVisit.visitDate)}</strong>
+                  </div>
+                  <div>
+                    <span className="eyebrow">الطبيب</span>
+                    <strong>{selectedVisit.doctorName}</strong>
+                  </div>
+                  <div>
+                    <span className="eyebrow">التقارير</span>
+                    <strong>{ensureVisitReports(selectedVisit).length} تقارير</strong>
+                  </div>
                 </div>
                 {selectedVisit.referral ? (
                   <div className="inline-note">
@@ -863,7 +884,7 @@ export function VisitsPage() {
               </div>
 
               {canAuthorReports ? (
-                <form className="form-grid" onSubmit={handleReportSubmit}>
+                <form className="form-grid report-editor-form" onSubmit={handleReportSubmit}>
                   <label className="field field-span-2">
                     <span>عنوان التقرير</span>
                     <input
@@ -874,7 +895,7 @@ export function VisitsPage() {
                     />
                   </label>
                   <label className="field">
-                    <span>فئة التقرير</span>
+                    <span>نوع التقرير</span>
                     <select
                       value={reportForm.category}
                       onChange={(event) =>
@@ -889,7 +910,7 @@ export function VisitsPage() {
                     </select>
                   </label>
                   <label className="field report-checkbox-field">
-                    <span>إتاحة للمريض</span>
+                    <span>إتاحة التقرير للمريض</span>
                     <label className="switch-label">
                       <input
                         checked={reportForm.shareWithPatient}
@@ -904,17 +925,37 @@ export function VisitsPage() {
                       <strong>{reportForm.shareWithPatient ? "مشارك في السجل الصحي" : "داخلي فقط"}</strong>
                     </label>
                   </label>
+                  <label className="field report-checkbox-field">
+                    <span>إضافته إلى السجل الصحي</span>
+                    <label className="switch-label">
+                      <input
+                        checked={reportForm.includeInMedicalRecord}
+                        onChange={(event) =>
+                          setReportForm((current) => ({
+                            ...current,
+                            includeInMedicalRecord: event.target.checked
+                          }))
+                        }
+                        type="checkbox"
+                      />
+                      <strong>{reportForm.includeInMedicalRecord ? "ضمن السجل الصحي" : "تقرير داخلي"}</strong>
+                    </label>
+                  </label>
                   <label className="field field-span-2">
-                    <span>رابط التقرير للمريض</span>
+                    <span>رابط التقرير الخارجي</span>
                     <input
                       dir="ltr"
                       type="url"
                       value={reportForm.reportUrl}
-                      required
+                      required={selectedReportTypeRequiresLink}
                       onChange={(event) => setReportForm((current) => ({ ...current, reportUrl: event.target.value }))}
                       placeholder="https://example.com/report.pdf"
                     />
-                    <small className="muted">سيظهر هذا الرابط للمريض في السجل الصحي ويفتح في تبويب جديد.</small>
+                    <small className="muted">
+                      {selectedReportTypeRequiresLink
+                        ? "الرابط مطلوب لهذا النوع من التقارير."
+                        : "يمكن ترك الرابط فارغًا للتقرير السريري أو تقرير المتابعة."}
+                    </small>
                   </label>
                   <label className="field field-span-2">
                     <span>ملاحظة مختصرة للمريض</span>
@@ -932,9 +973,7 @@ export function VisitsPage() {
                     >
                       {submittingReport
                         ? "جارٍ حفظ التقرير..."
-                        : editingReportId
-                          ? "تحديث التقرير"
-                          : "إنشاء التقرير"}
+                        : "حفظ التقرير"}
                     </button>
                     {editingReportId ? (
                       <button className="ghost-button" onClick={resetReportForm} type="button">
@@ -944,7 +983,7 @@ export function VisitsPage() {
                   </div>
                 </form>
               ) : (
-                <div className="empty-state compact">يمكن للطبيب أو مدير المركز فقط إنشاء تقارير النتائج.</div>
+                <div className="empty-state compact">يمكن للطبيب فقط إنشاء أو تعديل تقارير النتائج. يظهر هذا القسم للمدير للمتابعة والقراءة فقط.</div>
               )}
 
               <div className="stack-list">
@@ -999,23 +1038,23 @@ export function VisitsPage() {
                   </article>
                 ))}
                 {ensureVisitReports(selectedVisit).length === 0 ? (
-                  <div className="empty-state compact">لا توجد تقارير نتائج لهذه الزيارة بعد.</div>
+                  <div className="empty-state compact">لا توجد تقارير لهذه الزيارة بعد. يمكنك إضافة تقرير جديد.</div>
                 ) : null}
               </div>
             </div>
           ) : (
-            <div className="empty-state compact">لا توجد زيارة محددة حاليًا.</div>
+            <div className="empty-state compact">اختر زيارة من القائمة لإدارة تقاريرها.</div>
           )}
         </SectionCard>
 
         <SectionCard
-          title="الزيارات الحديثة"
-          subtitle="اختر زيارة لفتح استوديو التقارير أو لتعديل بياناتها التشغيلية."
+          title="زياراتي الحديثة"
+          subtitle="اختر زيارة لفتح تقاريرها وحالة المزامنة."
           className="visit-stream-card"
         >
           <div className="stack-list compact">
             {visits.map((visit) => {
-              const canMutate = !visit.syncedToCentral && visit.syncState !== "SYNCED";
+              const canMutate = canCreateVisit && !visit.syncedToCentral && visit.syncState !== "SYNCED";
 
               return (
                 <article
@@ -1038,7 +1077,7 @@ export function VisitsPage() {
                   </div>
                   <div className="button-row">
                     <button className="primary-button" onClick={() => setSelectedVisitId(visit.id)} type="button">
-                      إدارة التقارير
+                      {canAuthorReports ? "إدارة التقارير" : "عرض التقارير"}
                     </button>
                     {canMutate ? (
                       <button className="ghost-button" onClick={() => hydrateVisitForm(visit)} type="button">
@@ -1050,21 +1089,21 @@ export function VisitsPage() {
               );
             })}
             {loading ? <div className="empty-state compact">جارٍ تحميل الزيارات...</div> : null}
-            {!loading && visits.length === 0 ? <div className="empty-state compact">لا توجد زيارات محلية مسجلة بعد.</div> : null}
+            {!loading && visits.length === 0 ? <div className="empty-state compact">لا توجد زيارات مسجلة لك حتى الآن.</div> : null}
           </div>
         </SectionCard>
       </section>
 
       <SectionCard
-        title="سجل الزيارات المحلي"
-        subtitle="عرض تفصيلي لحالة المزامنة والأرشفة وعدد التقارير المرتبطة بكل زيارة."
+        title="سجل زياراتي"
+        subtitle="عرض تفصيلي لحالة المزامنة وعدد التقارير المرتبطة بكل زيارة."
       >
         <div className="table-shell">
           <table className="data-table">
             <thead>
               <tr>
                 <th>المريض</th>
-                <th>المعالج</th>
+                <th>الطبيب</th>
                 <th>التشخيص</th>
                 <th>التقارير</th>
                 <th>المزامنة</th>
@@ -1074,7 +1113,7 @@ export function VisitsPage() {
             </thead>
             <tbody>
               {visits.map((visit) => {
-                const canMutate = !visit.syncedToCentral && visit.syncState !== "SYNCED";
+                const canMutate = canCreateVisit && !visit.syncedToCentral && visit.syncState !== "SYNCED";
 
                 return (
                   <tr key={visit.id}>
@@ -1130,7 +1169,7 @@ export function VisitsPage() {
               })}
             </tbody>
           </table>
-          {!loading && visits.length === 0 ? <div className="empty-state compact">لا توجد زيارات محلية مسجلة بعد.</div> : null}
+          {!loading && visits.length === 0 ? <div className="empty-state compact">لا توجد زيارات مسجلة لك حتى الآن.</div> : null}
         </div>
       </SectionCard>
     </div>

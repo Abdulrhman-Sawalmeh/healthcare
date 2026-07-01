@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
@@ -6,8 +6,10 @@ import { SectionCard } from "../components/SectionCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { Breadcrumbs, EmptyState, ErrorState, LoadingState, PageHeader, ResultSummary, SearchBox } from "../components/UiStates";
 import { useAuth } from "../context/AuthContext";
-import { joinMeta, toArabicLabel } from "../lib/arabic";
+import { formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
 import { LocalPatientRecord, NetworkPatientSearchResult, UnifiedPatientRecord } from "../types";
+
+type PatientFilter = "all" | "openVisits" | "chronic" | "recent";
 
 type CreatePatientResponse = {
   success: boolean;
@@ -47,6 +49,27 @@ function getChronicDiseasesLabel(chronicDiseases: string[]) {
   return validDiseases.length > 0 ? validDiseases.join("، ") : "لا توجد أمراض مزمنة مسجلة.";
 }
 
+function formatBloodType(value?: string | null) {
+  const normalized = value?.trim().toUpperCase();
+
+  if (!normalized) {
+    return "فصيلة الدم غير مسجلة";
+  }
+
+  const flipped = normalized.match(/^([+-])([ABO]{1,2})$/);
+  return flipped ? `${flipped[2]}${flipped[1]}` : normalized;
+}
+
+function latestVisit(patient: LocalPatientRecord) {
+  return [...patient.recentVisits].sort((first, second) => {
+    return new Date(second.visitDate).getTime() - new Date(first.visitDate).getTime();
+  })[0];
+}
+
+function hasOpenVisit(patient: LocalPatientRecord) {
+  return patient.recentVisits.some((visit) => visit.syncState !== "SYNCED");
+}
+
 export function PatientsPage() {
   const { user } = useAuth();
   const [centralPatients, setCentralPatients] = useState<UnifiedPatientRecord[]>([]);
@@ -58,6 +81,7 @@ export function PatientsPage() {
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [patientFilter, setPatientFilter] = useState<PatientFilter>("all");
   const didRunInitialFilter = useRef(false);
   const [form, setForm] = useState({
     fullName: "",
@@ -320,22 +344,46 @@ export function PatientsPage() {
   }
 
   const canCreateAccounts = user?.role === "RECEPTIONIST";
+  const isDoctor = user?.role === "DOCTOR";
   const patientMatches = searchResult?.patientMatches ?? (searchResult?.patient ? [searchResult.patient] : []);
   const localMatches = searchResult?.localMatches ?? (searchResult?.localPatient ? [searchResult.localPatient] : []);
+  const filteredLocalPatients = useMemo(() => {
+    if (patientFilter === "openVisits") {
+      return localPatients.filter(hasOpenVisit);
+    }
+
+    if (patientFilter === "chronic") {
+      return localPatients.filter((patient) => patient.chronicDiseases.some((disease) => !isPlaceholderText(disease)));
+    }
+
+    if (patientFilter === "recent") {
+      return localPatients.filter((patient) => patient.recentVisits.length > 0);
+    }
+
+    return localPatients;
+  }, [localPatients, patientFilter]);
 
   return (
     <div className="page-stack">
       <Breadcrumbs items={[{ label: "لوحة المتابعة", to: "/" }, { label: "المرضى" }]} />
       <PageHeader
-        eyebrow="إدارة المرضى"
-        title="ملفات المرضى المحليين"
-        subtitle="ابحث في السجل المحلي والموحد وأنشئ ملف مريض عند الحاجة."
+        eyebrow={isDoctor ? "ملفات الطبيب" : "إدارة المرضى"}
+        title={isDoctor ? "مرضاي" : "ملفات المرضى المحليين"}
+        subtitle={
+          isDoctor
+            ? "تعرض القائمة المرضى المرتبطين بزياراتك، ويمكن استخدام البحث للوصول إلى ملف مريض عند الحاجة السريرية."
+            : "ابحث في السجل المحلي والموحد وأنشئ ملف مريض عند الحاجة."
+        }
         meta={`${localPatients.length} ملف`}
       />
       <div className="split-grid">
         <SectionCard
-          title="بحث الاستقبال"
-          subtitle="ابحث برقم الهوية أو الهاتف قبل إنشاء حساب جديد للمريض."
+          title={isDoctor ? "بحث في ملفات المرضى" : "بحث الاستقبال"}
+          subtitle={
+            isDoctor
+              ? "بحث مساعد للوصول إلى ملف مريض برقم الهوية أو الهاتف دون تعديل بياناته الإدارية."
+              : "ابحث برقم الهوية أو الهاتف قبل إنشاء حساب جديد للمريض."
+          }
         >
           <SearchBox
             value={searchTerm}
@@ -446,8 +494,10 @@ export function PatientsPage() {
               <label className="field">
                 <span>فصيلة الدم</span>
                 <input
+                  dir="ltr"
                   value={form.bloodType}
                   onChange={(event) => setForm((current) => ({ ...current, bloodType: event.target.value }))}
+                  placeholder="A+ / O-"
                 />
               </label>
               <label className="field">
@@ -474,22 +524,25 @@ export function PatientsPage() {
             </form>
           </SectionCard>
         ) : (
-          <SectionCard
-            title="إنشاء الحساب"
-            subtitle="إنشاء حساب المريض متاح حالياً لموظف الاستقبال فقط."
-          >
-            <EmptyState
-              title="الصلاحية غير متاحة"
-              description="يستطيع الطبيب أو مدير المركز مراجعة السجلات والبحث عن المرضى، بينما تبقى عملية إنشاء الحساب وربط الدخول برقم الهوية من مهام الاستقبال."
-            />
-          </SectionCard>
+          <div className="inline-note manager-permission-note">
+            {isDoctor
+              ? "إنشاء أو تعديل بيانات حساب المريض متاح لموظف الاستقبال فقط. يستطيع الطبيب فتح السجل الطبي ومتابعة الزيارات المرتبطة به."
+              : "إنشاء ملف أو حساب مريض جديد متاح لموظف الاستقبال فقط. يمكن للمدير مراجعة السجلات والبحث دون تعديل بيانات إنشاء الحساب."}
+          </div>
         )}
       </div>
 
       {successMessage ? <EmptyState title="تم تجهيز حساب المريض" description={successMessage} /> : null}
       {error ? <ErrorState message={error} onRetry={() => retryLoadPatients(query)} /> : null}
 
-      <SectionCard title="سجل المرضى المحلي" subtitle="المرضى المخزنون حالياً في قاعدة بيانات هذا المركز.">
+      <SectionCard
+        title={isDoctor ? "مرضاي داخل المركز" : "سجل المرضى المحلي"}
+        subtitle={
+          isDoctor
+            ? "المرضى الذين لديهم زيارات مرتبطة بالطبيب الحالي داخل هذا المركز."
+            : "المرضى المخزنون حالياً في قاعدة بيانات هذا المركز."
+        }
+      >
         <SearchBox
           value={query}
           onChange={setQuery}
@@ -497,32 +550,66 @@ export function PatientsPage() {
           placeholder="تصفية بالاسم أو الهاتف أو رقم الهوية أو الرقم الموحد"
           buttonLabel="تصفية"
         />
+        <div className="chip-row">
+          <button className={patientFilter === "all" ? "primary-button" : "ghost-button"} onClick={() => setPatientFilter("all")} type="button">
+            كل المرضى
+          </button>
+          <button
+            className={patientFilter === "openVisits" ? "primary-button" : "ghost-button"}
+            onClick={() => setPatientFilter("openVisits")}
+            type="button"
+          >
+            زيارات مفتوحة
+          </button>
+          <button className={patientFilter === "chronic" ? "primary-button" : "ghost-button"} onClick={() => setPatientFilter("chronic")} type="button">
+            أمراض مزمنة
+          </button>
+          <button className={patientFilter === "recent" ? "primary-button" : "ghost-button"} onClick={() => setPatientFilter("recent")} type="button">
+            لديهم زيارات
+          </button>
+        </div>
 
         {loading ? (
           <LoadingState text="جار تحميل المرضى المحليين..." />
-        ) : localPatients.length === 0 ? (
+        ) : filteredLocalPatients.length === 0 ? (
           <EmptyState
-            title="لا توجد ملفات محلية"
-            description="أنشئ ملفًا جديدًا أو امسح التصفية إذا كنت تبحث عن نتيجة محددة."
+            title={isDoctor ? "لا توجد ملفات مرضى مرتبطة بك" : "لا توجد ملفات محلية"}
+            description={
+              isDoctor
+                ? "استخدم البحث إذا كنت تحتاج فتح ملف مريض محدد، أو انتظر إسناد زيارة جديدة."
+                : "أنشئ ملفًا جديدًا أو امسح التصفية إذا كنت تبحث عن نتيجة محددة."
+            }
           />
         ) : (
           <>
-            <ResultSummary count={localPatients.length} label="ملف محلي" query={query.trim() || undefined} />
+            <ResultSummary count={filteredLocalPatients.length} label="ملف محلي" query={query.trim() || undefined} />
             <div className="card-grid">
-              {localPatients.map((patient, index) => (
-                <Link key={patient.id} to={`/patients/${patient.id}`} className="profile-tile interactive-card">
-                  <p className="eyebrow">{patient.unifiedId ?? "سجل محلي فقط"}</p>
-                  <h3>{getPatientDisplayName(patient.fullName, index)}</h3>
-                  <p>{joinMeta([patient.nationalId ?? "بدون هوية", patient.phone])}</p>
-                  <div className="tile-stats">
-                    <span>{patient.visitCount} زيارات</span>
-                    <span>{toArabicLabel(patient.billingStatus)}</span>
-                    <span>{patient.bloodType ?? "فصيلة الدم غير مسجلة"}</span>
-                  </div>
-                  <p className="muted">{getChronicDiseasesLabel(patient.chronicDiseases)}</p>
-                  <span className="action-hint">عرض أو تعديل ملف المريض</span>
-                </Link>
-              ))}
+              {filteredLocalPatients.map((patient, index) => {
+                const patientLatestVisit = latestVisit(patient);
+                const openVisitCount = patient.recentVisits.filter((visit) => visit.syncState !== "SYNCED").length;
+
+                return (
+                  <Link key={patient.id} to={`/patients/${patient.id}`} className="profile-tile interactive-card">
+                    <p className="eyebrow">{patient.unifiedId ?? "سجل محلي فقط"}</p>
+                    <h3>{getPatientDisplayName(patient.fullName, index)}</h3>
+                    <p>{joinMeta([patient.nationalId ?? "بدون هوية", patient.phone])}</p>
+                    <div className="tile-stats">
+                      <span>{patient.visitCount} زيارات</span>
+                      <span>{openVisitCount > 0 ? `${openVisitCount} زيارات مفتوحة` : "لا توجد زيارات مفتوحة"}</span>
+                      <span dir="ltr" className="ltr-value">{formatBloodType(patient.bloodType)}</span>
+                    </div>
+                    <p className="muted">{getChronicDiseasesLabel(patient.chronicDiseases)}</p>
+                    {patientLatestVisit ? (
+                      <p className="muted">
+                        آخر زيارة: {formatDateTime(patientLatestVisit.visitDate)} - {toArabicLabel(patientLatestVisit.visitType)}
+                      </p>
+                    ) : null}
+                    <span className="action-hint">
+                      {isDoctor && openVisitCount > 0 ? "فتح السجل ومتابعة الزيارة" : "فتح السجل الطبي"}
+                    </span>
+                  </Link>
+                );
+              })}
             </div>
           </>
         )}

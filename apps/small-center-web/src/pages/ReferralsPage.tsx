@@ -22,6 +22,8 @@ const defaultForm = {
   notesFromSender: ""
 };
 
+const fallbackSpecialties = ["أمراض القلب", "الباطنية", "الأطفال", "النساء والولادة", "العظام", "الأعصاب", "الجلدية"];
+
 const centralStatusFilters = [
   "",
   "REQUESTED",
@@ -36,18 +38,6 @@ const centralStatusFilters = [
 
 const reviewStatuses = new Set(["AUTO_SELECTED", "PENDING_RECEIVING_MANAGER", "ACCEPTED"]);
 
-function details(referral: ReferralRecord) {
-  return [
-    referral.selectedCenterReason,
-    referral.managerDecisionReason ? `قرار المدير: ${referral.managerDecisionReason}` : null,
-    referral.rejectionReason ? `سبب الرفض: ${referral.rejectionReason}` : null,
-    referral.matchingScore != null ? `درجة المطابقة: ${referral.matchingScore}` : null,
-    referral.estimatedWaitTimeMinutes != null ? `انتظار متوقع: ${referral.estimatedWaitTimeMinutes} دقيقة` : null,
-    referral.assignedDoctor ? `الطبيب المسند: ${referral.assignedDoctor.fullName}` : null,
-    referral.createdVisitId ? `زيارة رقم: ${referral.createdVisitId}` : null
-  ].filter(Boolean);
-}
-
 export function ReferralsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -57,7 +47,7 @@ export function ReferralsPage() {
   const [assigned, setAssigned] = useState<ReferralRecord[]>([]);
   const [patients, setPatients] = useState<LocalPatientRecord[]>([]);
   const [doctors, setDoctors] = useState<CenterDoctorsBundle | null>(null);
-  const [activeView, setActiveView] = useState<ReferralView>("all");
+  const [activeView, setActiveView] = useState<ReferralView>(user?.role === "DOCTOR" ? "assigned" : "all");
   const [form, setForm] = useState(defaultForm);
   const [rejectReasons, setRejectReasons] = useState<Record<number, string>>({});
   const [doctorAssignments, setDoctorAssignments] = useState<Record<number, string>>({});
@@ -73,6 +63,18 @@ export function ReferralsPage() {
   const canRequest = user?.workspace === "center" && (user.role === "CENTER_MANAGER" || user.role === "DOCTOR");
   const canReview = user?.workspace === "center" && user.role === "CENTER_MANAGER";
   const canSeeAssigned = user?.workspace === "center" && user.role === "DOCTOR";
+  const specialtyOptions = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...fallbackSpecialties,
+          ...(doctors?.center.specialties ?? []),
+          ...(doctors?.specialtyOptions ?? []),
+          form.requiredSpecialty
+        ].map((specialty) => specialty.trim()).filter(Boolean))
+      ),
+    [doctors, form.requiredSpecialty]
+  );
 
   async function loadData() {
     setLoading(true);
@@ -115,6 +117,8 @@ export function ReferralsPage() {
     if (viewParam === "incoming" && canReview) {
       setActiveView("incoming");
     } else if (viewParam === "assigned" && canSeeAssigned) {
+      setActiveView("assigned");
+    } else if (!viewParam && canSeeAssigned) {
       setActiveView("assigned");
     }
   }, [canReview, canSeeAssigned, viewParam]);
@@ -166,6 +170,28 @@ export function ReferralsPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const maxDistanceKm = Number(form.maxDistanceKm);
+    if (!form.localPatientId) {
+      setError("اختر المريض قبل إرسال طلب الإحالة.");
+      return;
+    }
+
+    if (!form.requiredSpecialty.trim()) {
+      setError("اختر التخصص المطلوب للإحالة.");
+      return;
+    }
+
+    if (!form.reason.trim()) {
+      setError("اكتب سبب الإحالة السريري قبل الإرسال.");
+      return;
+    }
+
+    if (!Number.isFinite(maxDistanceKm) || maxDistanceKm <= 0) {
+      setError("أدخل أقصى مسافة بالكيلومتر كرقم صحيح أكبر من صفر.");
+      return;
+    }
+
     try {
       await apiRequest("/center/referrals/request", {
         method: "POST",
@@ -181,7 +207,7 @@ export function ReferralsPage() {
             .filter(Boolean)
             .map(Number),
           preferredRegion: form.preferredRegion || undefined,
-          maxDistanceKm: Number(form.maxDistanceKm),
+          maxDistanceKm,
           notesFromSender: form.notesFromSender || undefined,
           processNow: true
         })
@@ -466,8 +492,23 @@ export function ReferralsPage() {
 
   return (
     <div className="page-stack">
+      {selectedReferral ? (
+        <div className="referral-details-backdrop" role="dialog" aria-modal="true" onClick={closeReferralDetails}>
+          <div className="referral-details-dialog" onClick={(event) => event.stopPropagation()}>
+            {renderReferralDetailsPanel(selectedReferral)}
+          </div>
+        </div>
+      ) : null}
+
       {canRequest ? (
-        <SectionCard title="إنشاء إحالة ذكية" subtitle="المحرك المركزي يرشح مركزاً مناسباً، والقبول النهائي من مدير المركز المستقبل.">
+        <SectionCard
+          title={canReview ? "طلب إحالة بناءً على توصية طبية" : "إنشاء إحالة ذكية"}
+          subtitle={
+            canReview
+              ? "يُسجل المدير الطلب الإداري عندما تكون هناك توصية طبية واضحة، ثم يرشح النظام المركزي جهة مناسبة."
+              : "المحرك المركزي يرشح مركزاً مناسباً، والقبول النهائي من مدير المركز المستقبل."
+          }
+        >
           <form className="form-grid" onSubmit={handleSubmit}>
             <label className="field">
               <span>المريض</span>
@@ -480,7 +521,13 @@ export function ReferralsPage() {
             </label>
             <label className="field">
               <span>التخصص المطلوب</span>
-              <input required value={form.requiredSpecialty} onChange={(event) => setForm((current) => ({ ...current, requiredSpecialty: event.target.value }))} />
+              <select required value={form.requiredSpecialty} onChange={(event) => setForm((current) => ({ ...current, requiredSpecialty: event.target.value }))}>
+                {specialtyOptions.map((specialty) => (
+                  <option key={specialty} value={specialty}>
+                    {specialty}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="field">
               <span>درجة الاستعجال</span>
@@ -491,10 +538,10 @@ export function ReferralsPage() {
               </select>
             </label>
             <label className="field">
-              <span>أقصى مسافة</span>
-              <input value={form.maxDistanceKm} onChange={(event) => setForm((current) => ({ ...current, maxDistanceKm: event.target.value }))} />
+              <span>أقصى مسافة (كم)</span>
+              <input min="1" type="number" value={form.maxDistanceKm} onChange={(event) => setForm((current) => ({ ...current, maxDistanceKm: event.target.value }))} />
             </label>
-            <label className="field checkbox-field">
+            <label className="field checkbox-field referral-checkbox-field">
               <input checked={form.requiresOr} onChange={(event) => setForm((current) => ({ ...current, requiresOr: event.target.checked }))} type="checkbox" />
               <span>تتطلب غرفة عمليات</span>
             </label>
@@ -506,12 +553,8 @@ export function ReferralsPage() {
               <span>سبب الإحالة</span>
               <textarea required value={form.reason} onChange={(event) => setForm((current) => ({ ...current, reason: event.target.value }))} />
             </label>
-            <label className="field">
-              <span>معرفات الأدوية</span>
-              <input value={form.requiredMedicineIds} onChange={(event) => setForm((current) => ({ ...current, requiredMedicineIds: event.target.value }))} placeholder="1,2" />
-            </label>
-            <label className="field">
-              <span>ملاحظات سريرية</span>
+            <label className="field field-span-2">
+              <span>{canReview ? "ملاحظة إدارية أو توصية طبية" : "ملاحظات سريرية"}</span>
               <input value={form.notesFromSender} onChange={(event) => setForm((current) => ({ ...current, notesFromSender: event.target.value }))} />
             </label>
             <button className="primary-button field-span-2" type="submit">إرسال طلب الإحالة</button>
@@ -524,11 +567,13 @@ export function ReferralsPage() {
         {message ? <div className="success-banner">{message}</div> : null}
 
         <div className="toolbar">
-          <button className={activeView === "all" ? "primary-button" : "ghost-button"} onClick={() => setActiveView("all")} type="button">
-            {user?.workspace === "central" ? "كل الإحالات" : "سجل المركز"}
-          </button>
-          {canReview ? <button className={activeView === "incoming" ? "primary-button" : "ghost-button"} onClick={() => setActiveView("incoming")} type="button">الإحالات الواردة</button> : null}
-          {canSeeAssigned ? <button className={activeView === "assigned" ? "primary-button" : "ghost-button"} onClick={() => setActiveView("assigned")} type="button">الحالات المحوّلة للطبيب</button> : null}
+          {!canSeeAssigned ? (
+            <button className={activeView === "all" ? "primary-button" : "ghost-button"} onClick={() => setActiveView("all")} type="button">
+              {user?.workspace === "central" ? "كل الإحالات" : "سجل المركز"}
+            </button>
+          ) : null}
+          {canReview ? <button className={activeView === "incoming" ? "primary-button" : "ghost-button"} onClick={() => setActiveView("incoming")} type="button">الإحالات الواردة ({incoming.length})</button> : null}
+          {canSeeAssigned ? <button className={activeView === "assigned" ? "primary-button" : "ghost-button"} onClick={() => setActiveView("assigned")} type="button">إحالاتي المسندة ({assigned.length})</button> : null}
         </div>
 
         {user?.workspace === "central" ? (
@@ -540,8 +585,6 @@ export function ReferralsPage() {
             ))}
           </div>
         ) : null}
-
-        {selectedReferral ? renderReferralDetailsPanel(selectedReferral) : null}
 
         {loading ? (
           <div className="empty-state compact">جارٍ تحميل الإحالات...</div>
@@ -562,11 +605,11 @@ export function ReferralsPage() {
               </thead>
               <tbody>
                 {visibleReferrals.map((referral) => {
-                  const manager = managerActions(referral);
-                  const doctor = doctorActions(referral);
-
                   return (
-                    <tr key={`${activeView}-${referral.id}`}>
+                    <tr
+                      key={`${activeView}-${referral.id}`}
+                      className={selectedReferralId === referral.id ? "is-selected referral-row-highlight" : undefined}
+                    >
                       <td>
                         <strong>{referral.patientName ?? "مريض"}</strong>
                         <span>{referral.patientUnifiedId ?? "سجل إحالة محلي"}</span>
@@ -582,7 +625,7 @@ export function ReferralsPage() {
                       </td>
                       <td>
                         <StatusBadge status={referral.status} />
-                        {details(referral).map((item) => <span key={item}>{item}</span>)}
+                        {referral.assignedDoctor ? <span>الطبيب: {referral.assignedDoctor.fullName}</span> : null}
                       </td>
                       <td>
                         <strong>{formatDateTime(referral.requestedAt)}</strong>
@@ -591,11 +634,8 @@ export function ReferralsPage() {
                       </td>
                       <td>
                         <button className="ghost-button" onClick={() => openReferralDetails(referral)} type="button">
-                          عرض التفاصيل
+                          عرض التفاصيل والإجراءات
                         </button>
-                        {manager}
-                        {doctor}
-                        {!manager && !doctor ? <span className="muted">متابعة فقط</span> : null}
                       </td>
                     </tr>
                   );

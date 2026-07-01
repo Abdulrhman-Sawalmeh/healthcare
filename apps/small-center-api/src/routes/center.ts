@@ -175,7 +175,9 @@ const reportUrlSchema = z
   .url("أدخل رابط تقرير صالح يبدأ بـ http أو https.")
   .refine((value) => ["http:", "https:"].includes(new URL(value).protocol), {
     message: "أدخل رابط تقرير صالح يبدأ بـ http أو https."
-  });
+  })
+  .optional()
+  .or(z.literal("").transform(() => undefined));
 
 const reportSchema = z.object({
   title: z.string().min(2),
@@ -332,7 +334,7 @@ const doctorAccountSchema = z.object({
 router.get(
   "/dashboard",
   asyncHandler(async (req, res) => {
-    res.json(await getCenterWorkspaceData(getCenterId(req), req.auth!.role));
+    res.json(await getCenterWorkspaceData(getCenterId(req), req.auth!.role, getActorCenterUserId(req)));
   })
 );
 
@@ -532,7 +534,12 @@ router.get(
   authorize("CENTER_MANAGER", "RECEPTIONIST", "DOCTOR"),
   asyncHandler(async (req, res) => {
     const search = typeof req.query.search === "string" ? req.query.search : undefined;
-    res.json(await getCenterPatients(getCenterId(req), search));
+    res.json(
+      await getCenterPatients(getCenterId(req), search, {
+        role: req.auth!.role,
+        actorId: getActorCenterUserId(req)
+      })
+    );
   })
 );
 
@@ -916,13 +923,18 @@ router.get(
   "/visits",
   authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"),
   asyncHandler(async (req, res) => {
-    res.json(await getCenterVisits(getCenterId(req)));
+    res.json(
+      await getCenterVisits(getCenterId(req), {
+        role: req.auth!.role,
+        actorId: getActorCenterUserId(req)
+      })
+    );
   })
 );
 
 router.post(
   "/visits",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const payload = visitSchema.parse(req.body);
@@ -984,7 +996,7 @@ router.post(
 
 router.post(
   "/visits/:visitId/reports",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const visitId = Number(req.params.visitId);
@@ -1055,7 +1067,7 @@ router.post(
 
 router.put(
   "/visits/:visitId/reports/:reportId",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const visitId = Number(req.params.visitId);
@@ -1134,7 +1146,7 @@ router.put(
 
 router.delete(
   "/visits/:visitId/reports/:reportId",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const visitId = Number(req.params.visitId);
@@ -1179,11 +1191,18 @@ router.get(
   authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
+    const isDoctor = req.auth!.role === "DOCTOR";
+    const actorId = isDoctor ? getActorCenterUserId(req) : undefined;
     const [referrals, outgoingReferralRequests, center] = await Promise.all([
       prisma.centralReferral.findMany({
-        where: {
-          OR: [{ fromCenterId: centerId }, { toCenterId: centerId }]
-        },
+        where: isDoctor
+          ? {
+              toCenterId: centerId,
+              assignedDoctorId: actorId
+            }
+          : {
+              OR: [{ fromCenterId: centerId }, { toCenterId: centerId }]
+            },
         include: centralReferralInclude,
         orderBy: {
           requestedAt: "desc"
@@ -1209,7 +1228,14 @@ router.get(
     res.json(
       [
         ...referrals.map(mapCentralReferral),
-        ...outgoingReferralRequests.map((notification) => {
+        ...outgoingReferralRequests.filter((notification) => {
+          if (!isDoctor) {
+            return true;
+          }
+
+          const payload = notification.payload as Record<string, unknown>;
+          return Number(payload.created_by_doctor_id) === actorId;
+        }).map((notification) => {
           const payload = notification.payload as Record<string, unknown>;
 
           return {
@@ -1251,6 +1277,7 @@ router.post(
   authorize("CENTER_MANAGER", "DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
+    const actorId = getActorCenterUserId(req);
     const payload = referralSchema.parse(req.body);
 
     let patientUnifiedId = payload.patientUnifiedId;
@@ -1275,7 +1302,13 @@ router.post(
       required_medicine_ids: payload.requiredMedicineIds,
       preferred_region: payload.preferredRegion,
       max_distance_km: payload.maxDistanceKm,
-      notes_from_sender: payload.notesFromSender
+      notes_from_sender: payload.notesFromSender,
+      ...(req.auth!.role === "DOCTOR"
+        ? {
+            created_by_doctor_id: actorId,
+            created_by_doctor_username: req.auth!.username ?? null
+          }
+        : {})
     });
 
     if (payload.processNow) {
@@ -1806,7 +1839,12 @@ router.get(
   "/notifications",
   authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"),
   asyncHandler(async (req, res) => {
-    res.json(await getCenterNotifications(getCenterId(req)));
+    res.json(
+      await getCenterNotifications(getCenterId(req), {
+        role: req.auth!.role,
+        actorId: getActorCenterUserId(req)
+      })
+    );
   })
 );
 
@@ -1815,10 +1853,19 @@ router.get(
   authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "LAB_TECH", "PHARMACIST", "NURSE"),
   asyncHandler(async (req, res) => {
     const count = await prisma.centerSystemAlert.count({
-      where: {
-        centerId: getCenterId(req),
-        isResolved: false
-      }
+      where:
+        req.auth!.role === "DOCTOR"
+          ? {
+              centerId: getCenterId(req),
+              isResolved: false,
+              alertType: {
+                startsWith: "ROLE_DOCTOR_"
+              }
+            }
+          : {
+              centerId: getCenterId(req),
+              isResolved: false
+            }
     });
 
     res.json({ count });

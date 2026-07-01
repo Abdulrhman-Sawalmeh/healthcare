@@ -144,7 +144,7 @@ router.get(
 
 router.get(
   "/catalogs",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const medicines = await prisma.pharmacyInventoryLocal.findMany({
       where: { centerId: centerIdFromRequest(req) },
@@ -156,7 +156,7 @@ router.get(
 
 router.patch(
   "/:visitId/assign-doctor",
-  authorize("CENTER_MANAGER", "RECEPTIONIST"),
+  authorize("RECEPTIONIST"),
   asyncHandler(async (req, res) => {
     const centerId = centerIdFromRequest(req);
     const visitId = Number(req.params.visitId);
@@ -198,9 +198,84 @@ router.patch(
   })
 );
 
+router.patch(
+  "/:visitId/start-treatment",
+  authorize("DOCTOR"),
+  asyncHandler(async (req, res) => {
+    const centerId = centerIdFromRequest(req);
+    const visitId = Number(req.params.visitId);
+    const doctorId = Number(req.auth!.sub);
+    const visit = await requireVisit(centerId, visitId);
+
+    if (visit.doctorId !== doctorId) {
+      return res.status(403).json({ message: "هذه الزيارة معينة لطبيب آخر." });
+    }
+
+    const updatedVisit = visit.workflowStatus === "WAITING_DOCTOR"
+      ? await prisma.localVisit.update({
+          where: { id: visitId },
+          data: {
+            workflowStatus: "IN_TREATMENT"
+          },
+          include: {
+            patient: true,
+            doctor: { select: { id: true, fullName: true, role: true } },
+            prescriptions: true,
+            resultReports: {
+              include: {
+                author: {
+                  include: {
+                    doctorProfile: true
+                  }
+                }
+              },
+              orderBy: {
+                createdAt: "desc"
+              }
+            },
+            invoice: true
+          }
+        })
+      : await prisma.localVisit.findUniqueOrThrow({
+          where: { id: visitId },
+          include: {
+            patient: true,
+            doctor: { select: { id: true, fullName: true, role: true } },
+            prescriptions: true,
+            resultReports: {
+              include: {
+                author: {
+                  include: {
+                    doctorProfile: true
+                  }
+                }
+              },
+              orderBy: {
+                createdAt: "desc"
+              }
+            },
+            invoice: true
+          }
+        });
+
+    if (visit.workflowStatus === "WAITING_DOCTOR") {
+      await recordAuditLog(req, {
+        action: "START_VISIT_TREATMENT",
+        entityType: "LocalVisit",
+        entityId: visitId,
+        centerId,
+        oldValue: { workflowStatus: visit.workflowStatus },
+        newValue: { workflowStatus: updatedVisit.workflowStatus }
+      });
+    }
+
+    res.json(updatedVisit);
+  })
+);
+
 router.post(
   "/",
-  authorize("CENTER_MANAGER", "RECEPTIONIST"),
+  authorize("RECEPTIONIST"),
   asyncHandler(async (req, res) => {
     const centerId = centerIdFromRequest(req);
     const payload = createVisitSchema.parse(req.body);
@@ -274,7 +349,7 @@ router.post(
 
 router.patch(
   "/:visitId/doctor",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = centerIdFromRequest(req);
     const visitId = Number(req.params.visitId);
@@ -366,7 +441,7 @@ router.patch(
 
 router.post(
   "/:visitId/report-link",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = centerIdFromRequest(req);
     const visitId = Number(req.params.visitId);
@@ -441,7 +516,7 @@ router.post(
 
 router.post(
   "/:visitId/complete",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = centerIdFromRequest(req);
     const visitId = Number(req.params.visitId);
@@ -490,7 +565,7 @@ router.post(
 
 router.patch(
   "/:visitId/cancel",
-  authorize("CENTER_MANAGER", "RECEPTIONIST"),
+  authorize("RECEPTIONIST"),
   asyncHandler(async (req, res) => {
     const centerId = centerIdFromRequest(req);
     const visitId = Number(req.params.visitId);
@@ -534,7 +609,7 @@ router.patch(
 
 router.post(
   "/:visitId/upload",
-  authorize("CENTER_MANAGER", "DOCTOR"),
+  authorize("DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = centerIdFromRequest(req);
     const visitId = Number(req.params.visitId);

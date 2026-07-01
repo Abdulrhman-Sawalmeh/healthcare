@@ -785,12 +785,19 @@ table {
   padding: 1.2rem;
   position: sticky;
   top: 1.6rem;
+  max-height: min(72vh, 620px);
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .notification-list {
   display: grid;
   gap: 0.9rem;
   margin-top: 1rem;
+  max-height: min(54vh, 430px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-inline-end: 0.2rem;
 }
 
 .notification-header {

@@ -295,7 +295,7 @@ async function generateWithGemini(input: CareInsightInput, fallback: CareInsight
   const apiKey = env.GEMINI_API_KEY?.trim();
 
   if (!apiKey) {
-    return fallback;
+    return null;
   }
 
   const response = await fetch(
@@ -339,6 +339,30 @@ async function generateWithGemini(input: CareInsightInput, fallback: CareInsight
   }
 }
 
+type RuntimeProvider = "openrouter" | "gemini";
+
+function getProviderOrder(provider: typeof env.AI_PROVIDER): RuntimeProvider[] {
+  if (provider === "gemini") {
+    return ["gemini", "openrouter"];
+  }
+
+  return ["openrouter", "gemini"];
+}
+
+async function tryGenerateWithProvider(
+  provider: RuntimeProvider,
+  input: CareInsightInput,
+  fallback: CareInsightResponse
+) {
+  try {
+    return provider === "openrouter"
+      ? await generateWithOpenRouter(input, fallback)
+      : await generateWithGemini(input, fallback);
+  } catch {
+    return null;
+  }
+}
+
 export async function generateCareInsights(input: CareInsightInput): Promise<CareInsightResponse> {
   const fallback = buildLocalResponse(input);
   const provider = env.AI_PROVIDER;
@@ -347,27 +371,13 @@ export async function generateCareInsights(input: CareInsightInput): Promise<Car
     return fallback;
   }
 
-  if (provider === "openrouter") {
-    return (await generateWithOpenRouter(input, fallback)) ?? fallback;
-  }
+  for (const candidate of getProviderOrder(provider)) {
+    const result = await tryGenerateWithProvider(candidate, input, fallback);
 
-  if (provider === "gemini") {
-    return generateWithGemini(input, fallback);
-  }
-
-  try {
-    const openRouterResult = await generateWithOpenRouter(input, fallback);
-
-    if (openRouterResult) {
-      return openRouterResult;
+    if (result) {
+      return result;
     }
-  } catch {
-    undefined;
   }
 
-  try {
-    return await generateWithGemini(input, fallback);
-  } catch {
-    return fallback;
-  }
+  return fallback;
 }

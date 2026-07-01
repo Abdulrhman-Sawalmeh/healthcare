@@ -2477,6 +2477,8 @@ a.ghost-button {
   box-shadow: 0 24px 60px rgba(0, 78, 37, 0.2);
   direction: rtl;
   text-align: right;
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .notification-dropdown .notification-list {

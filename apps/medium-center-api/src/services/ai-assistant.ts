@@ -49,6 +49,9 @@ type OpenRouterResponse = {
 const disclaimer =
   "هذا مساعد داعم لاتخاذ القرار ولا يقدم تشخيصًا نهائيًا. عند وجود أعراض خطرة أو تدهور سريع يجب التواصل فورًا مع الطوارئ أو الطبيب المناوب.";
 
+const medicalOnlyApology =
+  "أعتذر، لا أستطيع الإجابة عن هذا السؤال لأنه خارج نطاق الطب والرعاية الصحية. يمكنني مساعدتك فقط في الأسئلة الطبية مثل الأعراض، الفرز السريري، المتابعة، الأدوية، التحاليل، أو مؤشرات الخطورة.";
+
 function compact(value?: string) {
   return value?.trim() || "غير مذكور";
 }
@@ -103,6 +106,143 @@ function inferUrgency(message: string): CareInsightResponse["urgency"] {
   }
 
   return "ROUTINE";
+}
+
+function normalizeForScope(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي");
+}
+
+function isMedicalQuestion(input: CareInsightInput) {
+  const text = normalizeForScope(
+    [
+      input.message,
+      input.chronicDiseases,
+      input.allergies,
+      input.currentMedications,
+      input.gender
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  const medicalKeywords = [
+    "الم",
+    "وجع",
+    "اعراض",
+    "عرض",
+    "مرض",
+    "مريض",
+    "طبيب",
+    "دكتور",
+    "ممرض",
+    "صيدلي",
+    "دواء",
+    "ادويه",
+    "علاج",
+    "جرعه",
+    "وصفه",
+    "حساسيه",
+    "ضغط",
+    "سكري",
+    "سكر",
+    "حراره",
+    "حمي",
+    "حمى",
+    "صداع",
+    "دوخه",
+    "غثيان",
+    "قيء",
+    "اسهال",
+    "امساك",
+    "سعال",
+    "كحه",
+    "ضيق نفس",
+    "صدر",
+    "قلب",
+    "نزيف",
+    "جرح",
+    "كسر",
+    "حرق",
+    "جلطه",
+    "تشنج",
+    "حمل",
+    "تحاليل",
+    "تحليل",
+    "مختبر",
+    "اشعه",
+    "ضغط الدم",
+    "نبض",
+    "اكسجين",
+    "طوارئ",
+    "اسعاف",
+    "عياده",
+    "زيارة",
+    "زياره",
+    "متابعه",
+    "تشخيص",
+    "medical",
+    "medicine",
+    "health",
+    "healthcare",
+    "doctor",
+    "nurse",
+    "patient",
+    "symptom",
+    "symptoms",
+    "pain",
+    "fever",
+    "cough",
+    "headache",
+    "dizziness",
+    "nausea",
+    "vomiting",
+    "diarrhea",
+    "constipation",
+    "chest",
+    "breath",
+    "bleeding",
+    "wound",
+    "fracture",
+    "burn",
+    "stroke",
+    "seizure",
+    "pregnancy",
+    "diabetes",
+    "hypertension",
+    "allergy",
+    "medication",
+    "dose",
+    "prescription",
+    "lab",
+    "test",
+    "xray",
+    "triage",
+    "diagnosis",
+    "treatment",
+    "follow up"
+  ];
+
+  return medicalKeywords.some((keyword) => text.includes(normalizeForScope(keyword)));
+}
+
+function buildOutOfScopeResponse(): CareInsightResponse {
+  return {
+    source: "local-fallback",
+    urgency: "LOW",
+    summary: medicalOnlyApology,
+    suggestedActions: [
+      "أعد صياغة السؤال بحيث يكون متعلقًا بالصحة أو الأعراض أو الرعاية الطبية.",
+      "إذا كانت لديك أعراض أو حالة صحية، اذكر العمر والأعراض ومدة ظهورها والأدوية الحالية."
+    ],
+    questionsForClinician: [],
+    redFlags: [],
+    selfCare: [],
+    disclaimer
+  };
 }
 
 function buildLocalResponse(input: CareInsightInput): CareInsightResponse {
@@ -161,6 +301,7 @@ function makePrompt(input: CareInsightInput) {
 You are a careful healthcare AI assistant embedded in a local health center system.
 Respond in Arabic. Do not provide a final diagnosis. Do not prescribe medication.
 Prioritize triage, next steps, clinician questions, and safety red flags.
+You must only answer medical and healthcare questions. If the user asks about a non-medical topic, return the Arabic refusal summary and do not answer the non-medical question.
 
 Center: ${compact(input.centerName)}
 User role: ${input.role}
@@ -295,7 +436,7 @@ async function generateWithGemini(input: CareInsightInput, fallback: CareInsight
   const apiKey = env.GEMINI_API_KEY?.trim();
 
   if (!apiKey) {
-    return fallback;
+    return null;
   }
 
   const response = await fetch(
@@ -339,7 +480,35 @@ async function generateWithGemini(input: CareInsightInput, fallback: CareInsight
   }
 }
 
+type RuntimeProvider = "openrouter" | "gemini";
+
+function getProviderOrder(provider: typeof env.AI_PROVIDER): RuntimeProvider[] {
+  if (provider === "gemini") {
+    return ["gemini", "openrouter"];
+  }
+
+  return ["openrouter", "gemini"];
+}
+
+async function tryGenerateWithProvider(
+  provider: RuntimeProvider,
+  input: CareInsightInput,
+  fallback: CareInsightResponse
+) {
+  try {
+    return provider === "openrouter"
+      ? await generateWithOpenRouter(input, fallback)
+      : await generateWithGemini(input, fallback);
+  } catch {
+    return null;
+  }
+}
+
 export async function generateCareInsights(input: CareInsightInput): Promise<CareInsightResponse> {
+  if (env.AI_MEDICAL_ONLY && !isMedicalQuestion(input)) {
+    return buildOutOfScopeResponse();
+  }
+
   const fallback = buildLocalResponse(input);
   const provider = env.AI_PROVIDER;
 
@@ -347,27 +516,13 @@ export async function generateCareInsights(input: CareInsightInput): Promise<Car
     return fallback;
   }
 
-  if (provider === "openrouter") {
-    return (await generateWithOpenRouter(input, fallback)) ?? fallback;
-  }
+  for (const candidate of getProviderOrder(provider)) {
+    const result = await tryGenerateWithProvider(candidate, input, fallback);
 
-  if (provider === "gemini") {
-    return generateWithGemini(input, fallback);
-  }
-
-  try {
-    const openRouterResult = await generateWithOpenRouter(input, fallback);
-
-    if (openRouterResult) {
-      return openRouterResult;
+    if (result) {
+      return result;
     }
-  } catch {
-    undefined;
   }
 
-  try {
-    return await generateWithGemini(input, fallback);
-  } catch {
-    return fallback;
-  }
+  return fallback;
 }

@@ -1,9 +1,27 @@
-import { CenterUserRole } from "@prisma/client";
+import { CenterUserRole, Prisma } from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
 
 const hiddenCenterRoles: CenterUserRole[] = ["LAB_TECH", "PHARMACIST", "NURSE"];
+const activeReferralStatuses = [
+  "PENDING",
+  "REQUESTED",
+  "AUTO_SELECTED",
+  "PENDING_RECEIVING_MANAGER",
+  "RECEIVING_MANAGER_ACCEPTED",
+  "ASSIGNED_TO_DOCTOR",
+  "VISIT_CREATED"
+];
+
+type RoleScope = {
+  role?: string;
+  actorId?: number;
+};
+
+function isDoctorScope(scope: RoleScope = {}) {
+  return scope.role === "DOCTOR" && Number.isInteger(scope.actorId) && Number(scope.actorId) > 0;
+}
 
 export async function getCentralDashboardData() {
   const [
@@ -409,7 +427,29 @@ export async function getReportsSummary() {
   };
 }
 
-export async function getCenterWorkspaceData(centerId: number, role: string) {
+export async function getCenterWorkspaceData(centerId: number, role: string, actorId?: number) {
+  const doctorScoped = isDoctorScope({ role, actorId });
+  const doctorId = doctorScoped ? Number(actorId) : undefined;
+  const visitWhere: Prisma.LocalVisitWhereInput = doctorScoped ? { centerId, doctorId } : { centerId };
+  const patientWhere: Prisma.LocalPatientWhereInput = doctorScoped
+    ? {
+        centerId,
+        visits: {
+          some: {
+            doctorId
+          }
+        }
+      }
+    : { centerId };
+  const referralWhere: Prisma.CentralReferralWhereInput = doctorScoped
+    ? {
+        toCenterId: centerId,
+        assignedDoctorId: doctorId
+      }
+    : {
+        OR: [{ fromCenterId: centerId }, { toCenterId: centerId }]
+      };
+
   const [center, team, localPatients, unsyncedVisits, incomingPending, outgoingPending, referrals, recentVisits] =
     await Promise.all([
       prisma.centralCenter.findUnique({
@@ -432,10 +472,10 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
         },
         orderBy: [{ role: "asc" }, { fullName: "asc" }]
       }),
-      prisma.localPatient.count({ where: { centerId } }),
+      prisma.localPatient.count({ where: patientWhere }),
       prisma.localVisit.count({
         where: {
-          centerId,
+          ...visitWhere,
           syncedToCentral: false
         }
       }),
@@ -456,9 +496,7 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
         }
       }),
       prisma.centralReferral.findMany({
-        where: {
-          OR: [{ fromCenterId: centerId }, { toCenterId: centerId }]
-        },
+        where: referralWhere,
         include: {
           patient: true,
           fromCenter: true,
@@ -470,7 +508,7 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
         take: 6
       }),
       prisma.localVisit.findMany({
-        where: { centerId },
+        where: visitWhere,
         include: {
           patient: true,
           doctor: true,
@@ -486,6 +524,59 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
   if (!center) {
     throw new AppError("تعذر العثور على مساحة عمل المركز.", 404);
   }
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = new Date(todayStart);
+  todayEnd.setDate(todayEnd.getDate() + 1);
+
+  const [doctorWaitingFiles, doctorTodayVisits, doctorInTreatment, doctorAssignedReferrals] = doctorScoped
+    ? await Promise.all([
+        prisma.localVisit.count({
+          where: {
+            centerId,
+            doctorId,
+            workflowStatus: {
+              in: ["WAITING_DOCTOR", "IN_TREATMENT"]
+            }
+          }
+        }),
+        prisma.localVisit.count({
+          where: {
+            centerId,
+            doctorId,
+            visitDate: {
+              gte: todayStart,
+              lt: todayEnd
+            }
+          }
+        }),
+        prisma.localVisit.count({
+          where: {
+            centerId,
+            doctorId,
+            workflowStatus: "IN_TREATMENT"
+          }
+        }),
+        prisma.centralReferral.count({
+          where: {
+            toCenterId: centerId,
+            assignedDoctorId: doctorId,
+            status: {
+              in: ["ASSIGNED_TO_DOCTOR", "VISIT_CREATED"]
+            }
+          }
+        })
+      ])
+    : [0, 0, 0, 0];
+  const doctorNotifications = doctorScoped
+    ? await getCenterNotifications(centerId, { role, actorId: doctorId })
+    : null;
+  const doctorActionNotifications = doctorNotifications
+    ? doctorNotifications.alerts.filter((alert) => !alert.isResolved).length +
+      doctorNotifications.incoming.filter((item) => item.status !== "COMPLETED").length +
+      doctorNotifications.outgoing.filter((item) => item.status !== "COMPLETED").length
+    : 0;
 
   const [labOpenRequests, lowStockItems, invoiceTotals, invoices, inventory, labCatalog] = await Promise.all([
     prisma.labRequestLocal.count({
@@ -572,18 +663,15 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
       incomingPending,
       outgoingPending,
       openReferrals: referrals.filter((item) =>
-        [
-          "PENDING",
-          "REQUESTED",
-          "AUTO_SELECTED",
-          "PENDING_RECEIVING_MANAGER",
-          "RECEIVING_MANAGER_ACCEPTED",
-          "ASSIGNED_TO_DOCTOR",
-          "VISIT_CREATED"
-        ].includes(item.status)
+        activeReferralStatuses.includes(item.status)
       ).length,
       labOpenRequests,
-      lowStockItems
+      lowStockItems,
+      doctorWaitingFiles,
+      doctorTodayVisits,
+      doctorInTreatment,
+      doctorAssignedReferrals,
+      doctorActionNotifications
     },
     financial: {
       invoices: {
@@ -638,10 +726,23 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
   };
 }
 
-export async function getCenterPatients(centerId: number, search?: string) {
+export async function getCenterPatients(centerId: number, search?: string, scope: RoleScope = {}) {
+  const doctorScoped = isDoctorScope(scope);
+  const doctorId = doctorScoped ? Number(scope.actorId) : undefined;
+  const visitFilter = doctorScoped ? { doctorId } : {};
+
   const patients = await prisma.localPatient.findMany({
     where: {
       centerId,
+      ...(doctorScoped
+        ? {
+            visits: {
+              some: {
+                doctorId
+              }
+            }
+          }
+        : {}),
       ...(search
         ? {
             OR: [
@@ -664,6 +765,7 @@ export async function getCenterPatients(centerId: number, search?: string) {
     include: {
       unifiedPatient: true,
       visits: {
+        where: visitFilter,
         orderBy: {
           visitDate: "desc"
         },
@@ -706,9 +808,16 @@ export async function getCenterPatients(centerId: number, search?: string) {
   }));
 }
 
-export async function getCenterVisits(centerId: number) {
+export async function getCenterVisits(centerId: number, scope: RoleScope = {}) {
+  const where: Prisma.LocalVisitWhereInput = isDoctorScope(scope)
+    ? {
+        centerId,
+        doctorId: Number(scope.actorId)
+      }
+    : { centerId };
+
   const visits = await prisma.localVisit.findMany({
-    where: { centerId },
+    where,
     include: {
       patient: true,
       doctor: true,
@@ -858,31 +967,52 @@ export async function getCenterPharmacyData(centerId: number) {
   }));
 }
 
-export async function getCenterNotifications(centerId: number) {
+export async function getCenterNotifications(centerId: number, scope: RoleScope = {}) {
+  const doctorScoped = isDoctorScope(scope);
+
   const [incoming, outgoing, alerts, logs] = await Promise.all([
     prisma.incomingNotification.findMany({
-      where: { centerId },
+      where: doctorScoped
+        ? {
+            centerId,
+            notificationType: {
+              in: ["NOTIFY_REFERRAL", "NOTIFY_REFERRAL_RESPONSE", "ALERT"]
+            }
+          }
+        : { centerId },
       orderBy: {
         receivedAt: "desc"
       },
       take: 20
     }),
     prisma.outgoingNotification.findMany({
-      where: { centerId },
+      where: doctorScoped
+        ? {
+            centerId,
+            notificationType: "REFERRAL_REQUEST"
+          }
+        : { centerId },
       orderBy: {
         createdAt: "desc"
       },
       take: 20
     }),
     prisma.centerSystemAlert.findMany({
-      where: { centerId },
+      where: doctorScoped
+        ? {
+            centerId,
+            alertType: {
+              startsWith: "ROLE_DOCTOR_"
+            }
+          }
+        : { centerId },
       orderBy: {
         createdAt: "desc"
       },
       take: 12
     }),
     prisma.notificationProcessingLog.findMany({
-      where: { centerId },
+      where: doctorScoped ? { centerId, id: -1 } : { centerId },
       orderBy: {
         createdAt: "desc"
       },
@@ -903,7 +1033,12 @@ export async function getCenterNotifications(centerId: number) {
 
   return {
     incoming,
-    outgoing,
+    outgoing: doctorScoped
+      ? outgoing.filter((notification) => {
+          const payload = notification.payload as Record<string, unknown>;
+          return Number(payload.created_by_doctor_id) === Number(scope.actorId);
+        })
+      : outgoing,
     alerts: alerts.map(mapAlert),
     logs
   };

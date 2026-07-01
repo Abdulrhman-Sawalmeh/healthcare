@@ -360,6 +360,28 @@ table {
   width: auto;
 }
 
+.checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0.6rem;
+}
+
+.checkbox-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 38px;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  font-weight: 700;
+}
+
+.checkbox-chip input {
+  width: auto;
+}
+
 .field input,
 .field select,
 .field textarea {
@@ -785,12 +807,19 @@ table {
   padding: 1.2rem;
   position: sticky;
   top: 1.6rem;
+  max-height: min(72vh, 620px);
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .notification-list {
   display: grid;
   gap: 0.9rem;
   margin-top: 1rem;
+  max-height: min(54vh, 430px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-inline-end: 0.2rem;
 }
 
 .notification-header {
@@ -1083,6 +1112,45 @@ table {
   font-size: 0.92rem;
 }
 
+.referral-details-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgba(25, 37, 35, 0.34);
+}
+
+.referral-details-dialog {
+  width: min(920px, 100%);
+  max-height: min(86vh, 760px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.referral-row-highlight {
+  box-shadow: inset 4px 0 0 var(--accent);
+  background: rgba(15, 118, 99, 0.07);
+}
+
+.visit-file-row-highlight {
+  animation: visit-file-pulse 1.2s ease-in-out 2;
+  box-shadow: inset 4px 0 0 var(--accent);
+  background: rgba(15, 118, 99, 0.1);
+}
+
+@keyframes visit-file-pulse {
+  0%,
+  100% {
+    background: rgba(15, 118, 99, 0.08);
+  }
+
+  50% {
+    background: rgba(240, 143, 82, 0.18);
+  }
+}
+
 .inset-card {
   box-shadow: none;
   background: var(--surface-strong);
@@ -1092,6 +1160,42 @@ table {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
+}
+
+.form-section-title {
+  padding: 0.35rem 0 0.1rem;
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.inline-field-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.compact-button {
+  min-height: 38px;
+  padding: 0.55rem 0.85rem;
+}
+
+.compact-checkbox-grid {
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 0.45rem;
+}
+
+.manager-permission-note {
+  align-self: start;
+}
+
+.ltr-value {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.referral-checkbox-field {
+  align-content: center;
 }
 
 .field-span-2 {

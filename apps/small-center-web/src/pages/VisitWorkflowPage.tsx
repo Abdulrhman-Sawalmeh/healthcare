@@ -1,4 +1,5 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
@@ -150,8 +151,16 @@ function reportDepartment(report: NonNullable<WorkflowVisit["resultReports"]>[nu
   return report.author.doctorProfile?.specialization ?? reportCategoryLabel(report.category);
 }
 
+function workflowActionLabel(status: string) {
+  if (status === "WAITING_DOCTOR") return "بدء المعالجة";
+  if (status === "IN_TREATMENT") return "متابعة المعالجة";
+  if (["READY_TO_UPLOAD", "UPLOAD_PENDING", "UPLOADED", "COMPLETED"].includes(status)) return "عرض الملف";
+  return "فتح الملف";
+}
+
 export function VisitWorkflowPage() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const role = user?.role;
   const [visits, setVisits] = useState<WorkflowVisit[]>([]);
   const [options, setOptions] = useState<IntakeOptions>({ patients: [], doctors: [] });
@@ -162,12 +171,23 @@ export function VisitWorkflowPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [reportLinkForm, setReportLinkForm] = useState(defaultReportLinkForm);
+  const [highlightVisitId, setHighlightVisitId] = useState<number | null>(null);
+  const rowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
 
-  const canIntake = hasRole(role, ["CENTER_MANAGER", "RECEPTIONIST"]);
-  const canAssess = hasRole(role, ["CENTER_MANAGER", "DOCTOR"]);
+  const canIntake = hasRole(role, ["RECEPTIONIST"]);
+  const canAssess = hasRole(role, ["DOCTOR"]);
   const selectedVisit = useMemo(
     () => visits.find((visit) => visit.id === selectedVisitId) ?? null,
     [selectedVisitId, visits]
+  );
+  const visitFileStats = useMemo(
+    () => ({
+      waitingDoctor: visits.filter((visit) => visit.workflowStatus === "WAITING_DOCTOR").length,
+      inTreatment: visits.filter((visit) => visit.workflowStatus === "IN_TREATMENT").length,
+      readyReports: visits.filter((visit) => ["READY_TO_UPLOAD", "COMPLETED", "UPLOADED"].includes(visit.workflowStatus)).length,
+      urgent: visits.filter((visit) => visit.priority !== "NORMAL").length
+    }),
+    [visits]
   );
 
   const canAddReportLink =
@@ -200,6 +220,38 @@ export function VisitWorkflowPage() {
     void loadPage();
   }, [loadPage]);
 
+  useEffect(() => {
+    const visitId = Number(searchParams.get("visitId") ?? 0);
+
+    if (visitId > 0 && status) {
+      setStatus("");
+      return;
+    }
+
+    const targetVisit = visits.find((visit) => visit.id === visitId);
+
+    if (targetVisit) {
+      void openVisitFile(targetVisit, true);
+    }
+  }, [searchParams, visits]);
+
+  useEffect(() => {
+    if (!highlightVisitId) {
+      return;
+    }
+
+    rowRefs.current[highlightVisitId]?.scrollIntoView({
+      behavior: "smooth",
+      block: "center"
+    });
+
+    const timeout = window.setTimeout(() => {
+      setHighlightVisitId(null);
+    }, 2800);
+
+    return () => window.clearTimeout(timeout);
+  }, [highlightVisitId]);
+
   async function runAction(visitId: number, action: () => Promise<unknown>, success: string) {
     try {
       setBusyId(visitId);
@@ -210,6 +262,34 @@ export function VisitWorkflowPage() {
       await loadVisits();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر تنفيذ العملية.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function openVisitFile(visit: WorkflowVisit, highlight = false) {
+    setSelectedVisitId(visit.id);
+
+    if (highlight) {
+      setHighlightVisitId(visit.id);
+    }
+
+    if (!canAssess || visit.workflowStatus !== "WAITING_DOCTOR") {
+      return;
+    }
+
+    try {
+      setBusyId(visit.id);
+      const updatedVisit = await apiRequest<WorkflowVisit>(`/center/visit-workflow/${visit.id}/start-treatment`, {
+        method: "PATCH"
+      });
+
+      setVisits((current) =>
+        current.map((item) => (item.id === updatedVisit.id ? { ...item, ...updatedVisit } : item))
+      );
+      setSelectedVisitId(updatedVisit.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "تعذر بدء معالجة ملف الزيارة.");
     } finally {
       setBusyId(null);
     }
@@ -355,6 +435,31 @@ export function VisitWorkflowPage() {
       {error ? <div className="error-banner">{error}</div> : null}
       {message ? <div className="success-banner">{message}</div> : null}
 
+      {canAssess ? (
+        <section className="metric-grid">
+          <article className="metric-card">
+            <span className="eyebrow">بانتظار الطبيب</span>
+            <h3>{visitFileStats.waitingDoctor}</h3>
+            <p className="muted">ملفات جاهزة لبدء المعالجة السريرية.</p>
+          </article>
+          <article className="metric-card">
+            <span className="eyebrow">قيد المعالجة</span>
+            <h3>{visitFileStats.inTreatment}</h3>
+            <p className="muted">ملفات بدأ تقييمها وتحتاج استكمال الخطة.</p>
+          </article>
+          <article className="metric-card">
+            <span className="eyebrow">تقارير جاهزة</span>
+            <h3>{visitFileStats.readyReports}</h3>
+            <p className="muted">ملفات لها تقييم محفوظ أو تقرير جاهز للمتابعة.</p>
+          </article>
+          <article className="metric-card">
+            <span className="eyebrow">أولوية مرتفعة</span>
+            <h3>{visitFileStats.urgent}</h3>
+            <p className="muted">زيارات عاجلة أو طارئة ضمن القائمة الحالية.</p>
+          </article>
+        </section>
+      ) : null}
+
       {canIntake ? (
         <SectionCard title="تسجيل زيارة جديدة" subtitle="إدخال المريض من حجز موعد أو إحالة أو وصول مباشر إلى المركز">
           <form className="form-grid" onSubmit={submitVisit}>
@@ -432,15 +537,28 @@ export function VisitWorkflowPage() {
                   <th>الطبيب</th>
                   <th>حالة الملف</th>
                   <th>الأولوية</th>
-                  <th>الأدوية</th>
+                  <th>وصفات هذه الزيارة</th>
                   <th>إجراء</th>
                 </tr>
               </thead>
               <tbody>
                 {visits.map((visit) => (
-                  <tr key={visit.id} className={selectedVisitId === visit.id ? "is-selected" : undefined}>
+                  <tr
+                    key={visit.id}
+                    ref={(element) => {
+                      rowRefs.current[visit.id] = element;
+                    }}
+                    className={[
+                      selectedVisitId === visit.id ? "is-selected" : "",
+                      highlightVisitId === visit.id ? "visit-file-row-highlight" : ""
+                    ].filter(Boolean).join(" ") || undefined}
+                  >
                     <td>
                       <strong>{visit.patient.fullName}</strong>
+                      <span>
+                        {formatDate(visit.visitDate)} {visit.visitTime ? `- ${visit.visitTime}` : ""} |{" "}
+                        {visitTypeLabels[visit.visitType ?? ""] ?? valueOrDash(visit.visitType)}
+                      </span>
                       <span>{visit.patient.phone}</span>
                     </td>
                     <td>{visit.doctor?.fullName ?? "لم يحدد بعد"}</td>
@@ -455,14 +573,19 @@ export function VisitWorkflowPage() {
                         {priorityLabels[visit.priority]}
                       </span>
                     </td>
-                    <td>{visit.prescriptions?.length ?? 0}</td>
+                    <td>
+                      {["WAITING_RECEPTION", "WAITING_DOCTOR"].includes(visit.workflowStatus)
+                        ? "بانتظار الطبيب"
+                        : visit.prescriptions?.length ?? 0}
+                    </td>
                     <td>
                       <button
                         className={selectedVisitId === visit.id ? "primary-button" : "ghost-button"}
                         type="button"
-                        onClick={() => setSelectedVisitId(visit.id)}
+                        onClick={() => void openVisitFile(visit)}
+                        disabled={busyId === visit.id}
                       >
-                        {selectedVisitId === visit.id ? "مفتوح" : "فتح الملف"}
+                        {busyId === visit.id ? "جارٍ الفتح..." : selectedVisitId === visit.id ? "مفتوح" : workflowActionLabel(visit.workflowStatus)}
                       </button>
                     </td>
                   </tr>
@@ -558,8 +681,8 @@ export function VisitWorkflowPage() {
             <article className="visit-file-section">
               <header className="section-header">
                 <div>
-                  <h3>روابط التقارير الطبية</h3>
-                  <p className="muted">بعد حفظ تقييم الطبيب، أضف رابط التقرير الخارجي ليظهر للمريض ويفتح في صفحة جديدة.</p>
+                  <h3>إضافة تقرير طبي</h3>
+                  <p className="muted">بعد حفظ تقييم الطبيب، أرفق رابط التقرير الخارجي وحدد ظهوره للمريض من صفحة مستقلة.</p>
                 </div>
               </header>
               {!canAddReportLink && canAssess ? (
@@ -576,7 +699,7 @@ export function VisitWorkflowPage() {
                         <th>اسم القسم</th>
                         <th>تاريخ الطلب</th>
                         <th>نوع التقرير</th>
-                        <th>رابط التقرير</th>
+                        <th>إرفاق رابط تقرير خارجي</th>
                         <th>الإجراء</th>
                       </tr>
                     </thead>
@@ -787,13 +910,6 @@ export function VisitWorkflowPage() {
               )}
             </article>
 
-            {selectedVisit.invoice ? (
-              <div className="inline-note">
-                قيمة الفاتورة: {selectedVisit.invoice.amount.toFixed(2)} شيكل
-                {selectedVisit.invoice.paidAmount != null ? ` | المدفوع: ${selectedVisit.invoice.paidAmount.toFixed(2)} شيكل` : ""}
-              </div>
-            ) : null}
-
             {canAssess ? (
               <div className="visit-detail-actions">
                 {selectedVisit.workflowStatus === "READY_TO_UPLOAD" && selectedVisit.uploadStatus === "NOT_READY" ? (
@@ -805,11 +921,11 @@ export function VisitWorkflowPage() {
                       void runAction(
                         selectedVisit.id,
                         () => apiRequest(`/center/visit-workflow/${selectedVisit.id}/complete`, { method: "POST" }),
-                        "تم إنشاء الفاتورة وتجهيز الملف."
+                        "تم تجهيز ملف الزيارة للإرسال."
                       )
                     }
                   >
-                    إنشاء الفاتورة وتجهيز الملف
+                    تجهيز الملف للإرسال
                   </button>
                 ) : null}
                 {["READY", "FAILED"].includes(selectedVisit.uploadStatus) ? (
@@ -833,7 +949,7 @@ export function VisitWorkflowPage() {
           </div>
         </SectionCard>
       ) : visits.length > 0 ? (
-        <div className="empty-state">اختر ملف زيارة من الجدول لعرض تفاصيله.</div>
+        <div className="empty-state">اختر ملف زيارة من الجدول لعرض التفاصيل الطبية وخطة المعالجة.</div>
       ) : null}
     </div>
   );

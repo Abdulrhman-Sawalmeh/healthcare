@@ -8,6 +8,11 @@ import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
 import { navigationItems } from "../data/navigation";
 import { formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
+import {
+  buildDoctorActionNotifications,
+  DoctorVisitFileNotificationSource,
+  summarizeUnreadMessages
+} from "../lib/doctor-notifications";
 import { resolveNotificationPath } from "../lib/notification-routing";
 import {
   CenterNotificationsBundle,
@@ -42,40 +47,6 @@ function userInitials(name: string) {
     .slice(0, 2)
     .map((part) => part[0])
     .join("");
-}
-
-function summarizeUnreadMessages(threads: PortalThreadRecord[], currentRole: string) {
-  let unreadMessages = 0;
-  let unreadThreads = 0;
-  let latestUnreadTimestamp = 0;
-
-  for (const thread of threads) {
-    const unreadThreadMessages = thread.messages.filter(
-      (message) => !message.isRead && message.sender.role !== currentRole
-    );
-
-    if (unreadThreadMessages.length === 0) {
-      continue;
-    }
-
-    unreadMessages += unreadThreadMessages.length;
-    unreadThreads += 1;
-
-    for (const message of unreadThreadMessages) {
-      const timestamp = new Date(message.createdAt).getTime();
-
-      if (timestamp > latestUnreadTimestamp) {
-        latestUnreadTimestamp = timestamp;
-      }
-    }
-  }
-
-  return {
-    unreadMessages,
-    unreadThreads,
-    latestUnreadAt:
-      latestUnreadTimestamp > 0 ? new Date(latestUnreadTimestamp).toISOString() : null
-  };
 }
 
 export function AppShell() {
@@ -146,76 +117,39 @@ export function AppShell() {
         }
 
         if (currentUser.role === "DOCTOR" && currentUser.workspace === "center") {
-          const [centerPayloadResult, threadsResult] = await Promise.allSettled([
+          const [centerPayloadResult, threadsResult, visitFilesResult] = await Promise.allSettled([
             apiRequest<CenterNotificationsBundle>("/center/notifications"),
-            apiRequest<PortalThreadRecord[]>("/portal/communications/threads")
+            apiRequest<PortalThreadRecord[]>("/portal/communications/threads"),
+            apiRequest<DoctorVisitFileNotificationSource[]>("/center/visit-workflow?status=WAITING_DOCTOR")
           ]);
 
           if (!isActive) {
             return;
           }
 
-          if (centerPayloadResult.status === "rejected" && threadsResult.status === "rejected") {
+          if (
+            centerPayloadResult.status === "rejected" &&
+            threadsResult.status === "rejected" &&
+            visitFilesResult.status === "rejected"
+          ) {
             throw centerPayloadResult.reason;
           }
 
+          const centerBundle = centerPayloadResult.status === "fulfilled" ? centerPayloadResult.value : null;
           const threads = threadsResult.status === "fulfilled" ? threadsResult.value : [];
+          const waitingVisitFiles = visitFilesResult.status === "fulfilled" ? visitFilesResult.value : [];
+          const actionItems = buildDoctorActionNotifications({
+            centerBundle,
+            threads,
+            visitFiles: waitingVisitFiles,
+            role: currentUser.role,
+            workspace: currentUser.workspace
+          });
           const summary = summarizeUnreadMessages(threads, currentUser.role);
-          const centerAlerts: SidebarAlert[] = [
-            ...(centerPayloadResult.status === "fulfilled"
-              ? centerPayloadResult.value.alerts.map((alert) => ({
-                  id: `alert-${alert.id}`,
-                  title: alert.title,
-                  helper: alert.message,
-                  status: alert.severity,
-                  createdAt: alert.createdAt,
-                  to: resolveNotificationPath({
-                    role: currentUser.role,
-                    workspace: currentUser.workspace,
-                    type: alert.severity,
-                    title: alert.title,
-                    body: alert.message,
-                    targetUrl: alert.targetUrl
-                  })
-                }))
-              : []),
-            ...(centerPayloadResult.status === "fulfilled"
-              ? centerPayloadResult.value.outgoing.map((item) => ({
-                  id: `out-${item.id}`,
-                  title: toArabicLabel(item.notificationType),
-                  helper: `عدد المحاولات ${item.retryCount}/${item.maxRetries}`,
-                  status: item.status,
-                  createdAt: item.createdAt,
-                  to: resolveNotificationPath({
-                    role: currentUser.role,
-                    workspace: currentUser.workspace,
-                    type: item.notificationType,
-                    title: toArabicLabel(item.notificationType),
-                    body: item.lastError ?? `عدد المحاولات ${item.retryCount}/${item.maxRetries}`
-                  })
-                }))
-              : [])
-          ];
 
           setUnreadMessageCount(summary.unreadMessages);
-          setNotificationBadgeCount(centerAlerts.length + (summary.unreadMessages > 0 ? 1 : 0));
-          setAlerts(
-            [
-              ...(summary.unreadMessages > 0
-                ? [
-                    {
-                      id: "doctor-messages",
-                      title: "رسائل مرضى جديدة",
-                      helper: `لديك ${summary.unreadMessages} رسالة جديدة في ${summary.unreadThreads} محادثات.`,
-                      status: "MESSAGE",
-                      createdAt: summary.latestUnreadAt ?? new Date().toISOString(),
-                      to: "/messages"
-                    }
-                  ]
-                : []),
-              ...centerAlerts
-            ].slice(0, 5)
-          );
+          setNotificationBadgeCount(actionItems.length);
+          setAlerts(actionItems.slice(0, 5));
           return;
         }
 
@@ -379,6 +313,12 @@ export function AppShell() {
     );
   }
 
+  function stopNotificationScroll(event: ReactWheelEvent<HTMLElement>) {
+    if (!event.ctrlKey) {
+      event.stopPropagation();
+    }
+  }
+
   const visibleNavigation = navigationItems.filter(
     (item) => item.roles.includes(user.role) && systemConfig.allowedRoutes.includes(item.to)
   );
@@ -411,6 +351,11 @@ export function AppShell() {
       } catch {
         // Navigation should still work even if marking the notification as read fails.
       }
+    }
+
+    if (user?.role === "DOCTOR" && alert.id.startsWith("visit-file-")) {
+      setAlerts((current) => current.filter((item) => item.id !== alert.id));
+      setNotificationBadgeCount((current) => Math.max(0, current - 1));
     }
 
     setShowNotifications(false);
@@ -553,7 +498,7 @@ export function AppShell() {
           </section>
 
           {showNotifications ? (
-          <aside className="notification-panel">
+          <aside className="notification-panel" onWheel={stopNotificationScroll}>
             <div className="notification-header">
               <div>
                 <p className="eyebrow">{systemConfig.feedLabel}</p>

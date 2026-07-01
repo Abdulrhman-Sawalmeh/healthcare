@@ -418,6 +418,12 @@ export function AppShell() {
     );
   }
 
+  function stopNotificationScroll(event: ReactWheelEvent<HTMLElement>) {
+    if (!event.ctrlKey) {
+      event.stopPropagation();
+    }
+  }
+
   const labNavigationOrder = ["/", "/lab", "/notifications"];
   const pharmacyNavigationOrder = [
     "/",
@@ -626,7 +632,7 @@ export function AppShell() {
           </section>
 
           {showNotifications ? (
-          <aside className="notification-panel">
+          <aside className="notification-panel" onWheel={stopNotificationScroll}>
             <div className="notification-header">
               <div>
                 <p className="eyebrow">{systemConfig.feedLabel}</p>
