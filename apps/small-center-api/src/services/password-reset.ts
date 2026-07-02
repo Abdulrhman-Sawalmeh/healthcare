@@ -5,7 +5,7 @@ import { randomBytes, randomInt } from "node:crypto";
 import { isWorkspaceAllowed, systemConfig } from "../config/system";
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
-import { normalizeEmail, sendSystemEmail } from "./email-delivery";
+import { EmailDeliveryMethod, normalizeEmail, sendSystemEmail } from "./email-delivery";
 
 type ResetAccountType = "CENTRAL" | "CENTER" | "LEGACY";
 
@@ -133,7 +133,10 @@ async function sendResetCodeEmail(input: { email: string; fullName: string; code
   });
 }
 
-export async function requestPasswordReset(emailInput: string) {
+export async function requestPasswordReset(emailInput: string): Promise<{
+  accountFound: boolean;
+  deliveryMethod: EmailDeliveryMethod | "SKIPPED";
+}> {
   const email = normalizeEmail(emailInput);
 
   if (!email) {
@@ -143,7 +146,10 @@ export async function requestPasswordReset(emailInput: string) {
   const account = await findResetAccountByEmail(email);
 
   if (!account) {
-    return;
+    return {
+      accountFound: false,
+      deliveryMethod: "SKIPPED"
+    };
   }
 
   const code = createResetCode();
@@ -170,11 +176,16 @@ export async function requestPasswordReset(emailInput: string) {
     }
   });
 
-  await sendResetCodeEmail({
+  const deliveryMethod = await sendResetCodeEmail({
     email,
     fullName: account.fullName,
     code
   });
+
+  return {
+    accountFound: true,
+    deliveryMethod
+  };
 }
 
 async function findLatestActiveReset(email: string) {

@@ -329,6 +329,7 @@ export interface PatientTimelineBundle {
     fullName: string;
     unifiedId?: string | null;
     nationalId?: string | null;
+    email?: string | null;
     phone: string;
     gender: string;
     dateOfBirth: string;
@@ -559,6 +560,7 @@ export interface CenterNotificationsBundle {
   }>;
   alerts: Array<{
     id: number;
+    alertType?: string;
     title: string;
     message: string;
     severity: string;

@@ -432,6 +432,7 @@ export interface PatientTimelineBundle {
     fullName: string;
     unifiedId?: string | null;
     nationalId?: string | null;
+    email?: string | null;
     phone: string;
     gender: string;
     dateOfBirth: string;

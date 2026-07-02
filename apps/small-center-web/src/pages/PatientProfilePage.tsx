@@ -25,6 +25,7 @@ const defaultForm = {
   dateOfBirth: "",
   gender: "MALE",
   primaryPhone: "",
+  email: "",
   address: "",
   emergencyContact: "",
   bloodType: "",
@@ -106,6 +107,7 @@ export function PatientProfilePage() {
           dateOfBirth: payload.patient.dateOfBirth.slice(0, 10),
           gender: payload.patient.gender,
           primaryPhone: payload.patient.phone,
+          email: payload.patient.email ?? "",
           address: payload.patient.address,
           emergencyContact: payload.patient.emergencyContact ?? "",
           bloodType: payload.patient.bloodType ?? "",
@@ -146,6 +148,7 @@ export function PatientProfilePage() {
       dateOfBirth: payload.patient.dateOfBirth.slice(0, 10),
       gender: payload.patient.gender,
       primaryPhone: payload.patient.phone,
+      email: payload.patient.email ?? "",
       address: payload.patient.address,
       emergencyContact: payload.patient.emergencyContact ?? "",
       bloodType: payload.patient.bloodType ?? "",
@@ -171,6 +174,7 @@ export function PatientProfilePage() {
           dateOfBirth: form.dateOfBirth,
           gender: form.gender,
           primaryPhone: form.primaryPhone,
+          email: form.email,
           address: form.address,
           emergencyContact: form.emergencyContact || undefined,
           bloodType: form.bloodType || undefined,
@@ -310,6 +314,15 @@ export function PatientProfilePage() {
                 }
               />
             </label>
+            <label className="field">
+              <span>البريد الإلكتروني</span>
+              <input
+                dir="ltr"
+                type="email"
+                value={form.email}
+                onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+              />
+            </label>
             <label className="field field-span-2">
               <span>العنوان</span>
               <input
@@ -377,6 +390,10 @@ export function PatientProfilePage() {
         ])}
       >
         <div className="detail-grid">
+          <div className="detail-field">
+            <span>البريد الإلكتروني</span>
+            <strong dir="ltr">{bundle.patient.email ?? "غير مسجل"}</strong>
+          </div>
           <div className="detail-field">
             <span>تاريخ الميلاد</span>
             <strong>{formatDate(bundle.patient.dateOfBirth)}</strong>

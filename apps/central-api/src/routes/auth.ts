@@ -123,11 +123,15 @@ router.post(
   asyncHandler(async (req, res) => {
     const payload = passwordResetRequestSchema.parse(req.body);
 
-    await requestPasswordReset(payload.email);
+    const result = await requestPasswordReset(payload.email);
 
     res.json({
       success: true,
-      message: "If this email belongs to an active account, a verification code has been sent."
+      deliveryMethod: result.deliveryMethod,
+      message:
+        result.deliveryMethod === "OUTBOX"
+          ? "تم إنشاء رمز التحقق، لكن تعذر إرسال البريد من المزود الحالي وتم حفظ الرسالة في سجل البريد المحلي."
+          : "إذا كان البريد مرتبطا بحساب فعال، تم إرسال كود التحقق إليه."
     });
   })
 );

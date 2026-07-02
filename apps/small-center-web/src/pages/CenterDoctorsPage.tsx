@@ -9,6 +9,7 @@ import { CenterDoctorAccountRecord, CenterDoctorsBundle, WorkDay } from "../type
 
 type CreateDoctorResponse = {
   success: boolean;
+  emailDeliveryMethod?: "BREVO_API" | "SMTP" | "WEBHOOK" | "OUTBOX" | "SKIPPED";
   credentials?: {
     username: string;
     temporaryPassword: string;
@@ -194,10 +195,16 @@ export function CenterDoctorsPage() {
       resetForm();
       await loadDoctors();
       setError("");
+      const emailDeliveryNote =
+        !editingDoctorId && payload.emailDeliveryMethod && payload.emailDeliveryMethod !== "SKIPPED"
+          ? payload.emailDeliveryMethod === "OUTBOX"
+            ? " تم حفظ رسالة البريد في سجل البريد المحلي."
+            : " تم إرسال بيانات الدخول إلى بريد الطبيب."
+          : "";
       setSuccessMessage(
         editingDoctorId
           ? `تم تحديث بيانات الطبيب ${payload.doctor.fullName}.`
-          : `تم إنشاء حساب الطبيب ${payload.doctor.fullName}. اسم المستخدم: ${payload.credentials?.username}، وكلمة المرور المؤقتة: ${payload.credentials?.temporaryPassword}`
+          : `تم إنشاء حساب الطبيب ${payload.doctor.fullName}. اسم المستخدم: ${payload.credentials?.username}، وكلمة المرور المؤقتة: ${payload.credentials?.temporaryPassword}.${emailDeliveryNote}`
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذر حفظ بيانات الطبيب.");

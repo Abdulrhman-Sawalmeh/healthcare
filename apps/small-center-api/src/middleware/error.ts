@@ -22,7 +22,7 @@ export function errorHandler(
 ) {
   if (error instanceof ZodError) {
     return res.status(400).json({
-      message: "فشل التحقق من صحة البيانات المدخلة.",
+      message: error.issues[0]?.message ?? "فشل التحقق من صحة البيانات المدخلة.",
       issues: error.flatten()
     });
   }

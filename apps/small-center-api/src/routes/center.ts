@@ -32,7 +32,7 @@ import {
   getCenterVisits,
   getCenterWorkspaceData
 } from "../services/network-queries";
-import { ensurePatientPortalAccount } from "../services/patient-accounts";
+import { ensurePatientPortalAccount, syncPatientPortalProfile } from "../services/patient-accounts";
 import {
   buildPrescriptionQrValue,
   createPrescriptionVerificationCode,
@@ -128,9 +128,15 @@ function mapPatientQrCard(patient: NonNullable<PatientCardRecord>) {
 
 const patientSchema = z.object({
   fullName: z.string().min(3),
-  dateOfBirth: z.coerce.date(),
+  dateOfBirth: z.coerce.date().refine((value) => value <= new Date(), {
+    message: "تاريخ الميلاد لا يمكن أن يكون في المستقبل."
+  }),
   gender: z.enum(["MALE", "FEMALE", "OTHER", "PREFER_NOT_TO_SAY"]),
   primaryPhone: z.string().min(6),
+  email: z.preprocess(
+    (value) => (typeof value === "string" ? value.trim() : value),
+    z.string().email("أدخل البريد الإلكتروني الصحيح للمريض.")
+  ),
   address: z.string().min(5),
   emergencyContact: z.string().optional(),
   bloodType: z.string().optional(),
@@ -138,6 +144,8 @@ const patientSchema = z.object({
   chronicDiseases: z.array(z.string()).default([]),
   nationalId: z.string().min(6)
 });
+
+const patientUpdateSchema = patientSchema;
 
 const visitSchema = z.object({
   patientId: z.coerce.number(),
@@ -314,7 +322,10 @@ const doctorAccountSchema = z.object({
   password: z.string().optional(),
   fullName: z.string().min(2),
   phone: z.string().min(5),
-  email: z.string().optional(),
+  email: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.string().email("أدخل البريد الإلكتروني الصحيح.").optional()
+  ),
   nationalId: z.string().min(4),
   gender: z.enum(["MALE", "FEMALE", "OTHER", "PREFER_NOT_TO_SAY"]),
   specialization: z.string().min(2),
@@ -373,7 +384,7 @@ router.get(
 
 router.get(
   "/prescriptions/verify/:code",
-  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST", "PHARMACIST", "LAB_TECH", "NURSE"),
+  authorize("CENTER_MANAGER", "DOCTOR", "PHARMACIST", "LAB_TECH", "NURSE"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const rawCode = String(req.params.code ?? "").trim();
@@ -891,6 +902,7 @@ router.post(
       centerId,
       fullName: payload.fullName,
       nationalId: payload.nationalId,
+      email: payload.email,
       primaryPhone: payload.primaryPhone,
       dateOfBirth: payload.dateOfBirth,
       gender: payload.gender,
@@ -916,6 +928,98 @@ router.post(
       patient: localPatient,
       portalAccount
     });
+  })
+);
+
+router.put(
+  "/patients/:patientId",
+  authorize("RECEPTIONIST"),
+  asyncHandler(async (req, res) => {
+    const centerId = getCenterId(req);
+    const patientId = parsePositiveParam(req.params.patientId, "Patient ID");
+    const payload = patientUpdateSchema.parse(req.body);
+    const existingPatient = await prisma.localPatient.findFirst({
+      where: {
+        id: patientId,
+        centerId
+      },
+      include: {
+        unifiedPatient: true
+      }
+    });
+
+    if (!existingPatient) {
+      throw new AppError("ملف المريض غير موجود داخل هذا المركز.", 404);
+    }
+
+    const updatedPatient = await prisma.$transaction(async (tx) => {
+      let unifiedPatient = existingPatient.unifiedPatient;
+
+      if (unifiedPatient) {
+        unifiedPatient = await tx.unifiedPatient.update({
+          where: { id: unifiedPatient.id },
+          data: {
+            nationalId: payload.nationalId,
+            fullName: payload.fullName,
+            dateOfBirth: payload.dateOfBirth,
+            gender: payload.gender,
+            primaryPhone: payload.primaryPhone,
+            address: payload.address,
+            bloodType: payload.bloodType,
+            allergies: payload.allergies,
+            chronicDiseases: payload.chronicDiseases
+          }
+        });
+      }
+
+      return tx.localPatient.update({
+        where: {
+          id: existingPatient.id
+        },
+        data: {
+          unifiedPatientId: unifiedPatient?.id ?? existingPatient.unifiedPatientId,
+          unifiedId: unifiedPatient?.unifiedId ?? existingPatient.unifiedId,
+          fullName: payload.fullName,
+          dateOfBirth: payload.dateOfBirth,
+          gender: payload.gender,
+          phone: payload.primaryPhone,
+          address: payload.address,
+          emergencyContact: payload.emergencyContact,
+          bloodType: payload.bloodType,
+          allergies: payload.allergies,
+          chronicDiseases: payload.chronicDiseases
+        }
+      });
+    });
+
+    await syncPatientPortalProfile({
+      centerId,
+      fullName: payload.fullName,
+      nationalId: payload.nationalId,
+      previousNationalId: existingPatient.unifiedPatient?.nationalId,
+      email: payload.email,
+      primaryPhone: payload.primaryPhone,
+      previousPhone: existingPatient.phone,
+      dateOfBirth: payload.dateOfBirth,
+      gender: payload.gender,
+      emergencyContact: payload.emergencyContact,
+      chronicDiseases: payload.chronicDiseases
+    });
+
+    await recordAuditLog(req, {
+      action: "UPDATE_PATIENT",
+      entityType: "LocalPatient",
+      entityId: updatedPatient.id,
+      centerId,
+      newValue: {
+        fullName: updatedPatient.fullName,
+        unifiedId: updatedPatient.unifiedId,
+        phone: updatedPatient.phone,
+        email: payload.email
+      }
+    });
+
+    res.json(updatedPatient);
   })
 );
 
@@ -1188,7 +1292,7 @@ router.delete(
 
 router.get(
   "/referrals",
-  authorize("CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"),
+  authorize("CENTER_MANAGER", "DOCTOR"),
   asyncHandler(async (req, res) => {
     const centerId = getCenterId(req);
     const isDoctor = req.auth!.role === "DOCTOR";

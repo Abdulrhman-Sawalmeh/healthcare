@@ -26,6 +26,7 @@ const defaultForm = {
   dateOfBirth: "",
   gender: "MALE",
   primaryPhone: "",
+  email: "",
   address: "",
   emergencyContact: "",
   bloodType: "",
@@ -169,6 +170,7 @@ export function PatientProfilePage() {
       dateOfBirth: payload.patient.dateOfBirth.slice(0, 10),
       gender: payload.patient.gender,
       primaryPhone: payload.patient.phone,
+      email: payload.patient.email ?? "",
       address: payload.patient.address,
       emergencyContact: payload.patient.emergencyContact ?? "",
       bloodType: payload.patient.bloodType ?? "",
@@ -201,6 +203,7 @@ export function PatientProfilePage() {
           dateOfBirth: payload.patient.dateOfBirth.slice(0, 10),
           gender: payload.patient.gender,
           primaryPhone: payload.patient.phone,
+          email: payload.patient.email ?? "",
           address: payload.patient.address,
           emergencyContact: payload.patient.emergencyContact ?? "",
           bloodType: payload.patient.bloodType ?? "",
@@ -304,6 +307,7 @@ export function PatientProfilePage() {
           dateOfBirth: form.dateOfBirth,
           gender: form.gender,
           primaryPhone: form.primaryPhone.trim(),
+          email: form.email.trim(),
           address: form.address.trim(),
           emergencyContact: form.emergencyContact.trim() || undefined,
           bloodType: form.bloodType || undefined,
@@ -481,6 +485,16 @@ export function PatientProfilePage() {
               <span>رقم الهاتف</span>
               <input required value={form.primaryPhone} onChange={(event) => setForm((current) => ({ ...current, primaryPhone: event.target.value }))} />
             </label>
+            <label className="field">
+              <span>البريد الإلكتروني</span>
+              <input
+                dir="ltr"
+                required
+                type="email"
+                value={form.email}
+                onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+              />
+            </label>
             <label className="field field-span-2">
               <span>العنوان</span>
               <input required value={form.address} onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))} />
@@ -526,6 +540,10 @@ export function PatientProfilePage() {
 
       <SectionCard title="البيانات الأساسية" subtitle="معلومات تعريفية وإدارية لا تتضمن قرارات تشخيصية جديدة من المدير.">
         <div className="detail-grid">
+          <div className="detail-field">
+            <span>البريد الإلكتروني</span>
+            <strong dir="ltr">{bundle.patient.email ?? "غير مسجل"}</strong>
+          </div>
           <div className="detail-field">
             <span>تاريخ الميلاد</span>
             <strong>{formatDate(bundle.patient.dateOfBirth)}</strong>

@@ -37,11 +37,20 @@ export interface SyncPatientPortalProfileInput {
   centerId: number;
   fullName: string;
   nationalId?: string;
+  previousNationalId?: string | null;
+  email?: string;
   primaryPhone: string;
+  previousPhone?: string | null;
   dateOfBirth: Date;
   gender: Gender;
   emergencyContact?: string;
   chronicDiseases: string[];
+}
+
+export interface PatientPortalAccountLookupInput {
+  centerCode: string;
+  nationalId?: string | null;
+  primaryPhone?: string | null;
 }
 
 export interface PrepareDemoPatientPortalLoginInput {
@@ -92,6 +101,51 @@ function generateTemporaryPassword(length = 8) {
   ];
 
   return shuffleCharacters(characters).join("");
+}
+
+async function findLegacyCenterByCode(centerCode: string) {
+  return prisma.center.findUnique({
+    where: { code: centerCode },
+    select: {
+      id: true
+    }
+  });
+}
+
+function buildPatientPortalUserLookup(input: {
+  legacyCenterId: string;
+  nationalId?: string | null;
+  previousNationalId?: string | null;
+  primaryPhone?: string | null;
+  previousPhone?: string | null;
+  email?: string | null;
+}) {
+  const nationalIds = [
+    input.nationalId ? normalizeNationalId(input.nationalId) : null,
+    input.previousNationalId ? normalizeNationalId(input.previousNationalId) : null
+  ].filter((value): value is string => Boolean(value));
+  const phones = [input.primaryPhone, input.previousPhone].filter((value): value is string => Boolean(value));
+  const email = normalizeEmail(input.email);
+
+  return {
+    role: UserRole.PATIENT,
+    OR: [
+      ...nationalIds.map((nationalId) => ({
+        email: {
+          startsWith: `${nationalId}@`
+        }
+      })),
+      ...phones.map((phone) => ({
+        phone,
+        patientProfile: {
+          is: {
+            centerId: input.legacyCenterId
+          }
+        }
+      })),
+      ...(email ? [{ email }] : [])
+    ]
+  };
 }
 
 function formatChronicConditions(chronicDiseases: string[]) {
@@ -274,12 +328,7 @@ export async function ensurePatientPortalAccount(
     throw new AppError("تعذر تحديد المركز الصحي المرتبط بحساب المريض.", 404);
   }
 
-  const legacyCenter = await prisma.center.findUnique({
-    where: { code: center.centerCode },
-    select: {
-      id: true
-    }
-  });
+  const legacyCenter = await findLegacyCenterByCode(center.centerCode);
 
   if (!legacyCenter) {
     throw new AppError("تعذر العثور على بوابة المرضى الخاصة بهذا المركز.", 404);
@@ -603,30 +652,17 @@ export async function syncPatientPortalProfile(input: SyncPatientPortalProfileIn
   }
 
   const normalizedNationalId = input.nationalId ? normalizeNationalId(input.nationalId) : null;
+  const requestedEmail = normalizeEmail(input.email);
 
   const existingUser = await prisma.user.findFirst({
-    where: {
-      role: UserRole.PATIENT,
-      OR: [
-        ...(normalizedNationalId
-          ? [
-              {
-                email: {
-                  startsWith: `${normalizedNationalId}@`
-                }
-              }
-            ]
-          : []),
-        {
-          phone: input.primaryPhone,
-          patientProfile: {
-            is: {
-              centerId: legacyCenter.id
-            }
-          }
-        }
-      ]
-    },
+    where: buildPatientPortalUserLookup({
+      legacyCenterId: legacyCenter.id,
+      nationalId: input.nationalId,
+      previousNationalId: input.previousNationalId,
+      primaryPhone: input.primaryPhone,
+      previousPhone: input.previousPhone,
+      email: requestedEmail
+    }),
     include: {
       patientProfile: true
     }
@@ -636,12 +672,30 @@ export async function syncPatientPortalProfile(input: SyncPatientPortalProfileIn
     return;
   }
 
+  if (requestedEmail) {
+    const emailOwner = await prisma.user.findFirst({
+      where: {
+        email: requestedEmail,
+        NOT: {
+          id: existingUser.id
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (emailOwner) {
+      throw new AppError("هذا البريد الإلكتروني مستخدم لحساب آخر.", 409);
+    }
+  }
+
   await prisma.user.update({
     where: { id: existingUser.id },
     data: {
-      email: normalizedNationalId
+      email: requestedEmail ?? (normalizedNationalId
         ? buildCenterEmailAddress(normalizedNationalId, center.centerName)
-        : existingUser.email,
+        : existingUser.email),
       fullName: input.fullName,
       phone: input.primaryPhone
     }
@@ -659,4 +713,26 @@ export async function syncPatientPortalProfile(input: SyncPatientPortalProfileIn
       }
     });
   }
+}
+
+export async function getPatientPortalAccount(input: PatientPortalAccountLookupInput) {
+  const legacyCenter = await findLegacyCenterByCode(input.centerCode);
+
+  if (!legacyCenter) {
+    return null;
+  }
+
+  const user = await prisma.user.findFirst({
+    where: buildPatientPortalUserLookup({
+      legacyCenterId: legacyCenter.id,
+      nationalId: input.nationalId,
+      primaryPhone: input.primaryPhone
+    }),
+    select: {
+      id: true,
+      email: true
+    }
+  });
+
+  return user;
 }

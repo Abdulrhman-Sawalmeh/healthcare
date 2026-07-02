@@ -15,6 +15,12 @@ import {
 } from "../lib/doctor-notifications";
 import { resolveNotificationPath } from "../lib/notification-routing";
 import {
+  countReceptionActionItems,
+  filterReceptionAlerts,
+  filterReceptionOutgoing,
+  resolveReceptionNotificationPath
+} from "../lib/reception-notifications";
+import {
   CenterNotificationsBundle,
   CentralNotificationsBundle,
   PortalNotificationRecord,
@@ -29,6 +35,7 @@ type SidebarAlert = {
   createdAt: string;
   to: string;
   isRead?: boolean;
+  markReadPath?: string;
 };
 
 function BellIcon() {
@@ -186,6 +193,49 @@ export function AppShell() {
         }
 
         const centerPayload = payload as CenterNotificationsBundle;
+        if (currentUser.role === "RECEPTIONIST") {
+          const receptionAlerts = filterReceptionAlerts(centerPayload.alerts, "recent");
+          const receptionOutgoing = filterReceptionOutgoing(centerPayload.outgoing, "recent");
+
+          setNotificationBadgeCount(countReceptionActionItems(centerPayload));
+          setAlerts(
+            [
+              ...receptionAlerts.map((alert) => ({
+                id: `alert-${alert.id}`,
+                title: alert.title,
+                helper: alert.message,
+                status: alert.severity,
+                createdAt: alert.createdAt,
+                isRead: alert.isResolved,
+                markReadPath: `/center/notifications/${alert.id}/read`,
+                to: resolveReceptionNotificationPath({
+                  role: currentUser.role,
+                  workspace: currentUser.workspace,
+                  type: alert.alertType ?? alert.severity,
+                  title: alert.title,
+                  body: alert.message,
+                  targetUrl: alert.targetUrl
+                })
+              })),
+              ...receptionOutgoing.map((item) => ({
+                id: `out-${item.id}`,
+                title: toArabicLabel(item.notificationType),
+                helper: `Ø¹Ø¯Ø¯ Ø§Ù„Ù…Ø­Ø§ÙˆÙ„Ø§Øª ${item.retryCount}/${item.maxRetries}`,
+                status: item.status,
+                createdAt: item.createdAt,
+                to: resolveReceptionNotificationPath({
+                  role: currentUser.role,
+                  workspace: currentUser.workspace,
+                  type: item.notificationType,
+                  title: toArabicLabel(item.notificationType),
+                  body: item.lastError ?? `Ø¹Ø¯Ø¯ Ø§Ù„Ù…Ø­Ø§ÙˆÙ„Ø§Øª ${item.retryCount}/${item.maxRetries}`
+                })
+              }))
+            ].slice(0, 5)
+          );
+          return;
+        }
+
         setNotificationBadgeCount(centerPayload.alerts.length + centerPayload.outgoing.length);
         setAlerts(
           [
@@ -339,6 +389,20 @@ export function AppShell() {
   ] as Array<[string, string | null | undefined]>).filter((row): row is [string, string] => Boolean(row[1]));
 
   async function openSidebarAlert(alert: SidebarAlert) {
+    if (alert.markReadPath && !alert.isRead) {
+      try {
+        await apiRequest(alert.markReadPath, {
+          method: "PATCH"
+        });
+        setAlerts((current) =>
+          current.map((item) => (item.id === alert.id ? { ...item, isRead: true } : item))
+        );
+        setNotificationBadgeCount((current) => Math.max(0, current - 1));
+      } catch {
+        // Navigation should still work even if marking the notification as read fails.
+      }
+    }
+
     if (isPatientPortal && !alert.isRead) {
       try {
         await apiRequest(`/portal/notifications/${alert.id}/read`, {

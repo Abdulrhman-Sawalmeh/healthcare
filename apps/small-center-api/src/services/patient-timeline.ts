@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
+import { getPatientPortalAccount } from "./patient-accounts";
 
 type TimelineEventType =
   | "appointment"
@@ -131,6 +132,11 @@ export async function getPatientTimelineForCenter(centerId: number, patientId: n
         }
       })
     : [];
+  const portalAccount = await getPatientPortalAccount({
+    centerCode: patient.center.centerCode,
+    nationalId: patient.unifiedPatient?.nationalId,
+    primaryPhone: patient.phone
+  });
 
   const visitEvents = patient.visits.flatMap<TimelineEvent>((visit) => {
     const actor = visit.doctor?.fullName ?? visit.center.centerName;
@@ -289,6 +295,7 @@ export async function getPatientTimelineForCenter(centerId: number, patientId: n
       fullName: patient.fullName,
       unifiedId: patient.unifiedId,
       nationalId: patient.unifiedPatient?.nationalId ?? null,
+      email: portalAccount?.email ?? null,
       phone: patient.phone,
       gender: patient.gender,
       dateOfBirth: patient.dateOfBirth,

@@ -42,7 +42,7 @@ import {
   pharmacyPrescriptionStatuses,
   PharmacyPrescriptionStatus
 } from "../services/pharmacy-workflow";
-import { ensurePatientPortalAccount, prepareDemoPatientPortalLogin } from "../services/patient-accounts";
+import { ensurePatientPortalAccount, prepareDemoPatientPortalLogin, syncPatientPortalProfile } from "../services/patient-accounts";
 import {
   buildPrescriptionQrValue,
   createPrescriptionVerificationCode,
@@ -166,7 +166,7 @@ const patientSchema = z.object({
   nationalId: z.string().min(6)
 });
 
-const patientUpdateSchema = patientSchema.omit({ email: true });
+const patientUpdateSchema = patientSchema;
 
 const visitSchema = z.object({
   patientId: z.coerce.number(),
@@ -1421,6 +1421,20 @@ router.put(
       });
     });
 
+    await syncPatientPortalProfile({
+      centerId,
+      fullName: payload.fullName,
+      nationalId: payload.nationalId,
+      previousNationalId: existingPatient.unifiedPatient?.nationalId,
+      email: payload.email,
+      primaryPhone: payload.primaryPhone,
+      previousPhone: existingPatient.phone,
+      dateOfBirth: payload.dateOfBirth,
+      gender: payload.gender,
+      emergencyContact: payload.emergencyContact,
+      chronicDiseases: payload.chronicDiseases
+    });
+
     await recordAuditLog(req, {
       action: "UPDATE_PATIENT",
       entityType: "LocalPatient",
@@ -1429,7 +1443,8 @@ router.put(
       newValue: {
         fullName: updatedPatient.fullName,
         unifiedId: updatedPatient.unifiedId,
-        phone: updatedPatient.phone
+        phone: updatedPatient.phone,
+        email: payload.email
       }
     });
 

@@ -181,7 +181,7 @@ function getEmailTimeoutMs() {
 }
 
 function shouldRejectUnauthorizedSmtpTls() {
-  return process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== "false";
+  return process.env.SMTP_TLS_REJECT_UNAUTHORIZED === "true";
 }
 
 async function fetchWithTimeout(url: string, options: RequestInit) {

@@ -5,6 +5,7 @@ $asciiDrive = "H:"
 $asciiRoot = "$asciiDrive\"
 $npm = (Get-Command npm.cmd).Source
 $pgCtl = "C:\Program Files\PostgreSQL\16\bin\pg_ctl.exe"
+$pgIsReady = "C:\Program Files\PostgreSQL\16\bin\pg_isready.exe"
 
 function Ensure-AsciiDrive {
   if (Test-Path $asciiRoot) {
@@ -20,6 +21,15 @@ function Get-Listener($port) {
   } catch {
     return $null
   }
+}
+
+function Test-PostgresReady {
+  if (Test-Path $pgIsReady) {
+    & $pgIsReady -h localhost -p 5433 | Out-Null
+    return $LASTEXITCODE -eq 0
+  }
+
+  return [bool](Get-Listener 5433)
 }
 
 function Stop-PortProcess($port) {
@@ -49,7 +59,12 @@ function Start-LoggedProcess(
 }
 
 function Ensure-LocalPostgres {
+  if (Test-PostgresReady) {
+    return
+  }
+
   if (Get-Listener 5433) {
+    Write-Warning "Port 5433 is listening, but PostgreSQL is not accepting connections. Root DATABASE_URL will be used when configured."
     return
   }
 
@@ -60,6 +75,10 @@ function Ensure-LocalPostgres {
       -WindowStyle Hidden | Out-Null
 
     Start-Sleep -Seconds 3
+
+    if (-not (Test-PostgresReady)) {
+      Write-Warning "PostgreSQL did not become ready on port 5433."
+    }
   }
 }
 

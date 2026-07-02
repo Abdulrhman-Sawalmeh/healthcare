@@ -31,6 +31,12 @@ interface PasswordResetVerifyResponse {
   resetTokenExpiresAt: string;
 }
 
+interface PasswordResetRequestResponse {
+  success: boolean;
+  deliveryMethod?: "BREVO_API" | "SMTP" | "WEBHOOK" | "OUTBOX" | "SKIPPED";
+  message?: string;
+}
+
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
@@ -103,12 +109,12 @@ export function LoginPage() {
     setNotice("");
 
     try {
-      await apiRequest("/auth/password-reset/request", {
+      const payload = await apiRequest<PasswordResetRequestResponse>("/auth/password-reset/request", {
         method: "POST",
         body: JSON.stringify({ email })
       });
       setResetStep("verify");
-      setNotice("إذا كان البريد مرتبطا بحساب فعال، تم إرسال كود التحقق إليه.");
+      setNotice(payload.message ?? "إذا كان البريد مرتبطا بحساب فعال، تم إرسال كود التحقق إليه.");
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : "تعذر إرسال كود التحقق.");
     } finally {

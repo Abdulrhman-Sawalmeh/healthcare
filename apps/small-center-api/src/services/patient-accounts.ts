@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
+import { EmailDeliveryMethod, normalizeEmail, sendSystemEmail } from "./email-delivery";
 import { buildCenterEmailAddress } from "../utils/account-identifiers";
 
 const passwordLetters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -16,6 +17,7 @@ export interface EnsurePatientPortalAccountInput {
   centerId: number;
   fullName: string;
   nationalId: string;
+  email?: string;
   primaryPhone: string;
   dateOfBirth: Date;
   gender: Gender;
@@ -26,6 +28,8 @@ export interface EnsurePatientPortalAccountInput {
 export interface EnsurePatientPortalAccountResult {
   loginIdentifier: string;
   deliveryMethod: "TWILIO" | "WEBHOOK" | "OUTBOX";
+  email: string | null;
+  emailDeliveryMethod: EmailDeliveryMethod | "SKIPPED";
   accountStatus: "CREATED" | "RESET";
 }
 
@@ -33,11 +37,20 @@ export interface SyncPatientPortalProfileInput {
   centerId: number;
   fullName: string;
   nationalId?: string;
+  previousNationalId?: string | null;
+  email?: string;
   primaryPhone: string;
+  previousPhone?: string | null;
   dateOfBirth: Date;
   gender: Gender;
   emergencyContact?: string;
   chronicDiseases: string[];
+}
+
+export interface PatientPortalAccountLookupInput {
+  centerCode: string;
+  nationalId?: string | null;
+  primaryPhone?: string | null;
 }
 
 function normalizeNationalId(value: string) {
@@ -71,6 +84,51 @@ function generateTemporaryPassword(length = 8) {
   ];
 
   return shuffleCharacters(characters).join("");
+}
+
+async function findLegacyCenterByCode(centerCode: string) {
+  return prisma.center.findUnique({
+    where: { code: centerCode },
+    select: {
+      id: true
+    }
+  });
+}
+
+function buildPatientPortalUserLookup(input: {
+  legacyCenterId: string;
+  nationalId?: string | null;
+  previousNationalId?: string | null;
+  primaryPhone?: string | null;
+  previousPhone?: string | null;
+  email?: string | null;
+}) {
+  const nationalIds = [
+    input.nationalId ? normalizeNationalId(input.nationalId) : null,
+    input.previousNationalId ? normalizeNationalId(input.previousNationalId) : null
+  ].filter((value): value is string => Boolean(value));
+  const phones = [input.primaryPhone, input.previousPhone].filter((value): value is string => Boolean(value));
+  const email = normalizeEmail(input.email);
+
+  return {
+    role: UserRole.PATIENT,
+    OR: [
+      ...nationalIds.map((nationalId) => ({
+        email: {
+          startsWith: `${nationalId}@`
+        }
+      })),
+      ...phones.map((phone) => ({
+        phone,
+        patientProfile: {
+          is: {
+            centerId: input.legacyCenterId
+          }
+        }
+      })),
+      ...(email ? [{ email }] : [])
+    ]
+  };
 }
 
 function formatChronicConditions(chronicDiseases: string[]) {
@@ -202,6 +260,38 @@ async function sendPatientPasswordSms(input: {
   return "OUTBOX" as const;
 }
 
+async function sendPatientWelcomeEmail(input: {
+  email: string;
+  patientName: string;
+  centerName: string;
+  nationalId: string;
+  temporaryPassword: string;
+}) {
+  const subject = `مرحبا بك في ${input.centerName}`;
+  const text = [
+    `مرحبا ${input.patientName},`,
+    `تم إنشاء حسابك في ${input.centerName}.`,
+    `رقم الهوية: ${input.nationalId}`,
+    `كلمة السر: ${input.temporaryPassword}`,
+    "يمكنك تسجيل الدخول من بوابة المرضى باستخدام رقم الهوية أو البريد الإلكتروني."
+  ].join("\n");
+
+  return sendSystemEmail({
+    to: input.email,
+    subject,
+    text,
+    html: `
+      <div dir="rtl" style="font-family: Arial, sans-serif; line-height: 1.8">
+        <p>مرحبا ${input.patientName},</p>
+        <p>تم إنشاء حسابك في <strong>${input.centerName}</strong>.</p>
+        <p><strong>رقم الهوية:</strong> ${input.nationalId}</p>
+        <p><strong>كلمة السر:</strong> ${input.temporaryPassword}</p>
+        <p>يمكنك تسجيل الدخول من بوابة المرضى باستخدام رقم الهوية أو البريد الإلكتروني.</p>
+      </div>
+    `
+  });
+}
+
 export async function ensurePatientPortalAccount(
   input: EnsurePatientPortalAccountInput
 ): Promise<EnsurePatientPortalAccountResult> {
@@ -233,7 +323,8 @@ export async function ensurePatientPortalAccount(
   }
 
   const loginIdentifier = normalizedNationalId;
-  const patientEmail = buildCenterEmailAddress(loginIdentifier, center.centerName);
+  const requestedEmail = normalizeEmail(input.email);
+  const patientEmail = requestedEmail ?? buildCenterEmailAddress(loginIdentifier, center.centerName);
 
   const existingUser = await prisma.user.findFirst({
     where: {
@@ -251,13 +342,36 @@ export async function ensurePatientPortalAccount(
               centerId: legacyCenter.id
             }
           }
-        }
+        },
+        ...(requestedEmail
+          ? [
+              {
+                email: requestedEmail
+              }
+            ]
+          : [])
       ]
     },
     include: {
       patientProfile: true
     }
   });
+
+  if (requestedEmail) {
+    const emailOwner = await prisma.user.findFirst({
+      where: {
+        email: requestedEmail,
+        ...(existingUser ? { NOT: { id: existingUser.id } } : {})
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (emailOwner) {
+      throw new AppError("هذا البريد الإلكتروني مستخدم لحساب آخر.", 409);
+    }
+  }
 
   if (existingUser) {
     await prisma.user.update({
@@ -296,17 +410,30 @@ export async function ensurePatientPortalAccount(
       });
     }
 
-    const deliveryMethod = await sendPatientPasswordSms({
-      phone: input.primaryPhone,
-      patientName: input.fullName,
-      centerName: center.centerName,
-      nationalId: normalizedNationalId,
-      temporaryPassword
-    });
+    const [deliveryMethod, emailDeliveryMethod] = await Promise.all([
+      sendPatientPasswordSms({
+        phone: input.primaryPhone,
+        patientName: input.fullName,
+        centerName: center.centerName,
+        nationalId: normalizedNationalId,
+        temporaryPassword
+      }),
+      requestedEmail
+        ? sendPatientWelcomeEmail({
+            email: requestedEmail,
+            patientName: input.fullName,
+            centerName: center.centerName,
+            nationalId: normalizedNationalId,
+            temporaryPassword
+          })
+        : Promise.resolve("SKIPPED" as const)
+    ]);
 
     return {
       loginIdentifier,
       deliveryMethod,
+      email: requestedEmail ?? null,
+      emailDeliveryMethod,
       accountStatus: "RESET"
     };
   }
@@ -334,17 +461,30 @@ export async function ensurePatientPortalAccount(
     }
   });
 
-  const deliveryMethod = await sendPatientPasswordSms({
-    phone: input.primaryPhone,
-    patientName: input.fullName,
-    centerName: center.centerName,
-    nationalId: normalizedNationalId,
-    temporaryPassword
-  });
+  const [deliveryMethod, emailDeliveryMethod] = await Promise.all([
+    sendPatientPasswordSms({
+      phone: input.primaryPhone,
+      patientName: input.fullName,
+      centerName: center.centerName,
+      nationalId: normalizedNationalId,
+      temporaryPassword
+    }),
+    requestedEmail
+      ? sendPatientWelcomeEmail({
+          email: requestedEmail,
+          patientName: input.fullName,
+          centerName: center.centerName,
+          nationalId: normalizedNationalId,
+          temporaryPassword
+        })
+      : Promise.resolve("SKIPPED" as const)
+  ]);
 
   return {
     loginIdentifier,
     deliveryMethod,
+    email: requestedEmail ?? null,
+    emailDeliveryMethod,
     accountStatus: "CREATED"
   };
 }
@@ -362,42 +502,24 @@ export async function syncPatientPortalProfile(input: SyncPatientPortalProfileIn
     return;
   }
 
-  const legacyCenter = await prisma.center.findUnique({
-    where: { code: center.centerCode },
-    select: {
-      id: true
-    }
-  });
+  const legacyCenter = await findLegacyCenterByCode(center.centerCode);
 
   if (!legacyCenter) {
     return;
   }
 
   const normalizedNationalId = input.nationalId ? normalizeNationalId(input.nationalId) : null;
+  const requestedEmail = normalizeEmail(input.email);
 
   const existingUser = await prisma.user.findFirst({
-    where: {
-      role: UserRole.PATIENT,
-      OR: [
-        ...(normalizedNationalId
-          ? [
-              {
-                email: {
-                  startsWith: `${normalizedNationalId}@`
-                }
-              }
-            ]
-          : []),
-        {
-          phone: input.primaryPhone,
-          patientProfile: {
-            is: {
-              centerId: legacyCenter.id
-            }
-          }
-        }
-      ]
-    },
+    where: buildPatientPortalUserLookup({
+      legacyCenterId: legacyCenter.id,
+      nationalId: input.nationalId,
+      previousNationalId: input.previousNationalId,
+      primaryPhone: input.primaryPhone,
+      previousPhone: input.previousPhone,
+      email: requestedEmail
+    }),
     include: {
       patientProfile: true
     }
@@ -407,12 +529,30 @@ export async function syncPatientPortalProfile(input: SyncPatientPortalProfileIn
     return;
   }
 
+  if (requestedEmail) {
+    const emailOwner = await prisma.user.findFirst({
+      where: {
+        email: requestedEmail,
+        NOT: {
+          id: existingUser.id
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (emailOwner) {
+      throw new AppError("هذا البريد الإلكتروني مستخدم لحساب آخر.", 409);
+    }
+  }
+
   await prisma.user.update({
     where: { id: existingUser.id },
     data: {
-      email: normalizedNationalId
+      email: requestedEmail ?? (normalizedNationalId
         ? buildCenterEmailAddress(normalizedNationalId, center.centerName)
-        : existingUser.email,
+        : existingUser.email),
       fullName: input.fullName,
       phone: input.primaryPhone
     }
@@ -430,4 +570,26 @@ export async function syncPatientPortalProfile(input: SyncPatientPortalProfileIn
       }
     });
   }
+}
+
+export async function getPatientPortalAccount(input: PatientPortalAccountLookupInput) {
+  const legacyCenter = await findLegacyCenterByCode(input.centerCode);
+
+  if (!legacyCenter) {
+    return null;
+  }
+
+  const user = await prisma.user.findFirst({
+    where: buildPatientPortalUserLookup({
+      legacyCenterId: legacyCenter.id,
+      nationalId: input.nationalId,
+      primaryPhone: input.primaryPhone
+    }),
+    select: {
+      id: true,
+      email: true
+    }
+  });
+
+  return user;
 }

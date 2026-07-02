@@ -770,7 +770,7 @@ table {
 }
 
 .content-grid.with-notifications {
-  grid-template-columns: minmax(0, 1fr) 330px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .page-panel,
@@ -805,8 +805,11 @@ table {
 
 .notification-panel {
   padding: 1.2rem;
-  position: sticky;
-  top: 1.6rem;
+  position: fixed;
+  inset-block-start: 6.75rem;
+  inset-inline-end: 1.5rem;
+  width: min(360px, calc(100vw - 2rem));
+  z-index: 60;
   max-height: min(72vh, 620px);
   overflow: hidden;
   overscroll-behavior: contain;
@@ -1573,7 +1576,9 @@ table {
   }
 
   .notification-panel {
-    position: static;
+    position: fixed;
+    inset-block-start: 5.5rem;
+    inset-inline-end: 1rem;
   }
 
   .metric-card,

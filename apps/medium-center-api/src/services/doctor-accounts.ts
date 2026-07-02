@@ -2,6 +2,7 @@ import { CenterUserRole, Gender, Prisma } from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
+import { EmailDeliveryMethod, normalizeEmail, sendSystemEmail } from "./email-delivery";
 
 interface BaseCenterDoctorInput {
   centerId: number;
@@ -164,6 +165,38 @@ function mapDoctorRecord(doctor: DoctorWithRelations) {
   };
 }
 
+async function sendDoctorWelcomeEmail(input: {
+  email: string;
+  doctorName: string;
+  centerName: string;
+  username: string;
+  temporaryPassword: string;
+}) {
+  const subject = `مرحبا بك في ${input.centerName}`;
+  const text = [
+    `مرحبا د. ${input.doctorName},`,
+    `تم إنشاء حسابك في ${input.centerName}.`,
+    `اسم المستخدم: ${input.username}`,
+    `كلمة السر المؤقتة: ${input.temporaryPassword}`,
+    "يمكنك تسجيل الدخول ثم تغيير كلمة السر من صفحة الحساب."
+  ].join("\n");
+
+  return sendSystemEmail({
+    to: input.email,
+    subject,
+    text,
+    html: `
+      <div dir="rtl" style="font-family: Arial, sans-serif; line-height: 1.8">
+        <p>مرحبا د. ${input.doctorName},</p>
+        <p>تم إنشاء حسابك في <strong>${input.centerName}</strong>.</p>
+        <p><strong>اسم المستخدم:</strong> ${input.username}</p>
+        <p><strong>كلمة السر المؤقتة:</strong> ${input.temporaryPassword}</p>
+        <p>يمكنك تسجيل الدخول ثم تغيير كلمة السر من صفحة الحساب.</p>
+      </div>
+    `
+  });
+}
+
 async function syncCenterSpecialties(
   tx: Prisma.TransactionClient,
   centerId: number,
@@ -317,10 +350,23 @@ export async function getCenterDoctorsBundle(centerId: number) {
 
 export async function createCenterDoctor(input: CreateCenterDoctorInput) {
   try {
-    return await prisma.$transaction(async (tx) => {
+    const requestedEmail = normalizeEmail(input.email);
+    let welcomeEmailInput: Parameters<typeof sendDoctorWelcomeEmail>[0] | null = null;
+
+    const result = await prisma.$transaction(async (tx) => {
       const passwordHash = input.password;
       const username = normalizeLoginIdentifier(input);
       const specialization = await assertValidSpecialization(tx, input.centerId, input.specialization);
+      const center = await tx.centralCenter.findUnique({
+        where: { id: input.centerId },
+        select: {
+          centerName: true
+        }
+      });
+
+      if (!center) {
+        throw new AppError("Unable to find the requested center.", 404);
+      }
 
       await syncCenterSpecialties(tx, input.centerId, specialization);
 
@@ -332,7 +378,7 @@ export async function createCenterDoctor(input: CreateCenterDoctorInput) {
           fullName: input.fullName,
           role: CenterUserRole.DOCTOR,
           phone: input.phone,
-          email: input.email,
+          email: requestedEmail,
           isActive: input.isActive,
           createdById: input.createdById,
           doctorProfile: {
@@ -366,6 +412,16 @@ export async function createCenterDoctor(input: CreateCenterDoctorInput) {
 
       await syncCenterDoctorAvailability(tx, input.centerId);
 
+      if (requestedEmail) {
+        welcomeEmailInput = {
+          email: requestedEmail,
+          doctorName: input.fullName,
+          centerName: center.centerName,
+          username,
+          temporaryPassword: input.password
+        };
+      }
+
       return {
         success: true,
         credentials: {
@@ -375,6 +431,15 @@ export async function createCenterDoctor(input: CreateCenterDoctorInput) {
         doctor: mapDoctorRecord(doctor)
       };
     });
+
+    const emailDeliveryMethod: EmailDeliveryMethod | "SKIPPED" = welcomeEmailInput
+      ? await sendDoctorWelcomeEmail(welcomeEmailInput)
+      : "SKIPPED";
+
+    return {
+      ...result,
+      emailDeliveryMethod
+    };
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       throw new AppError(mapUniqueConstraintError(error), 409);
@@ -413,6 +478,7 @@ export async function updateCenterDoctor(input: UpdateCenterDoctorInput) {
       await syncCenterSpecialties(tx, input.centerId, specialization);
 
       const passwordHash = input.password || undefined;
+      const requestedEmail = normalizeEmail(input.email);
 
       const doctor = await tx.centerUserAccount.update({
         where: {
@@ -423,7 +489,7 @@ export async function updateCenterDoctor(input: UpdateCenterDoctorInput) {
           passwordHash,
           fullName: input.fullName,
           phone: input.phone,
-          email: input.email,
+          email: requestedEmail,
           isActive: input.isActive,
           doctorProfile: {
             upsert: {

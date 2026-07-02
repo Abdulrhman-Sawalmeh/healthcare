@@ -118,7 +118,7 @@ export function App() {
           <Route
             path="/doctors"
             element={
-              <ProtectedRoute roles={["PATIENT", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]}>
+              <ProtectedRoute roles={["PATIENT", "CENTER_MANAGER"]}>
                 <DoctorsRoute />
               </ProtectedRoute>
             }
@@ -225,7 +225,7 @@ export function App() {
             <Route
               path="/referrals"
               element={
-                <ProtectedRoute roles={["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]}>
+                <ProtectedRoute roles={["CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR"]}>
                   <ReferralsPage />
                 </ProtectedRoute>
               }
@@ -235,7 +235,7 @@ export function App() {
             <Route
               path="/prescription-verification"
               element={
-                <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]}>
+                <ProtectedRoute roles={["CENTER_MANAGER", "DOCTOR"]}>
                   <PrescriptionVerificationPage />
                 </ProtectedRoute>
               }
@@ -261,7 +261,16 @@ export function App() {
               }
             />
           ) : null}
-          {isRouteEnabled("/notifications") ? <Route path="/notifications" element={<NotificationsRoute />} /> : null}
+          {isRouteEnabled("/notifications") ? (
+            <Route
+              path="/notifications"
+              element={
+                <ProtectedRoute roles={["PATIENT", "CENTRAL_ADMIN", "CENTER_MANAGER", "DOCTOR", "RECEPTIONIST"]}>
+                  <NotificationsRoute />
+                </ProtectedRoute>
+              }
+            />
+          ) : null}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

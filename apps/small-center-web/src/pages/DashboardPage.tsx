@@ -17,10 +17,47 @@ import {
   Role
 } from "../types";
 
+type WorkflowVisitSummary = {
+  id: number;
+  visitDate?: string | null;
+  visitTime?: string | null;
+  visitType?: string | null;
+  priority: "NORMAL" | "URGENT" | "EMERGENCY";
+  workflowStatus: string;
+  symptoms?: string | null;
+  notes?: string | null;
+  patient: {
+    fullName: string;
+    phone: string;
+    unifiedId?: string | null;
+  };
+  doctor?: {
+    fullName: string;
+  } | null;
+};
+
+function isToday(value?: string | null) {
+  if (!value) {
+    return false;
+  }
+
+  const date = new Date(value);
+  const today = new Date();
+
+  return (
+    !Number.isNaN(date.getTime()) &&
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+  );
+}
+
 export function DashboardPage() {
   const { user } = useAuth();
   const [centralData, setCentralData] = useState<CentralDashboardData | null>(null);
   const [centerData, setCenterData] = useState<CenterWorkspaceData | null>(null);
+  const [intakeQueue, setIntakeQueue] = useState<WorkflowVisitSummary[]>([]);
+  const [waitingDoctorQueue, setWaitingDoctorQueue] = useState<WorkflowVisitSummary[]>([]);
   const [doctorActionNotificationCount, setDoctorActionNotificationCount] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -36,6 +73,8 @@ export function DashboardPage() {
     async function loadDashboard() {
       setLoading(true);
       setDoctorActionNotificationCount(0);
+      setIntakeQueue([]);
+      setWaitingDoctorQueue([]);
 
       try {
         const payload = await apiRequest<CentralDashboardData | CenterWorkspaceData>(path);
@@ -46,6 +85,18 @@ export function DashboardPage() {
         } else {
           setCenterData(payload as CenterWorkspaceData);
           setCentralData(null);
+        }
+
+        if (currentUser.workspace === "center" && currentUser.role === "RECEPTIONIST") {
+          const [intakeResult, waitingDoctorResult] = await Promise.allSettled([
+            apiRequest<WorkflowVisitSummary[]>("/center/visit-workflow?status=WAITING_RECEPTION"),
+            apiRequest<WorkflowVisitSummary[]>("/center/visit-workflow?status=WAITING_DOCTOR")
+          ]);
+
+          setIntakeQueue(intakeResult.status === "fulfilled" ? intakeResult.value : []);
+          setWaitingDoctorQueue(
+            waitingDoctorResult.status === "fulfilled" ? waitingDoctorResult.value : []
+          );
         }
 
         if (currentUser.workspace === "center" && currentUser.role === "DOCTOR") {
@@ -80,6 +131,7 @@ export function DashboardPage() {
   const centersRoute = isRouteEnabled("/centers") ? "/centers" : undefined;
   const patientsRoute = isRouteEnabled("/patients") ? "/patients" : undefined;
   const visitsRoute = isRouteEnabled("/visits") ? "/visits" : undefined;
+  const visitWorkflowRoute = isRouteEnabled("/visit-workflow") ? "/visit-workflow" : visitsRoute;
   const referralsRoute = isRouteEnabled("/referrals") ? "/referrals" : undefined;
   const notificationsRoute = isRouteEnabled("/notifications") ? "/notifications" : undefined;
   const labRoute = isRouteEnabled("/lab") ? "/lab" : undefined;
@@ -333,6 +385,165 @@ export function DashboardPage() {
 
   if (!centerData) {
     return <div className="empty-state">لا توجد بيانات متاحة لهذه الواجهة.</div>;
+  }
+
+  if (user?.role === "RECEPTIONIST") {
+    const todayWaitingDoctor = waitingDoctorQueue.filter((visit) => isToday(visit.visitDate)).length;
+    const incompleteIntakeCount = intakeQueue.filter(
+      (visit) => !visit.doctor || !visit.visitDate || !visit.patient.phone
+    ).length;
+
+    return (
+      <div className="page-stack">
+        <div className="hero-strip">
+          <div>
+            <p className="eyebrow">مساحة الاستقبال</p>
+            <h1>تسجيل المرضى وتحويل الزيارات إلى الطبيب</h1>
+          </div>
+          <p className="muted">
+            تركز هذه اللوحة على إنشاء ملفات المرضى، تسجيل الزيارة الأولية، متابعة الطابور، وتسليم الملف للطبيب دون عرض تفاصيل التشخيص أو الوصفات.
+          </p>
+        </div>
+
+        <div className="metric-grid">
+          <MetricCard
+            label="بانتظار الاستقبال"
+            value={intakeQueue.length}
+            helper="زيارات تحتاج استكمال بيانات الوصول أو تعيين الطبيب قبل دخولها طابور الطبيب."
+            to={visitWorkflowRoute ? `${visitWorkflowRoute}?status=WAITING_RECEPTION` : undefined}
+            actionHint="اضغط لفتح ملفات الزيارة بانتظار الاستقبال."
+          />
+          <MetricCard
+            label="بانتظار الطبيب"
+            value={waitingDoctorQueue.length}
+            helper="زيارات تم تسجيلها وتحويلها إلى الطبيب لمتابعة التقييم السريري."
+            to={visitWorkflowRoute ? `${visitWorkflowRoute}?status=WAITING_DOCTOR` : undefined}
+            actionHint="اضغط لفتح طابور الطبيب."
+          />
+          <MetricCard
+            label="زيارات اليوم"
+            value={todayWaitingDoctor}
+            helper="عدد الزيارات المسجلة اليوم والموجودة حاليا في طابور الطبيب."
+            to={visitWorkflowRoute}
+            actionHint="اضغط لمراجعة زيارات اليوم."
+          />
+          <MetricCard
+            label="ملفات مرضى"
+            value={centerData.stats.localPatients}
+            helper="ملفات المرضى المحلية التي يمكن للاستقبال البحث فيها أو إنشاء ملفات جديدة."
+            to={patientsRoute}
+            actionHint="اضغط لفتح صفحة المرضى."
+          />
+          <MetricCard
+            label="بيانات تحتاج استكمال"
+            value={incompleteIntakeCount}
+            helper="زيارات ينقصها تعيين طبيب أو بيانات أساسية قبل تسليمها بشكل واضح."
+            to={visitWorkflowRoute}
+            actionHint="اضغط لاستكمال بيانات الزيارة."
+          />
+          <MetricCard
+            label="إشعارات تسليم ومزامنة"
+            value={centerData.stats.outgoingPending}
+            helper="رسائل حسابات مرضى أو مزامنة زيارات ما زالت بحاجة متابعة تشغيلية."
+            to={notificationsRoute}
+            actionHint="اضغط لفتح إشعارات الاستقبال."
+          />
+        </div>
+
+        <div className="split-grid">
+          <SectionCard
+            title="إجراءات الاستقبال السريعة"
+            subtitle="المسارات اليومية: ملف مريض، زيارة أولية، ثم تسليم للطبيب."
+          >
+            <div className="stack-list compact">
+              {patientsRoute ? (
+                <Link className="stack-item interactive-card" to={patientsRoute}>
+                  <strong>تسجيل أو البحث عن مريض</strong>
+                  <p className="muted">إنشاء ملف وحساب مريض أو العثور على ملف موجود قبل تسجيل الزيارة.</p>
+                  <p className="action-hint">فتح المرضى</p>
+                </Link>
+              ) : null}
+              {visitWorkflowRoute ? (
+                <Link className="stack-item interactive-card" to={visitWorkflowRoute}>
+                  <strong>تسجيل زيارة أولية</strong>
+                  <p className="muted">إدخال سبب الوصول والأولوية والطبيب إن كان معروفا، ثم تحويل الملف للطبيب.</p>
+                  <p className="action-hint">فتح ملفات الزيارة</p>
+                </Link>
+              ) : null}
+              {notificationsRoute ? (
+                <Link className="stack-item interactive-card" to={notificationsRoute}>
+                  <strong>متابعة إشعارات الاستقبال</strong>
+                  <p className="muted">مراجعة رسائل حسابات المرضى وحالة المزامنة والتنبيهات المرتبطة بالطابور.</p>
+                  <p className="action-hint">فتح الإشعارات</p>
+                </Link>
+              ) : null}
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            title="بانتظار الطبيب"
+            subtitle="آخر الملفات التي سلمها الاستقبال إلى الطبيب."
+            action={renderSectionAction(visitWorkflowRoute ? `${visitWorkflowRoute}?status=WAITING_DOCTOR` : undefined, "فتح الطابور")}
+          >
+            <div className="stack-list">
+              {waitingDoctorQueue.slice(0, 6).map((visit) => (
+                <Link
+                  key={visit.id}
+                  className="stack-item interactive-card"
+                  to={visitWorkflowRoute ? `${visitWorkflowRoute}?visitId=${visit.id}` : "#"}
+                >
+                  <div className="info-row">
+                    <div>
+                      <strong>{visit.patient.fullName}</strong>
+                      <p className="muted">
+                        {joinMeta([
+                          visit.patient.phone,
+                          visit.doctor?.fullName ?? "لم يحدد طبيب",
+                          visit.visitType ? toArabicLabel(visit.visitType) : null
+                        ])}
+                      </p>
+                    </div>
+                    <StatusBadge status={visit.priority} />
+                  </div>
+                  <p className="muted">{visit.visitDate ? formatDateTime(visit.visitDate) : "بدون تاريخ مسجل"}</p>
+                </Link>
+              ))}
+              {waitingDoctorQueue.length === 0 ? (
+                <div className="empty-state compact">لا توجد ملفات بانتظار الطبيب حاليا.</div>
+              ) : null}
+            </div>
+          </SectionCard>
+        </div>
+
+        <SectionCard
+          title="بانتظار الاستقبال"
+          subtitle="زيارات تحتاج استكمال بيانات أو تعيين طبيب قبل تسليمها."
+          action={renderSectionAction(visitWorkflowRoute ? `${visitWorkflowRoute}?status=WAITING_RECEPTION` : undefined, "فتح القائمة")}
+        >
+          <div className="stack-list compact">
+            {intakeQueue.slice(0, 6).map((visit) => (
+              <Link
+                key={visit.id}
+                className="stack-item interactive-card"
+                to={visitWorkflowRoute ? `${visitWorkflowRoute}?visitId=${visit.id}` : "#"}
+              >
+                <div className="info-row">
+                  <div>
+                    <strong>{visit.patient.fullName}</strong>
+                    <p className="muted">{joinMeta([visit.patient.phone, visit.symptoms, visit.notes])}</p>
+                  </div>
+                  <StatusBadge status={visit.workflowStatus} />
+                </div>
+                <p className="action-hint">استكمال بيانات الوصول أو تعيين الطبيب</p>
+              </Link>
+            ))}
+            {intakeQueue.length === 0 ? (
+              <div className="empty-state compact">لا توجد زيارات معلقة عند الاستقبال حاليا.</div>
+            ) : null}
+          </div>
+        </SectionCard>
+      </div>
+    );
   }
 
   if (user?.role === "DOCTOR") {

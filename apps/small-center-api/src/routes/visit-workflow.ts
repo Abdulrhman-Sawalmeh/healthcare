@@ -117,6 +117,21 @@ router.get(
       orderBy: [{ priority: "desc" }, { checkedInAt: "asc" }]
     });
 
+    if (req.auth!.role === "RECEPTIONIST") {
+      return res.json(
+        visits.map((visit) => ({
+          ...visit,
+          diagnosis: undefined,
+          bloodPressure: undefined,
+          temperature: undefined,
+          heartRate: undefined,
+          prescriptions: undefined,
+          resultReports: undefined,
+          invoice: undefined
+        }))
+      );
+    }
+
     res.json(visits);
   })
 );
@@ -180,9 +195,7 @@ router.patch(
       },
       include: {
         patient: true,
-        doctor: { select: { id: true, fullName: true, role: true } },
-        prescriptions: true,
-        invoice: true
+        doctor: { select: { id: true, fullName: true, role: true } }
       }
     });
 
@@ -192,6 +205,15 @@ router.patch(
       entityId: visitId,
       centerId,
       newValue: { doctorId: payload.doctorId, workflowStatus: updatedVisit.workflowStatus }
+    });
+
+    await notifyRole({
+      centerId,
+      role: "DOCTOR",
+      type: "QUEUE_STAGE_ASSIGNED",
+      title: "مريض بانتظار الطبيب",
+      message: `زيارة رقم ${updatedVisit.id} تم تحويلها إلى الطبيب.`,
+      severity: updatedVisit.priority === "EMERGENCY" ? "WARNING" : "INFO"
     });
 
     res.json(updatedVisit);

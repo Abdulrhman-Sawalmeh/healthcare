@@ -18,6 +18,8 @@ type CreatePatientResponse = {
   portalAccount: {
     loginIdentifier: string;
     deliveryMethod: "TWILIO" | "WEBHOOK" | "OUTBOX";
+    email: string | null;
+    emailDeliveryMethod: "BREVO_API" | "SMTP" | "WEBHOOK" | "OUTBOX" | "SKIPPED";
     accountStatus: "CREATED" | "RESET";
   };
 };
@@ -89,6 +91,7 @@ export function PatientsPage() {
     dateOfBirth: "",
     gender: "MALE",
     primaryPhone: "",
+    email: "",
     address: "",
     emergencyContact: "",
     bloodType: "",
@@ -221,6 +224,13 @@ export function PatientsPage() {
     event.preventDefault();
 
     try {
+      const email = form.email.trim();
+
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        setError("أدخل البريد الإلكتروني الصحيح للمريض.");
+        return;
+      }
+
       const payload = await apiRequest<CreatePatientResponse>("/center/patients", {
         method: "POST",
         body: JSON.stringify({
@@ -229,6 +239,7 @@ export function PatientsPage() {
           dateOfBirth: form.dateOfBirth,
           gender: form.gender,
           primaryPhone: form.primaryPhone,
+          email,
           address: form.address,
           emergencyContact: form.emergencyContact || undefined,
           bloodType: form.bloodType || undefined,
@@ -243,6 +254,7 @@ export function PatientsPage() {
         dateOfBirth: "",
         gender: "MALE",
         primaryPhone: "",
+        email: "",
         address: "",
         emergencyContact: "",
         bloodType: "",
@@ -254,6 +266,21 @@ export function PatientsPage() {
         payload.portalAccount.deliveryMethod !== "OUTBOX"
           ? `تم تجهيز حساب المريض، ويمكنه الدخول برقم الهوية ${payload.portalAccount.loginIdentifier}. أُرسلت كلمة المرور إلى هاتفه.`
           : `تم تجهيز حساب المريض، ويمكنه الدخول برقم الهوية ${payload.portalAccount.loginIdentifier}. تم حفظ رسالة كلمة المرور في سجل الرسائل النصية المحلي.`
+      );
+      const deliveryNotes = [
+        payload.portalAccount.deliveryMethod === "OUTBOX"
+          ? "تم حفظ رسالة كلمة المرور في سجل الرسائل النصية المحلي."
+          : "أرسلت كلمة المرور إلى هاتف المريض.",
+        payload.portalAccount.emailDeliveryMethod === "SKIPPED"
+          ? null
+          : payload.portalAccount.emailDeliveryMethod === "OUTBOX"
+            ? "تم حفظ رسالة البريد الإلكتروني في سجل البريد المحلي."
+            : "أرسلت بيانات الدخول إلى بريد المريض."
+      ].filter(Boolean);
+      setSuccessMessage(
+        `تم إنشاء ملف وحساب المريض بنجاح. يمكنه الدخول برقم الهوية ${payload.portalAccount.loginIdentifier}${
+          payload.portalAccount.email ? ` أو البريد ${payload.portalAccount.email}` : ""
+        }. ${deliveryNotes.join(" ")}`
       );
       setSearchResult(null);
       await loadPatients();
@@ -473,6 +500,17 @@ export function PatientsPage() {
                   onChange={(event) =>
                     setForm((current) => ({ ...current, primaryPhone: event.target.value }))
                   }
+                />
+              </label>
+              <label className="field">
+                <span>البريد الإلكتروني</span>
+                <input
+                  dir="ltr"
+                  type="email"
+                  required
+                  value={form.email}
+                  onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                  placeholder="patient@example.com"
                 />
               </label>
               <label className="field field-span-2">

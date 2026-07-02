@@ -162,10 +162,11 @@ export function VisitWorkflowPage() {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const role = user?.role;
+  const initialStatus = searchParams.get("status") ?? "";
   const [visits, setVisits] = useState<WorkflowVisit[]>([]);
   const [options, setOptions] = useState<IntakeOptions>({ patients: [], doctors: [] });
   const [catalogs, setCatalogs] = useState<Catalogs>({ medicines: [] });
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState(initialStatus);
   const [selectedVisitId, setSelectedVisitId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState("");
@@ -176,6 +177,9 @@ export function VisitWorkflowPage() {
 
   const canIntake = hasRole(role, ["RECEPTIONIST"]);
   const canAssess = hasRole(role, ["DOCTOR"]);
+  const canViewMedicalSections = hasRole(role, ["CENTER_MANAGER", "DOCTOR"]);
+  const canViewReports = canViewMedicalSections;
+  const canViewPrescriptions = canViewMedicalSections;
   const selectedVisit = useMemo(
     () => visits.find((visit) => visit.id === selectedVisitId) ?? null,
     [selectedVisitId, visits]
@@ -219,6 +223,11 @@ export function VisitWorkflowPage() {
   useEffect(() => {
     void loadPage();
   }, [loadPage]);
+
+  useEffect(() => {
+    const statusParam = searchParams.get("status") ?? "";
+    setStatus((current) => (current === statusParam ? current : statusParam));
+  }, [searchParams]);
 
   useEffect(() => {
     const visitId = Number(searchParams.get("visitId") ?? 0);
@@ -678,6 +687,7 @@ export function VisitWorkflowPage() {
               ) : null}
             </article>
 
+            {canViewReports ? (
             <article className="visit-file-section">
               <header className="section-header">
                 <div>
@@ -782,7 +792,9 @@ export function VisitWorkflowPage() {
                 </div>
               </form>
             </article>
+            ) : null}
 
+            {canViewMedicalSections ? (
             <article className="visit-file-section">
               <header className="section-header">
                 <div>
@@ -872,7 +884,9 @@ export function VisitWorkflowPage() {
                 </form>
               ) : null}
             </article>
+            ) : null}
 
+            {canViewPrescriptions ? (
             <article className="visit-file-section">
               <header className="section-header">
                 <div>
@@ -909,6 +923,7 @@ export function VisitWorkflowPage() {
                 <div className="empty-state compact">لا توجد وصفات دوائية لهذه الزيارة.</div>
               )}
             </article>
+            ) : null}
 
             {canAssess ? (
               <div className="visit-detail-actions">

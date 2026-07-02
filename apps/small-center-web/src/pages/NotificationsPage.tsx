@@ -8,6 +8,13 @@ import { useAuth } from "../context/AuthContext";
 import { formatDateTime, toArabicLabel } from "../lib/arabic";
 import { buildDoctorActionNotifications, DoctorVisitFileNotificationSource } from "../lib/doctor-notifications";
 import { resolveNotificationPath } from "../lib/notification-routing";
+import {
+  filterReceptionAlerts,
+  filterReceptionOutgoing,
+  receptionNotificationViews,
+  ReceptionNotificationView,
+  resolveReceptionNotificationPath
+} from "../lib/reception-notifications";
 import { CenterNotificationsBundle, CentralNotificationsBundle, PortalThreadRecord } from "../types";
 
 type CenterNotificationView =
@@ -17,6 +24,8 @@ type CenterNotificationView =
   | "logs"
   | "referrals"
   | "visits"
+  | "patients"
+  | "sync"
   | "prescriptions"
   | "messages"
   | "completed"
@@ -128,6 +137,20 @@ export function NotificationsPage() {
         }
       }
     };
+  }
+
+  async function openCenterAlert(notificationId: number, path: string) {
+    try {
+      await apiRequest(`/center/notifications/${notificationId}/read`, {
+        method: "PATCH"
+      });
+      await loadData();
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "تعذر تحديث حالة الإشعار.");
+    }
+
+    handleCardNavigation(path);
   }
 
   if (user?.workspace === "central" && centralBundle) {
@@ -274,6 +297,119 @@ export function NotificationsPage() {
 
   if (!centerBundle) {
     return <div className="empty-state">جارٍ تحميل الإشعارات...</div>;
+  }
+
+  if (user?.role === "RECEPTIONIST") {
+    const receptionView: ReceptionNotificationView =
+      centerView === "visits" || centerView === "patients" || centerView === "sync" || centerView === "recent"
+        ? centerView
+        : "action";
+    const visibleReceptionAlerts = filterReceptionAlerts(centerBundle.alerts, receptionView);
+    const visibleReceptionOutgoing = filterReceptionOutgoing(centerBundle.outgoing, receptionView);
+
+    return (
+      <div className="page-stack">
+        <SectionCard
+          title="إشعارات موظف الاستقبال"
+          subtitle="تنبيهات مرتبطة بتسجيل المرضى، طابور الزيارات، وتسليم رسائل الحسابات والمزامنة."
+        >
+          {error ? <div className="error-banner">{error}</div> : null}
+
+          <div className="chip-row">
+            {receptionNotificationViews.map((view) => (
+              <button
+                key={view.value}
+                className={receptionView === view.value ? "primary-button" : "ghost-button"}
+                onClick={() => setCenterView(view.value)}
+                type="button"
+              >
+                {view.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="split-grid">
+            <div className="section-card inset-card">
+              <h3>تنبيهات الاستقبال</h3>
+              <div className="stack-list">
+                {visibleReceptionAlerts.map((alert) => {
+                  const path = resolveReceptionNotificationPath({
+                    role: user.role,
+                    workspace: user.workspace,
+                    type: alert.alertType ?? alert.severity,
+                    title: alert.title,
+                    body: alert.message,
+                    targetUrl: alert.targetUrl
+                  });
+
+                  return (
+                    <article
+                      key={alert.id}
+                      role="button"
+                      tabIndex={0}
+                      className="stack-item interactive-card"
+                      onClick={() => void openCenterAlert(alert.id, path)}
+                      onKeyDown={(event) => {
+                        if (isActivationKey(event)) {
+                          event.preventDefault();
+                          void openCenterAlert(alert.id, path);
+                        }
+                      }}
+                    >
+                      <div className="info-row">
+                        <div>
+                          <strong>{alert.title}</strong>
+                          <p className="muted">{alert.message}</p>
+                        </div>
+                        <StatusBadge status={alert.isResolved ? "COMPLETED" : alert.severity} />
+                      </div>
+                      <span className="muted">{formatDateTime(alert.createdAt)}</span>
+                    </article>
+                  );
+                })}
+                {visibleReceptionAlerts.length === 0 ? (
+                  <div className="empty-state compact">لا توجد تنبيهات استقبال ضمن هذا التصنيف.</div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="section-card inset-card">
+              <h3>رسائل وتسليم</h3>
+              <div className="stack-list">
+                {visibleReceptionOutgoing.map((item) => {
+                  const path = resolveReceptionNotificationPath({
+                    role: user.role,
+                    workspace: user.workspace,
+                    type: item.notificationType,
+                    title: toArabicLabel(item.notificationType),
+                    body: item.lastError ?? `المحاولات ${item.retryCount}/${item.maxRetries}`
+                  });
+
+                  return (
+                    <article key={item.id} {...interactiveProps(path)}>
+                      <div className="info-row">
+                        <div>
+                          <strong>{toArabicLabel(item.notificationType)}</strong>
+                          <p className="muted">
+                            المحاولات {item.retryCount}/{item.maxRetries}
+                          </p>
+                        </div>
+                        <StatusBadge status={item.status} />
+                      </div>
+                      {item.lastError ? <p className="muted">{item.lastError}</p> : null}
+                      <span className="muted">{formatDateTime(item.createdAt)}</span>
+                    </article>
+                  );
+                })}
+                {visibleReceptionOutgoing.length === 0 ? (
+                  <div className="empty-state compact">لا توجد رسائل أو عمليات مزامنة ضمن هذا التصنيف.</div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </SectionCard>
+      </div>
+    );
   }
 
   const actionIncoming = centerBundle.incoming.filter((item) => item.status !== "COMPLETED");
