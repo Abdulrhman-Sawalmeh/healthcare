@@ -38,6 +38,33 @@ type SidebarAlert = {
   markReadPath?: string;
 };
 
+const patientFinancialNotificationTerms = [
+  "subscription",
+  "subscribed",
+  "invoice",
+  "payment",
+  "paid",
+  "billing",
+  "bill",
+  "price",
+  "pricing",
+  "plan activated",
+  "subscription activated",
+  "اشتراك",
+  "الاشتراك",
+  "فاتورة",
+  "فواتير",
+  "دفع",
+  "دفعة",
+  "سداد",
+  "مدفوع",
+  "السعر",
+  "سعر",
+  "شيكل",
+  "شاقل",
+  "₪"
+];
+
 function BellIcon() {
   return (
     <svg aria-hidden="true" className="bell-icon" focusable="false" viewBox="0 0 24 24">
@@ -54,6 +81,16 @@ function userInitials(name: string) {
     .slice(0, 2)
     .map((part) => part[0])
     .join("");
+}
+
+function isFinancialPatientNotification(notification: PortalNotificationRecord) {
+  const haystack = `${notification.type} ${notification.title} ${notification.body}`.toLowerCase();
+
+  return patientFinancialNotificationTerms.some((term) => haystack.includes(term.toLowerCase()));
+}
+
+function filterPatientNotifications(notifications: PortalNotificationRecord[]) {
+  return notifications.filter((notification) => !isFinancialPatientNotification(notification));
 }
 
 export function AppShell() {
@@ -98,13 +135,14 @@ export function AppShell() {
 
           const notifications =
             notificationsResult.status === "fulfilled" ? notificationsResult.value : [];
+          const visibleNotifications = filterPatientNotifications(notifications);
           const threads = threadsResult.status === "fulfilled" ? threadsResult.value : [];
           const summary = summarizeUnreadMessages(threads, currentUser.role);
 
           setUnreadMessageCount(summary.unreadMessages);
-          setNotificationBadgeCount(notifications.filter((item) => !item.isRead).length);
+          setNotificationBadgeCount(visibleNotifications.filter((item) => !item.isRead).length);
           setAlerts(
-            notifications.slice(0, 5).map((item) => ({
+            visibleNotifications.slice(0, 5).map((item) => ({
               id: item.id,
               title: item.title,
               helper: item.body,

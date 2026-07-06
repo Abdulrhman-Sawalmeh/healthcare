@@ -4,12 +4,7 @@ import { Link, useLocation } from "react-router-dom";
 import { apiRequest } from "../api/client";
 import { PatientContactBar } from "../components/PatientContactBar";
 import { formatDate, formatDateTime, joinMeta, toArabicLabel } from "../lib/arabic";
-import {
-  PortalClinicalReportRecord,
-  PortalMedicalRecord,
-  PortalSubscriptionPlanRecord,
-  PortalSubscriptionRecord
-} from "../types";
+import { PortalClinicalReportRecord, PortalMedicalRecord } from "../types";
 
 type ActivePanel =
   | { kind: "profile" }
@@ -17,7 +12,6 @@ type ActivePanel =
   | { kind: "appointments" }
   | { kind: "report"; id: string }
   | { kind: "referral"; id: string }
-  | { kind: "subscription"; id: string }
   | null;
 
 function isActivationKey(event: KeyboardEvent<HTMLElement>) {
@@ -31,11 +25,6 @@ function escapeHtml(value: string) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
-}
-
-function formatAmount(amountInCents: number, currency: string) {
-  const currencyLabel = currency === "ILS" ? "شيكل" : currency;
-  return `${(amountInCents / 100).toFixed(2)} ${currencyLabel}`;
 }
 
 function renderPrintableReportSections(report: PortalClinicalReportRecord) {
@@ -307,11 +296,6 @@ function openPrintableReport(record: PortalMedicalRecord, report: PortalClinical
 export function PatientMedicalRecordPage() {
   const location = useLocation();
   const [record, setRecord] = useState<PortalMedicalRecord | null>(null);
-  const [plans, setPlans] = useState<PortalSubscriptionPlanRecord[]>([]);
-  const [selectedPlanId, setSelectedPlanId] = useState("");
-  const [paymentToken, setPaymentToken] = useState("");
-  const [subscriptionMessage, setSubscriptionMessage] = useState("");
-  const [activatingSubscription, setActivatingSubscription] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
   const [reportSearch, setReportSearch] = useState("");
@@ -330,15 +314,6 @@ export function PatientMedicalRecordPage() {
       .finally(() => {
         setLoading(false);
       });
-  }, []);
-
-  useEffect(() => {
-    apiRequest<PortalSubscriptionPlanRecord[]>("/portal/subscriptions/plans")
-      .then((payload) => {
-        setPlans(payload);
-        setSelectedPlanId((current) => current || payload[0]?.id || "");
-      })
-      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -415,14 +390,6 @@ export function PatientMedicalRecordPage() {
     return record.referrals.find((referral) => referral.id === activePanel.id) ?? null;
   }, [activePanel, record]);
 
-  const activeSubscription = useMemo(() => {
-    if (!record || activePanel?.kind !== "subscription") {
-      return null;
-    }
-
-    return record.subscriptions.find((subscription) => subscription.id === activePanel.id) ?? null;
-  }, [activePanel, record]);
-
   function openPanel(nextPanel: Exclude<ActivePanel, null>) {
     setActivePanel(nextPanel);
   }
@@ -434,36 +401,6 @@ export function PatientMedicalRecordPage() {
 
     event.preventDefault();
     openPanel(nextPanel);
-  }
-
-  async function handleActivateSubscription() {
-    if (!selectedPlanId || paymentToken.trim().length < 12) {
-      setSubscriptionMessage("Enter a secure payment token with at least 12 characters.");
-      return;
-    }
-
-    setActivatingSubscription(true);
-    setSubscriptionMessage("");
-
-    try {
-      const subscription = await apiRequest<PortalSubscriptionRecord>("/portal/subscriptions/activate", {
-        method: "POST",
-        body: JSON.stringify({
-          planId: selectedPlanId,
-          securePaymentToken: paymentToken,
-          autoRenew: true
-        })
-      });
-
-      setPaymentToken("");
-      setSubscriptionMessage("Subscription activated. Follow-up reminders and doctor messaging are available.");
-      await loadRecord();
-      setActivePanel({ kind: "subscription", id: subscription.id });
-    } catch (cause) {
-      setSubscriptionMessage(cause instanceof Error ? cause.message : "Subscription activation failed.");
-    } finally {
-      setActivatingSubscription(false);
-    }
   }
 
   function renderDetailPanel() {
@@ -759,68 +696,6 @@ export function PatientMedicalRecordPage() {
       );
     }
 
-    if (activePanel.kind === "subscription" && activeSubscription) {
-      return (
-        <section className="section-card detail-panel" ref={detailPanelRef}>
-          <div className="section-header">
-            <div>
-              <p className="eyebrow">تفاصيل الاشتراك</p>
-              <h3>{activeSubscription.plan.name}</h3>
-            </div>
-            <button className="ghost-button" type="button" onClick={() => setActivePanel(null)}>
-              إغلاق
-            </button>
-          </div>
-          <div className="stack-item">
-            <strong>{activeSubscription.plan.description ?? "خطة متابعة علاجية مرتبطة بالحساب الحالي."}</strong>
-            <div className="tile-stats">
-              <span>{toArabicLabel(activeSubscription.status)}</span>
-              <span>{toArabicLabel(activeSubscription.plan.billingCycle)}</span>
-              <span>{formatAmount(activeSubscription.plan.priceInCents, "ILS")}</span>
-            </div>
-          </div>
-          <div className="detail-grid">
-            <div className="detail-field">
-              <span>المركز</span>
-              <strong>{activeSubscription.center.name}</strong>
-            </div>
-            <div className="detail-field">
-              <span>أقصى عدد زيارات</span>
-              <strong>{activeSubscription.plan.maxVisits}</strong>
-            </div>
-            <div className="detail-field">
-              <span>تاريخ البداية</span>
-              <strong>{formatDate(activeSubscription.startedAt)}</strong>
-            </div>
-            <div className="detail-field">
-              <span>تاريخ النهاية</span>
-              <strong>{formatDate(activeSubscription.endsAt)}</strong>
-            </div>
-            <div className="detail-field">
-              <span>التجديد التلقائي</span>
-              <strong>{activeSubscription.autoRenew ? "مفعل" : "غير مفعل"}</strong>
-            </div>
-          </div>
-          <div className="stack-list compact">
-            {activeSubscription.payments.map((payment) => (
-              <div className="stack-item" key={payment.id}>
-                <strong>{formatAmount(payment.amountInCents, payment.currency)}</strong>
-                <p>{toArabicLabel(payment.status)}</p>
-                <div className="tile-stats">
-                  <span>{toArabicLabel(payment.method)}</span>
-                  <span>{formatDate(payment.paidAt ?? payment.createdAt)}</span>
-                  <span>{payment.reference ?? "بدون مرجع"}</span>
-                </div>
-              </div>
-            ))}
-            {activeSubscription.payments.length === 0 ? (
-              <div className="empty-state compact">لا توجد دفعات مسجلة لهذا الاشتراك بعد.</div>
-            ) : null}
-          </div>
-        </section>
-      );
-    }
-
     return null;
   }
 
@@ -1008,76 +883,6 @@ export function PatientMedicalRecordPage() {
         </article>
       </section>
 
-      <section className="section-card">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">خطط المتابعة</p>
-            <h3>الاشتراكات والفواتير</h3>
-          </div>
-        </div>
-        <div className="form-grid">
-          <label className="field">
-            <span>خطة الاشتراك</span>
-            <select value={selectedPlanId} onChange={(event) => setSelectedPlanId(event.target.value)}>
-              {plans.map((plan) => (
-                <option key={plan.id} value={plan.id}>
-                  {plan.name} - {formatAmount(plan.priceInCents, "ILS")}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>رمز الدفع الآمن</span>
-            <input
-              value={paymentToken}
-              onChange={(event) => setPaymentToken(event.target.value)}
-              placeholder="رمز بطاقة آمن"
-              type="password"
-            />
-          </label>
-          <div className="field-span-2">
-            <button
-              className="primary-button"
-              disabled={activatingSubscription || plans.length === 0}
-              type="button"
-              onClick={handleActivateSubscription}
-            >
-              {activatingSubscription ? "جاري التفعيل..." : "تفعيل الاشتراك عبر دفع آمن"}
-            </button>
-          </div>
-          {subscriptionMessage ? <div className="field-span-2 inline-note">{subscriptionMessage}</div> : null}
-        </div>
-        <div className="stack-list compact">
-          {record.subscriptions.map((subscription) => (
-            <article
-              className="stack-item interactive-card"
-              key={subscription.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => openPanel({ kind: "subscription", id: subscription.id })}
-              onKeyDown={(event) => handlePanelActivation(event, { kind: "subscription", id: subscription.id })}
-            >
-              <strong>{subscription.plan.name}</strong>
-              <p>{subscription.plan.description ?? "خطة متابعة علاجية بدون وصف إضافي."}</p>
-              <div className="tile-stats">
-                <span>{toArabicLabel(subscription.status)}</span>
-                <span>{toArabicLabel(subscription.plan.billingCycle)}</span>
-                <span>{formatAmount(subscription.plan.priceInCents, "ILS")}</span>
-              </div>
-              {subscription.payments[0] ? (
-                <p className="muted">
-                  آخر دفعة: {formatAmount(subscription.payments[0].amountInCents, subscription.payments[0].currency)} في{" "}
-                  {formatDate(subscription.payments[0].paidAt ?? subscription.payments[0].createdAt)}
-                </p>
-              ) : null}
-              <p className="action-hint">اضغط لعرض تفاصيل الاشتراك والدفعات.</p>
-            </article>
-          ))}
-          {record.subscriptions.length === 0 ? (
-            <div className="empty-state compact">لا توجد اشتراكات علاجية مرتبطة بالحساب.</div>
-          ) : null}
-        </div>
-      </section>
     </div>
   );
 }

@@ -2,24 +2,43 @@ import { CenterUserRole } from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
 import { AppError } from "../middleware/error";
+import { getSafeErrorMessage } from "../lib/database-diagnostics";
+
+async function dashboardSection<T>(
+  section: string,
+  query: () => Promise<T>,
+  fallback: T
+): Promise<T> {
+  try {
+    return await query();
+  } catch (error) {
+    console.error("[dashboard:partial]", {
+      section,
+      message: getSafeErrorMessage(error)
+    });
+    return fallback;
+  }
+}
 
 export async function getCentralDashboardData() {
-  const [
-    connectedCenters,
-    suspendedCenters,
-    unifiedPatients,
-    pendingReferrals,
-    pendingCentralNotifications,
-    pendingOutgoingNotifications,
-    centers,
-    recentReferrals,
-    recentVisits,
-    referralPipeline
-  ] = await Promise.all([
-    prisma.centralCenter.count({ where: { isConnected: true } }),
-    prisma.centralCenter.count({ where: { isConnected: false } }),
-    prisma.unifiedPatient.count(),
-    prisma.centralReferral.count({
+  const connectedCenters = await dashboardSection(
+    "central.connectedCenters",
+    () => prisma.centralCenter.count({ where: { isConnected: true } }),
+    0
+  );
+  const suspendedCenters = await dashboardSection(
+    "central.suspendedCenters",
+    () => prisma.centralCenter.count({ where: { isConnected: false } }),
+    0
+  );
+  const unifiedPatients = await dashboardSection(
+    "central.unifiedPatients",
+    () => prisma.unifiedPatient.count(),
+    0
+  );
+  const pendingReferrals = await dashboardSection(
+    "central.pendingReferrals",
+    () => prisma.centralReferral.count({
       where: {
         status: {
           in: [
@@ -34,9 +53,21 @@ export async function getCentralDashboardData() {
         }
       }
     }),
-    prisma.centralNotification.count({ where: { status: { in: ["PENDING", "FAILED"] } } }),
-    prisma.outgoingNotification.count({ where: { status: { in: ["PENDING", "FAILED"] } } }),
-    prisma.centralCenter.findMany({
+    0
+  );
+  const pendingCentralNotifications = await dashboardSection(
+    "central.pendingCentralNotifications",
+    () => prisma.centralNotification.count({ where: { status: { in: ["PENDING", "FAILED"] } } }),
+    0
+  );
+  const pendingOutgoingNotifications = await dashboardSection(
+    "central.pendingOutgoingNotifications",
+    () => prisma.outgoingNotification.count({ where: { status: { in: ["PENDING", "FAILED"] } } }),
+    0
+  );
+  const centers = await dashboardSection(
+    "central.centers",
+    () => prisma.centralCenter.findMany({
       include: {
         loadSnapshots: true,
         doctorAvailability: true,
@@ -55,7 +86,11 @@ export async function getCentralDashboardData() {
         centerName: "asc"
       }
     }),
-    prisma.centralReferral.findMany({
+    []
+  );
+  const recentReferrals = await dashboardSection(
+    "central.recentReferrals",
+    () => prisma.centralReferral.findMany({
       include: {
         fromCenter: true,
         toCenter: true,
@@ -66,7 +101,11 @@ export async function getCentralDashboardData() {
       },
       take: 5
     }),
-    prisma.unifiedVisit.findMany({
+    []
+  );
+  const recentVisits = await dashboardSection(
+    "central.recentVisits",
+    () => prisma.unifiedVisit.findMany({
       include: {
         center: true,
         patient: true
@@ -76,13 +115,18 @@ export async function getCentralDashboardData() {
       },
       take: 6
     }),
-    prisma.centralReferral.groupBy({
+    []
+  );
+  const referralPipeline = await dashboardSection(
+    "central.referralPipeline",
+    () => prisma.centralReferral.groupBy({
       by: ["status"],
       _count: {
         _all: true
       }
-    })
-  ]);
+    }),
+    []
+  );
 
   return {
     stats: {
@@ -143,52 +187,152 @@ export async function getCentralDashboardData() {
 
 export async function getCentersOverview() {
   const centers = await prisma.centralCenter.findMany({
-    include: {
-      doctorAvailability: true,
-      operatingRoomStatus: true,
-      loadSnapshots: true,
-      _count: {
-        select: {
-          referralsFrom: true,
-          referralsTo: true,
-          localPatients: true
-        }
-      }
-    },
     orderBy: {
       centerName: "asc"
     }
   });
+  const centerIds = centers.map((center) => center.id);
 
-  return centers.map((center) => ({
-    id: center.id,
-    code: center.centerCode,
-    name: center.centerName,
-    type: center.centerType,
-    region: center.region,
-    city: center.city,
-    address: center.address,
-    phone: center.phone,
-    email: center.email,
-    specialties: center.specialties,
-    isConnected: center.isConnected,
-    suspensionReason: center.suspensionReason,
-    lastSyncAt: center.lastSyncAt,
-    availableDoctors: center.doctorAvailability.reduce((sum, item) => sum + item.availableDoctors, 0),
-    totalDoctors: center.doctorAvailability.reduce((sum, item) => sum + item.totalDoctors, 0),
-    operatingRooms: center.operatingRoomStatus[0]
+  if (centerIds.length === 0) {
+    return [];
+  }
+
+  const doctorAvailability = await dashboardSection(
+    "central.centers.doctorAvailability",
+    () =>
+      prisma.centerDoctorAvailability.findMany({
+        where: {
+          centerId: {
+            in: centerIds
+          }
+        }
+      }),
+    []
+  );
+  const operatingRoomStatus = await dashboardSection(
+    "central.centers.operatingRoomStatus",
+    () =>
+      prisma.centerOperatingRoomAvailability.findMany({
+        where: {
+          centerId: {
+            in: centerIds
+          }
+        }
+      }),
+    []
+  );
+  const loadSnapshots = await dashboardSection(
+    "central.centers.loadSnapshots",
+    () =>
+      prisma.centerLoadSnapshot.findMany({
+        where: {
+          centerId: {
+            in: centerIds
+          }
+        }
+      }),
+    []
+  );
+  const patientCounts = await dashboardSection(
+    "central.centers.patientCounts",
+    () =>
+      prisma.localPatient.groupBy({
+        by: ["centerId"],
+        where: {
+          centerId: {
+            in: centerIds
+          }
+        },
+        _count: {
+          _all: true
+        }
+      }),
+    []
+  );
+  const referralsFromCounts = await dashboardSection(
+    "central.centers.referralsFromCounts",
+    () =>
+      prisma.centralReferral.groupBy({
+        by: ["fromCenterId"],
+        where: {
+          fromCenterId: {
+            in: centerIds
+          }
+        },
+        _count: {
+          _all: true
+        }
+      }),
+    []
+  );
+  const referralsToCounts = await dashboardSection(
+    "central.centers.referralsToCounts",
+    () =>
+      prisma.centralReferral.groupBy({
+        by: ["toCenterId"],
+        where: {
+          toCenterId: {
+            in: centerIds
+          }
+        },
+        _count: {
+          _all: true
+        }
+      }),
+    []
+  );
+  const doctorAvailabilityByCenter = new Map<number, typeof doctorAvailability>();
+  const operatingRoomByCenter = new Map(operatingRoomStatus.map((item) => [item.centerId, item]));
+  const loadSnapshotByCenter = new Map(loadSnapshots.map((item) => [item.centerId, item]));
+  const patientCountByCenter = new Map(patientCounts.map((item) => [item.centerId, item._count._all]));
+  const referralsFromByCenter = new Map(referralsFromCounts.map((item) => [item.fromCenterId, item._count._all]));
+  const referralsToByCenter = new Map(
+    referralsToCounts
+      .filter((item) => item.toCenterId !== null)
+      .map((item) => [item.toCenterId!, item._count._all])
+  );
+
+  for (const item of doctorAvailability) {
+    const current = doctorAvailabilityByCenter.get(item.centerId) ?? [];
+    current.push(item);
+    doctorAvailabilityByCenter.set(item.centerId, current);
+  }
+
+  return centers.map((center) => {
+    const availability = doctorAvailabilityByCenter.get(center.id) ?? [];
+    const operatingRooms = operatingRoomByCenter.get(center.id);
+    const loadSnapshot = loadSnapshotByCenter.get(center.id);
+
+    return {
+      id: center.id,
+      code: center.centerCode,
+      name: center.centerName,
+      type: center.centerType,
+      region: center.region,
+      city: center.city,
+      address: center.address,
+      phone: center.phone,
+      email: center.email,
+      specialties: center.specialties,
+      isConnected: center.isConnected,
+      suspensionReason: center.suspensionReason,
+      lastSyncAt: center.lastSyncAt,
+      availableDoctors: availability.reduce((sum, item) => sum + item.availableDoctors, 0),
+      totalDoctors: availability.reduce((sum, item) => sum + item.totalDoctors, 0),
+      operatingRooms: operatingRooms
       ? {
-          total: center.operatingRoomStatus[0].totalRooms,
-          available: center.operatingRoomStatus[0].availableRooms,
-          nextAvailableSlot: center.operatingRoomStatus[0].nextAvailableSlot
+          total: operatingRooms.totalRooms,
+          available: operatingRooms.availableRooms,
+          nextAvailableSlot: operatingRooms.nextAvailableSlot
         }
       : null,
-    currentLoad: center.loadSnapshots[0]?.currentPatientLoad ?? 0,
-    averageWaitTime: center.loadSnapshots[0]?.averageWaitTime ?? 0,
-    referralsOut: center._count.referralsFrom,
-    referralsIn: center._count.referralsTo,
-    patientCount: center._count.localPatients
-  }));
+      currentLoad: loadSnapshot?.currentPatientLoad ?? 0,
+      averageWaitTime: loadSnapshot?.averageWaitTime ?? 0,
+      referralsOut: referralsFromByCenter.get(center.id) ?? 0,
+      referralsIn: referralsToByCenter.get(center.id) ?? 0,
+      patientCount: patientCountByCenter.get(center.id) ?? 0
+    };
+  });
 }
 
 export async function getUnifiedPatients(search?: string) {
@@ -332,11 +476,21 @@ export async function getCentralReferralsOverview() {
 }
 
 export async function getMasterDataLists() {
-  const [medicines, labTests, specialties] = await Promise.all([
-    prisma.masterMedicine.findMany({ orderBy: { genericName: "asc" } }),
-    prisma.masterLabTest.findMany({ orderBy: { testName: "asc" } }),
-    prisma.masterSpecialty.findMany({ orderBy: { specialtyName: "asc" } })
-  ]);
+  const medicines = await dashboardSection(
+    "central.masterData.medicines",
+    () => prisma.masterMedicine.findMany({ orderBy: { genericName: "asc" } }),
+    []
+  );
+  const labTests = await dashboardSection(
+    "central.masterData.labTests",
+    () => prisma.masterLabTest.findMany({ orderBy: { testName: "asc" } }),
+    []
+  );
+  const specialties = await dashboardSection(
+    "central.masterData.specialties",
+    () => prisma.masterSpecialty.findMany({ orderBy: { specialtyName: "asc" } }),
+    []
+  );
 
   return {
     medicines,
@@ -417,76 +571,102 @@ export async function getReportsSummary(filters: { startDate?: Date; endDate?: D
 }
 
 export async function getCenterWorkspaceData(centerId: number, role: string) {
-  const [center, team, localPatients, unsyncedVisits, incomingPending, outgoingPending, referrals, recentVisits] =
-    await Promise.all([
-      prisma.centralCenter.findUnique({
-        where: { id: centerId },
-        include: {
-          loadSnapshots: true,
-          doctorAvailability: true
-        }
-      }),
-      prisma.centerUserAccount.findMany({
-        where: { centerId },
-        orderBy: [{ role: "asc" }, { fullName: "asc" }]
-      }),
-      prisma.localPatient.count({ where: { centerId } }),
-      prisma.localVisit.count({
-        where: {
-          centerId,
-          syncedToCentral: false
-        }
-      }),
-      prisma.incomingNotification.count({
-        where: {
-          centerId,
-          status: {
-            in: ["PENDING", "FAILED"]
-          }
-        }
-      }),
-      prisma.outgoingNotification.count({
-        where: {
-          centerId,
-          status: {
-            in: ["PENDING", "FAILED"]
-          }
-        }
-      }),
-      prisma.centralReferral.findMany({
-        where: {
-          OR: [{ fromCenterId: centerId }, { toCenterId: centerId }]
-        },
-        include: {
-          patient: true,
-          fromCenter: true,
-          toCenter: true
-        },
-        orderBy: {
-          requestedAt: "desc"
-        },
-        take: 6
-      }),
-      prisma.localVisit.findMany({
-        where: { centerId },
-        include: {
-          patient: true,
-          doctor: true,
-          prescriptions: true
-        },
-        orderBy: {
-          visitDate: "desc"
-        },
-        take: 6
-      })
-    ]);
+  const center = await prisma.centralCenter.findUnique({
+    where: { id: centerId },
+    include: {
+      loadSnapshots: true,
+      doctorAvailability: true
+    }
+  });
 
   if (!center) {
     throw new AppError("تعذر العثور على مساحة عمل المركز.", 404);
   }
 
-  const [labOpenRequests, lowStockItems] = await Promise.all([
-    prisma.labRequestLocal.count({
+  const team = await dashboardSection(
+    "center.team",
+    () => prisma.centerUserAccount.findMany({
+      where: { centerId },
+      orderBy: [{ role: "asc" }, { fullName: "asc" }]
+    }),
+    []
+  );
+  const localPatients = await dashboardSection(
+    "center.localPatients",
+    () => prisma.localPatient.count({ where: { centerId } }),
+    0
+  );
+  const unsyncedVisits = await dashboardSection(
+    "center.unsyncedVisits",
+    () => prisma.localVisit.count({
+      where: {
+        centerId,
+        syncedToCentral: false
+      }
+    }),
+    0
+  );
+  const incomingPending = await dashboardSection(
+    "center.incomingPending",
+    () => prisma.incomingNotification.count({
+      where: {
+        centerId,
+        status: {
+          in: ["PENDING", "FAILED"]
+        }
+      }
+    }),
+    0
+  );
+  const outgoingPending = await dashboardSection(
+    "center.outgoingPending",
+    () => prisma.outgoingNotification.count({
+      where: {
+        centerId,
+        status: {
+          in: ["PENDING", "FAILED"]
+        }
+      }
+    }),
+    0
+  );
+  const referrals = await dashboardSection(
+    "center.referrals",
+    () => prisma.centralReferral.findMany({
+      where: {
+        OR: [{ fromCenterId: centerId }, { toCenterId: centerId }]
+      },
+      include: {
+        patient: true,
+        fromCenter: true,
+        toCenter: true
+      },
+      orderBy: {
+        requestedAt: "desc"
+      },
+      take: 6
+    }),
+    []
+  );
+  const recentVisits = await dashboardSection(
+    "center.recentVisits",
+    () => prisma.localVisit.findMany({
+      where: { centerId },
+      include: {
+        patient: true,
+        doctor: true,
+        prescriptions: true
+      },
+      orderBy: {
+        visitDate: "desc"
+      },
+      take: 6
+    }),
+    []
+  );
+  const labOpenRequests = await dashboardSection(
+    "center.labOpenRequests",
+    () => prisma.labRequestLocal.count({
       where: {
         centerId,
         status: {
@@ -494,15 +674,20 @@ export async function getCenterWorkspaceData(centerId: number, role: string) {
         }
       }
     }),
-    prisma.pharmacyInventoryLocal.count({
+    0
+  );
+  const lowStockItems = await dashboardSection(
+    "center.lowStockItems",
+    () => prisma.pharmacyInventoryLocal.count({
       where: {
         centerId,
         quantity: {
           lte: 25
         }
       }
-    })
-  ]);
+    }),
+    0
+  );
 
   return {
     role,

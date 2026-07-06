@@ -1,8 +1,14 @@
 import { z } from "zod";
 
+import { formatSafeDatabaseUrlSummary, validateDatabaseUrl } from "./database-url";
+
 function firstNonBlank(...values: Array<string | undefined>) {
   return values.find((value) => value?.trim());
 }
+
+const databaseUrl = validateDatabaseUrl(process.env.DATABASE_URL);
+
+console.info(`[env] DATABASE_URL validated: ${formatSafeDatabaseUrlSummary(databaseUrl.summary)}`);
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -22,7 +28,7 @@ const envSchema = z.object({
 export const env = envSchema.parse({
   NODE_ENV: process.env.NODE_ENV,
   PORT: process.env.PORT,
-  DATABASE_URL: process.env.DATABASE_URL,
+  DATABASE_URL: databaseUrl.raw,
   JWT_SECRET: process.env.JWT_SECRET,
   CORS_ORIGIN: process.env.CORS_ORIGIN,
   AI_PROVIDER: process.env.AI_PROVIDER,

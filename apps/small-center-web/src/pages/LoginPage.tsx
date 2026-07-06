@@ -27,6 +27,24 @@ interface PasswordResetRequestResponse {
   message?: string;
 }
 
+function getLoginFailureMessage(cause: unknown) {
+  if (cause instanceof ApiError) {
+    return cause.status !== 401
+      ? cause.message
+      : "بيانات الدخول غير صحيحة أو لا تنتمي لهذا النظام.";
+  }
+
+  if (cause instanceof TypeError) {
+    return "تعذر الاتصال بالخادم. تحقق من تشغيل واجهة API ثم حاول مرة أخرى.";
+  }
+
+  if (cause instanceof Error && cause.message === systemConfig.accessDeniedMessage) {
+    return cause.message;
+  }
+
+  return "بيانات الدخول غير صحيحة أو لا تنتمي لهذا النظام.";
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
@@ -68,11 +86,7 @@ export function LoginPage() {
       await login(identifier, password);
       navigate("/", { replace: true });
     } catch (cause) {
-      setError(
-        cause instanceof ApiError && cause.status !== 401
-          ? cause.message
-          : "بيانات الدخول غير صحيحة أو لا تنتمي لهذا النظام."
-      );
+      setError(getLoginFailureMessage(cause));
     } finally {
       setSubmitting(false);
     }

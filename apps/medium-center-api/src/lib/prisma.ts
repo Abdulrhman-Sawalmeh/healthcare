@@ -8,7 +8,7 @@ declare global {
 export const prisma =
   global.__healthcarePrisma ??
   new PrismaClient({
-    log: ["error", "warn"]
+    log: ["warn"]
   });
 
 if (process.env.NODE_ENV !== "production") {

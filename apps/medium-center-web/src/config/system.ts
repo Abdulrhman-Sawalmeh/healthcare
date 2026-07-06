@@ -76,7 +76,6 @@ export const systemConfig: FrontendSystemConfig = {
     { group: "المركز الصحي المتوسط", roleLabel: "طبيب", identifier: "medium-doctor", password: demoPassword },
     { group: "المركز الصحي المتوسط", roleLabel: "مريض", identifier: "medium-patient", password: demoPassword },
     { group: "المركز الصحي المتوسط", roleLabel: "موظف استقبال", identifier: "medium-receptionist", password: demoPassword },
-    { group: "المركز الصحي المتوسط", roleLabel: "ممرض", identifier: "medium-nurse", password: demoPassword },
     { group: "المركز الصحي المتوسط", roleLabel: "فني مختبر", identifier: "medium-lab", password: demoPassword },
     { group: "المركز الصحي المتوسط", roleLabel: "صيدلي", identifier: "medium-pharmacist", password: demoPassword }
   ]

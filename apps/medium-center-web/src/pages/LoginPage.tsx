@@ -11,14 +11,12 @@ const accountArabicLabels: Record<string, string> = {
   DOCTOR: "طبيب",
   PATIENT: "مريض",
   RECEPTIONIST: "موظف استقبال",
-  NURSE: "ممرض",
   PHARMACIST: "صيدلي",
   LAB_TECH: "فني مختبر",
   "مدير المركز": "مدير المركز",
   "طبيب": "طبيب",
   "مريض": "مريض",
   "موظف استقبال": "موظف استقبال",
-  "ممرض": "ممرض",
   "صيدلي": "صيدلي",
   "فني مختبر": "فني مختبر"
 };
@@ -39,6 +37,31 @@ interface PasswordResetRequestResponse {
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function isHiddenDemoAccount(account: DemoAccount) {
+  const roleLabel = account.roleLabel.trim();
+  const identifier = account.identifier.trim().toLowerCase();
+
+  return roleLabel === "NURSE" || roleLabel === "ممرض" || identifier.includes("nurse");
+}
+
+function getLoginFailureMessage(cause: unknown) {
+  if (cause instanceof ApiError) {
+    return cause.status !== 401
+      ? cause.message
+      : "بيانات الدخول غير صحيحة أو لا تنتمي إلى هذا النظام.";
+  }
+
+  if (cause instanceof TypeError) {
+    return "تعذر الاتصال بالخادم. تحقق من تشغيل واجهة API ثم حاول مرة أخرى.";
+  }
+
+  if (cause instanceof Error && cause.message === systemConfig.accessDeniedMessage) {
+    return cause.message;
+  }
+
+  return "بيانات الدخول غير صحيحة أو لا تنتمي إلى هذا النظام.";
 }
 
 export function LoginPage() {
@@ -65,12 +88,16 @@ export function LoginPage() {
   useEffect(() => {
     apiRequest<DemoAccount[]>("/auth/demo-accounts")
       .then((accounts) => {
-        if (accounts.length > 0) {
-          setDemoAccounts(accounts);
+        const visibleAccounts = accounts.filter((account) => !isHiddenDemoAccount(account));
+
+        if (visibleAccounts.length > 0) {
+          setDemoAccounts(visibleAccounts);
         }
       })
       .catch(() => undefined);
   }, []);
+
+  const visibleDemoAccounts = demoAccounts.filter((account) => !isHiddenDemoAccount(account));
 
   async function handleLogin() {
     if (!identifier.trim() || !password) {
@@ -86,11 +113,7 @@ export function LoginPage() {
       await login(identifier.trim(), password);
       navigate("/", { replace: true });
     } catch (cause) {
-      setError(
-        cause instanceof ApiError && cause.status !== 401
-          ? cause.message
-          : "بيانات الدخول غير صحيحة أو لا تنتمي إلى هذا النظام."
-      );
+      setError(getLoginFailureMessage(cause));
     } finally {
       setSubmitting(false);
     }
@@ -367,7 +390,7 @@ export function LoginPage() {
           <div className="demo-login-panel">
             <span>تعبئة حساب تجريبي</span>
             <div className="demo-account-list">
-              {demoAccounts.map((account) => (
+              {visibleDemoAccounts.map((account) => (
                 <button key={account.identifier} className="demo-account-button" type="button" onClick={() => fillAccount(account)}>
                   {accountArabicLabels[account.roleLabel] ?? toArabicLabel(account.roleLabel)}
                 </button>

@@ -1,8 +1,16 @@
+import { getSafeErrorMessage, redactSensitive } from "../lib/database-diagnostics";
 import { prisma } from "../lib/prisma";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const ANALYTICS_QUERY_BATCH_SIZE = 5;
 
 type CountMap = Record<string, number>;
+type CenterCountGroup = Array<{ centerId: number; _count: { _all: number } }>;
+type AnalyticsQuery<T> = {
+  section: string;
+  fallback: T;
+  run: () => Promise<T>;
+};
 
 export interface CentralAnalyticsFilters {
   startDate?: Date;
@@ -10,6 +18,53 @@ export interface CentralAnalyticsFilters {
   centerId?: number;
   departmentId?: string;
   doctorId?: string;
+}
+
+function analyticsQuery<T>(section: string, fallback: T, run: () => Promise<T>): AnalyticsQuery<T> {
+  return { section, fallback, run };
+}
+
+function logAnalyticsSectionError(section: string, error: unknown) {
+  const payload: Record<string, unknown> = {
+    section,
+    message: getSafeErrorMessage(error)
+  };
+
+  if (process.env.NODE_ENV === "development" && error instanceof Error && error.stack) {
+    payload.stack = redactSensitive(error.stack);
+  }
+
+  console.error("[central-analytics:partial]", payload);
+}
+
+async function runAnalyticsQueries<T extends readonly AnalyticsQuery<unknown>[]>(
+  queries: T,
+  batchSize = ANALYTICS_QUERY_BATCH_SIZE
+): Promise<{ [K in keyof T]: T[K] extends AnalyticsQuery<infer R> ? R : never }> {
+  const values: unknown[] = [];
+
+  for (let start = 0; start < queries.length; start += batchSize) {
+    const batch = queries.slice(start, start + batchSize);
+    const settled = await Promise.allSettled(batch.map((query) => query.run()));
+
+    settled.forEach((result, index) => {
+      const query = batch[index];
+
+      if (!query) {
+        return;
+      }
+
+      if (result.status === "fulfilled") {
+        values[start + index] = result.value;
+        return;
+      }
+
+      logAnalyticsSectionError(query.section, result.reason);
+      values[start + index] = query.fallback;
+    });
+  }
+
+  return values as { [K in keyof T]: T[K] extends AnalyticsQuery<infer R> ? R : never };
 }
 
 function startOfDay(date: Date) {
@@ -131,8 +186,23 @@ export async function getCentralAnalyticsDashboard(filters: CentralAnalyticsFilt
     : {};
 
   const centralCenters = await prisma.centralCenter.findMany({
-    include: {
-      loadSnapshots: true
+    select: {
+      id: true,
+      centerCode: true,
+      centerName: true,
+      centerType: true,
+      isConnected: true,
+      lastSyncAt: true,
+      loadSnapshots: {
+        select: {
+          currentPatientLoad: true,
+          averageWaitTime: true
+        },
+        orderBy: {
+          lastUpdate: "desc"
+        },
+        take: 1
+      }
     },
     orderBy: {
       centerName: "asc"
@@ -141,27 +211,42 @@ export async function getCentralAnalyticsDashboard(filters: CentralAnalyticsFilt
   const selectedCenters = selectedCenterId
     ? centralCenters.filter((center) => center.id === selectedCenterId)
     : centralCenters;
-  const selectedCenterIds = selectedCenters.map((center) => center.id);
   const selectedCenterCodes = selectedCenters.map((center) => center.centerCode);
 
-  const legacyCenters = await prisma.center.findMany({
-    where: selectedCenterCodes.length > 0 ? { code: { in: selectedCenterCodes } } : undefined,
-    include: {
-      departments: true,
-      doctors: {
-        include: {
-          user: {
-            select: {
-              fullName: true
+  const [legacyCenters] = await runAnalyticsQueries(
+    [
+      analyticsQuery("legacy center filter metadata", [], () =>
+        prisma.center.findMany({
+          where: selectedCenterCodes.length > 0 ? { code: { in: selectedCenterCodes } } : undefined,
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            departments: {
+              select: {
+                id: true,
+                name: true
+              }
+            },
+            doctors: {
+              select: {
+                id: true,
+                user: {
+                  select: {
+                    fullName: true
+                  }
+                }
+              }
             }
+          },
+          orderBy: {
+            name: "asc"
           }
-        }
-      }
-    },
-    orderBy: {
-      name: "asc"
-    }
-  });
+        })
+      )
+    ] as const,
+    1
+  );
   const legacyCenterIdByCode = new Map(legacyCenters.map((center) => [center.code, center.id]));
   const selectedLegacyCenterIds = legacyCenters.map((center) => center.id);
 
@@ -197,13 +282,11 @@ export async function getCentralAnalyticsDashboard(filters: CentralAnalyticsFilt
   const [
     totalUnifiedPatients,
     totalLocalPatients,
-    totalVisits,
     todaysVisits,
-    activeCenters,
     pendingReferrals,
     completedReferrals,
     localVisits,
-    unifiedVisits,
+    syncedVisitCount,
     centralReferrals,
     appointments,
     labRequests,
@@ -217,296 +300,346 @@ export async function getCentralAnalyticsDashboard(filters: CentralAnalyticsFilt
     alerts,
     localPatientCounts,
     localVisitCounts,
-    labCounts,
-    prescriptionVisits
-  ] = await Promise.all([
-    prisma.unifiedPatient.count(),
-    prisma.localPatient.count({ where: selectedCenterWhere }),
-    prisma.localVisit.count({ where: localVisitWhere }),
-    prisma.localVisit.count({
-      where: {
-        ...selectedCenterWhere,
-        visitDate: {
-          gte: todayStart,
-          lte: todayEnd
+    labCounts
+  ] = await runAnalyticsQueries([
+    analyticsQuery("unified patient count", 0, () => prisma.unifiedPatient.count()),
+    analyticsQuery("local patient count", 0, () => prisma.localPatient.count({ where: selectedCenterWhere })),
+    analyticsQuery("today visit count", 0, () =>
+      prisma.localVisit.count({
+        where: {
+          ...selectedCenterWhere,
+          visitDate: {
+            gte: todayStart,
+            lte: todayEnd
+          }
         }
-      }
-    }),
-    prisma.centralCenter.count({ where: { isConnected: true } }),
-    prisma.centralReferral.count({
-      where: {
-        ...selectedCentralReferralWhere,
-        status: "PENDING"
-      }
-    }),
-    prisma.centralReferral.count({
-      where: {
-        ...selectedCentralReferralWhere,
-        status: "COMPLETED"
-      }
-    }),
-    prisma.localVisit.findMany({
-      where: localVisitWhere,
-      include: {
-        doctor: {
-          select: {
-            id: true,
-            fullName: true,
-            role: true
+      })
+    ),
+    analyticsQuery("pending referral count", 0, () =>
+      prisma.centralReferral.count({
+        where: {
+          ...selectedCentralReferralWhere,
+          status: "PENDING"
+        }
+      })
+    ),
+    analyticsQuery("completed referral count", 0, () =>
+      prisma.centralReferral.count({
+        where: {
+          ...selectedCentralReferralWhere,
+          status: "COMPLETED"
+        }
+      })
+    ),
+    analyticsQuery("local visit analytics", [], () =>
+      prisma.localVisit.findMany({
+        where: localVisitWhere,
+        select: {
+          id: true,
+          centerId: true,
+          doctorId: true,
+          visitDate: true,
+          visitType: true,
+          diagnosis: true,
+          syncedToCentral: true,
+          syncState: true,
+          prescriptions: {
+            select: {
+              id: true
+            }
           }
         },
-        prescriptions: true
-      },
-      orderBy: {
-        visitDate: "desc"
-      }
-    }),
-    prisma.unifiedVisit.findMany({
-      where: {
-        ...(selectedCenterId ? { centerId: selectedCenterId } : {}),
-        visitDate: {
-          gte: startDate,
-          lte: endDate
+        orderBy: {
+          visitDate: "desc"
         }
-      },
-      orderBy: {
-        visitDate: "asc"
-      }
-    }),
-    prisma.centralReferral.findMany({
-      where: referralWhere,
-      include: {
-        fromCenter: {
-          select: {
-            id: true,
-            centerCode: true,
-            centerName: true
+      })
+    ),
+    analyticsQuery("synced visit count", 0, () =>
+      prisma.unifiedVisit.count({
+        where: {
+          ...(selectedCenterId ? { centerId: selectedCenterId } : {}),
+          visitDate: {
+            gte: startDate,
+            lte: endDate
           }
+        }
+      })
+    ),
+    analyticsQuery("central referral analytics", [], () =>
+      prisma.centralReferral.findMany({
+        where: referralWhere,
+        select: {
+          id: true,
+          fromCenterId: true,
+          toCenterId: true,
+          status: true,
+          priority: true,
+          reason: true
         },
-        toCenter: {
-          select: {
-            id: true,
-            centerCode: true,
-            centerName: true
-          }
+        orderBy: {
+          requestedAt: "desc"
         }
-      },
-      orderBy: {
-        requestedAt: "desc"
-      }
-    }),
-    prisma.appointment.findMany({
-      where: appointmentWhere,
-      include: {
-        doctor: {
-          include: {
-            user: {
-              select: {
-                fullName: true
+      })
+    ),
+    analyticsQuery("appointment analytics", [], () =>
+      prisma.appointment.findMany({
+        where: appointmentWhere,
+        select: {
+          scheduledAt: true,
+          status: true,
+          doctor: {
+            select: {
+              user: {
+                select: {
+                  fullName: true
+                }
               }
             }
           }
         },
-        center: {
-          select: {
-            code: true,
-            name: true
-          }
+        orderBy: {
+          scheduledAt: "asc"
         }
-      },
-      orderBy: {
-        scheduledAt: "asc"
-      }
-    }),
-    prisma.labRequestLocal.findMany({
-      where: {
-        ...selectedCenterWhere,
-        requestDate: {
-          gte: startDate,
-          lte: endDate
-        },
-        ...(filters.doctorId && Number.isFinite(Number(filters.doctorId))
-          ? { doctorId: Number(filters.doctorId) }
-          : {})
-      },
-      select: {
-        id: true,
-        centerId: true,
-        doctorId: true,
-        status: true,
-        requestDate: true,
-        resultDate: true,
-        doctor: {
-          select: {
-            id: true,
-            fullName: true
-          }
-        },
-        test: {
-          select: {
-            testName: true,
-            category: true
-          }
-        }
-      },
-      orderBy: {
-        requestDate: "asc"
-      }
-    }),
-    prisma.localPrescription.findMany({
-      where: {
-        issuedAt: {
-          gte: startDate,
-          lte: endDate
-        },
-        visit: {
+      })
+    ),
+    analyticsQuery("lab request analytics", [], () =>
+      prisma.labRequestLocal.findMany({
+        where: {
           ...selectedCenterWhere,
+          requestDate: {
+            gte: startDate,
+            lte: endDate
+          },
           ...(filters.doctorId && Number.isFinite(Number(filters.doctorId))
             ? { doctorId: Number(filters.doctorId) }
             : {})
+        },
+        select: {
+          id: true,
+          centerId: true,
+          doctorId: true,
+          status: true,
+          requestDate: true,
+          resultDate: true,
+          test: {
+            select: {
+              testName: true
+            }
+          }
+        },
+        orderBy: {
+          requestDate: "asc"
         }
-      },
-      include: {
-        visit: {
-          include: {
-            doctor: {
-              select: {
-                id: true,
-                fullName: true
+      })
+    ),
+    analyticsQuery("prescription analytics", [], () =>
+      prisma.localPrescription.findMany({
+        where: {
+          issuedAt: {
+            gte: startDate,
+            lte: endDate
+          },
+          visit: {
+            ...selectedCenterWhere,
+            ...(filters.doctorId && Number.isFinite(Number(filters.doctorId))
+              ? { doctorId: Number(filters.doctorId) }
+              : {})
+          }
+        },
+        select: {
+          id: true,
+          medicineName: true,
+          dispensed: true,
+          issuedAt: true,
+          visit: {
+            select: {
+              doctor: {
+                select: {
+                  fullName: true
+                }
               }
             }
           }
+        },
+        orderBy: {
+          issuedAt: "asc"
         }
-      },
-      orderBy: {
-        issuedAt: "asc"
-      }
-    }),
-    prisma.centerUserAccount.findMany({
-      where: {
-        ...(selectedCenterId ? { centerId: selectedCenterId } : {}),
-        role: "DOCTOR"
-      },
-      orderBy: {
-        fullName: "asc"
-      }
-    }),
-    prisma.outgoingNotification.findMany({
-      where: selectedCenterWhere,
-      orderBy: {
-        createdAt: "desc"
-      },
-      take: 80
-    }),
-    prisma.incomingNotification.findMany({
-      where: selectedCenterWhere,
-      orderBy: {
-        receivedAt: "desc"
-      },
-      take: 80
-    }),
-    prisma.centralNotification.findMany({
-      where: selectedCenterId ? { targetCenterId: selectedCenterId } : {},
-      orderBy: {
-        createdAt: "desc"
-      },
-      take: 80
-    }),
-    prisma.communicationLog.findMany({
-      where: {
-        ...(selectedCenterId ? { centerId: selectedCenterId } : {}),
-        createdAt: {
-          gte: startDate,
-          lte: endDate
+      })
+    ),
+    analyticsQuery("center doctor workload", [], () =>
+      prisma.centerUserAccount.findMany({
+        where: {
+          ...(selectedCenterId ? { centerId: selectedCenterId } : {}),
+          role: "DOCTOR"
+        },
+        select: {
+          id: true,
+          fullName: true,
+          centerId: true
+        },
+        orderBy: {
+          fullName: "asc"
         }
-      },
-      orderBy: {
-        createdAt: "desc"
-      },
-      take: 80
-    }),
-    prisma.notificationProcessingLog.findMany({
-      where: {
-        ...(selectedCenterId ? { centerId: selectedCenterId } : {}),
-        createdAt: {
-          gte: startDate,
-          lte: endDate
-        }
-      },
-      include: {
-        center: {
-          select: {
-            centerCode: true,
-            centerName: true
+      })
+    ),
+    analyticsQuery("outgoing notification health", [], () =>
+      prisma.outgoingNotification.findMany({
+        where: selectedCenterWhere,
+        select: {
+          centerId: true,
+          status: true
+        },
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: 80
+      })
+    ),
+    analyticsQuery("incoming notification health", [], () =>
+      prisma.incomingNotification.findMany({
+        where: selectedCenterWhere,
+        select: {
+          centerId: true,
+          status: true
+        },
+        orderBy: {
+          receivedAt: "desc"
+        },
+        take: 80
+      })
+    ),
+    analyticsQuery("central notification health", [], () =>
+      prisma.centralNotification.findMany({
+        where: selectedCenterId ? { targetCenterId: selectedCenterId } : {},
+        select: {
+          targetCenterId: true,
+          status: true
+        },
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: 80
+      })
+    ),
+    analyticsQuery("communication error health", [], () =>
+      prisma.communicationLog.findMany({
+        where: {
+          ...(selectedCenterId ? { centerId: selectedCenterId } : {}),
+          createdAt: {
+            gte: startDate,
+            lte: endDate
           }
-        }
-      },
-      orderBy: {
-        createdAt: "desc"
-      },
-      take: 80
-    }),
-    prisma.centerSystemAlert.findMany({
-      where: selectedCenterId ? { centerId: selectedCenterId } : {},
-      include: {
-        center: {
-          select: {
-            centerCode: true,
-            centerName: true
+        },
+        select: {
+          id: true,
+          centerId: true,
+          status: true,
+          errorMessage: true,
+          createdAt: true
+        },
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: 80
+      })
+    ),
+    analyticsQuery("notification processing errors", [], () =>
+      prisma.notificationProcessingLog.findMany({
+        where: {
+          ...(selectedCenterId ? { centerId: selectedCenterId } : {}),
+          createdAt: {
+            gte: startDate,
+            lte: endDate
           }
-        }
-      },
-      orderBy: {
-        createdAt: "desc"
-      },
-      take: 20
-    }),
-    prisma.localPatient.groupBy({
-      by: ["centerId"],
-      where: selectedCenterWhere,
-      _count: {
-        _all: true
-      }
-    }),
-    prisma.localVisit.groupBy({
-      by: ["centerId"],
-      where: localVisitWhere,
-      _count: {
-        _all: true
-      }
-    }),
-    prisma.labRequestLocal.groupBy({
-      by: ["centerId"],
-      where: {
-        ...selectedCenterWhere,
-        requestDate: {
-          gte: startDate,
-          lte: endDate
-        }
-      },
-      _count: {
-        _all: true
-      }
-    }),
-    prisma.localVisit.findMany({
-      where: localVisitWhere,
-      select: {
-        id: true,
-        centerId: true,
-        doctorId: true,
-        prescriptions: {
-          select: {
-            id: true,
-            dispensed: true
+        },
+        select: {
+          id: true,
+          severity: true,
+          message: true,
+          createdAt: true,
+          center: {
+            select: {
+              centerCode: true,
+              centerName: true
+            }
           }
+        },
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: 80
+      })
+    ),
+    analyticsQuery("center system alerts", [], () =>
+      prisma.centerSystemAlert.findMany({
+        where: selectedCenterId ? { centerId: selectedCenterId } : {},
+        select: {
+          id: true,
+          title: true,
+          message: true,
+          severity: true,
+          isResolved: true,
+          createdAt: true,
+          center: {
+            select: {
+              centerCode: true,
+              centerName: true
+            }
+          }
+        },
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: 20
+      })
+    ),
+    analyticsQuery<CenterCountGroup>("local patient count by center", [], async () => {
+      const rows = await prisma.localPatient.groupBy({
+        by: ["centerId"],
+        where: selectedCenterWhere,
+        _count: {
+          _all: true
         }
-      }
+      });
+
+      return rows.map((item) => ({ centerId: item.centerId, _count: { _all: item._count._all } }));
+    }),
+    analyticsQuery<CenterCountGroup>("local visit count by center", [], async () => {
+      const rows = await prisma.localVisit.groupBy({
+        by: ["centerId"],
+        where: localVisitWhere,
+        _count: {
+          _all: true
+        }
+      });
+
+      return rows.map((item) => ({ centerId: item.centerId, _count: { _all: item._count._all } }));
+    }),
+    analyticsQuery<CenterCountGroup>("lab request count by center", [], async () => {
+      const rows = await prisma.labRequestLocal.groupBy({
+        by: ["centerId"],
+        where: {
+          ...selectedCenterWhere,
+          requestDate: {
+            gte: startDate,
+            lte: endDate
+          }
+        },
+        _count: {
+          _all: true
+        }
+      });
+
+      return rows.map((item) => ({ centerId: item.centerId, _count: { _all: item._count._all } }));
     })
-  ]);
+  ] as const);
 
   const patientCountByCenter = new Map(localPatientCounts.map((item) => [item.centerId, item._count._all]));
   const visitCountByCenter = new Map(localVisitCounts.map((item) => [item.centerId, item._count._all]));
   const labCountByCenter = new Map(labCounts.map((item) => [item.centerId, item._count._all]));
+  const totalVisits =
+    localVisitCounts.reduce((sum, item) => sum + item._count._all, 0) || localVisits.length;
+  const activeCenters = centralCenters.filter((center) => center.isConnected).length;
 
   const failedSyncCount =
     outgoingNotifications.filter((item) => isFailedStatus(item.status)).length +
@@ -594,7 +727,7 @@ export async function getCentralAnalyticsDashboard(filters: CentralAnalyticsFilt
     if (bucket) {
       bucket.count += 1;
     }
-    increment(appointmentsByDoctor, appointment.doctor.user.fullName);
+    increment(appointmentsByDoctor, appointment.doctor?.user?.fullName ?? "غير محدد");
   }
 
   const labStatuses: CountMap = {};
@@ -604,7 +737,7 @@ export async function getCentralAnalyticsDashboard(filters: CentralAnalyticsFilt
   const completedLabDurations: number[] = [];
   for (const request of labRequests) {
     increment(labStatuses, request.status);
-    increment(labTests, request.test.testName);
+    increment(labTests, request.test?.testName ?? "غير محدد");
     const bucket = labDayMap.get(dayKey(request.requestDate));
     if (bucket) {
       bucket.count += 1;
@@ -632,9 +765,7 @@ export async function getCentralAnalyticsDashboard(filters: CentralAnalyticsFilt
   const staffWorkload = centerUsers.map((doctor) => {
     const doctorVisits = localVisits.filter((visit) => visit.doctorId === doctor.id);
     const doctorLabRequests = labRequests.filter((request) => request.doctorId === doctor.id);
-    const doctorPrescriptionCount = prescriptionVisits
-      .filter((visit) => visit.doctorId === doctor.id)
-      .reduce((sum, visit) => sum + visit.prescriptions.length, 0);
+    const doctorPrescriptionCount = doctorVisits.reduce((sum, visit) => sum + visit.prescriptions.length, 0);
 
     return {
       doctorId: doctor.id,
@@ -709,7 +840,7 @@ export async function getCentralAnalyticsDashboard(filters: CentralAnalyticsFilt
         ...legacyCenters.flatMap((center) =>
           center.doctors.map((doctor) => ({
             id: doctor.id,
-            name: doctor.user.fullName,
+            name: doctor.user?.fullName ?? "غير محدد",
             centerCode: center.code,
             source: "appointments"
           }))
@@ -739,7 +870,7 @@ export async function getCentralAnalyticsDashboard(filters: CentralAnalyticsFilt
         { key: "INCOMPLETE_OR_PENDING_SYNC", count: incompleteVisits }
       ],
       mostCommonReasons: topItems(visitReasons),
-      syncedVisits: unifiedVisits.length,
+      syncedVisits: syncedVisitCount,
       localVsReferred: {
         available: false,
         message: "لا توجد علامة تربط الزيارة مباشرة بكونها زيارة محالة في البيانات الحالية."
@@ -850,8 +981,8 @@ export async function getCentralAnalyticsDashboard(filters: CentralAnalyticsFilt
           .filter((log) => log.severity === "ERROR")
           .map((log) => ({
             id: `processing-${log.id}`,
-            centerName: log.center.centerName,
-            centerCode: log.center.centerCode,
+            centerName: log.center?.centerName ?? "غير محدد",
+            centerCode: log.center?.centerCode ?? "-",
             message: log.message,
             createdAt: log.createdAt,
             severity: log.severity
@@ -869,8 +1000,8 @@ export async function getCentralAnalyticsDashboard(filters: CentralAnalyticsFilt
       ].slice(0, 10),
       recentAlerts: alerts.map((alert) => ({
         id: alert.id,
-        centerName: alert.center.centerName,
-        centerCode: alert.center.centerCode,
+        centerName: alert.center?.centerName ?? "غير محدد",
+        centerCode: alert.center?.centerCode ?? "-",
         title: alert.title,
         message: alert.message,
         severity: alert.severity,
