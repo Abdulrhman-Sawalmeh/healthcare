@@ -17,6 +17,7 @@
     "start:local": "powershell -ExecutionPolicy Bypass -File scripts/start-local.ps1",
     "build": "npm run build --workspaces --if-present",
     "db:migrate": "npm --workspace @healthcare/central-api run db:migrate",
+    "db:status": "npm --workspace @healthcare/central-api run db:status && npm --workspace @healthcare/medium-center-api run db:status && npm --workspace @healthcare/small-center-api run db:status",
     "db:seed": "npm --workspace @healthcare/central-api run db:seed"
   },
   "dependencies": {

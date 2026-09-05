@@ -25,6 +25,7 @@ import {
   hashPrescriptionVerificationCode
 } from "../services/prescription-verification";
 import { asyncHandler } from "../utils/async-handler";
+import { centralCenterWithoutApiKeySelect } from "../utils/central-center";
 
 const router = Router();
 
@@ -153,21 +154,70 @@ const centerConnectionSchema = z.object({
   reason: z.string().max(255).optional()
 });
 
-const centerSchema = z.object({
-  centerCode: z.string().min(2),
-  centerName: z.string().min(2),
-  centerType: z.enum(["CLINIC", "MEDICAL_CENTER", "HOSPITAL"]),
-  region: z.string().min(2),
-  city: z.string().min(2),
-  address: z.string().min(2),
-  phone: z.string().min(5),
-  email: z.string().min(3),
-  latitude: z.coerce.number().default(0),
-  longitude: z.coerce.number().default(0),
-  specialties: z.array(z.string().min(1)).default([]),
-  isConnected: z.boolean().default(true),
-  apiEndpoint: z.string().url().optional().or(z.literal("")),
+function requiredText(label: string, minimumLength = 1) {
+  return z
+    .string({ required_error: `${label} مطلوب.`, invalid_type_error: `${label} غير صالح.` })
+    .trim()
+    .min(minimumLength, `${label} مطلوب ولا يمكن أن يحتوي على مسافات فقط.`);
+}
+
+const optionalEmailSchema = z
+  .string({ invalid_type_error: "البريد الإلكتروني غير صالح." })
+  .trim()
+  .refine((value) => value === "" || z.string().email().safeParse(value).success, {
+    message: "يرجى إدخال بريد إلكتروني صحيح."
+  })
+  .default("");
+
+const optionalApiEndpointSchema = z
+  .string({ invalid_type_error: "رابط API غير صالح." })
+  .trim()
+  .refine(
+    (value) => {
+      if (!value) {
+        return true;
+      }
+
+      try {
+        const url = new URL(value);
+        return url.protocol === "http:" || url.protocol === "https:";
+      } catch {
+        return false;
+      }
+    },
+    { message: "يرجى إدخال رابط API صحيح يبدأ بـ http:// أو https://" }
+  )
+  .optional();
+
+const centerSharedSchema = z.object({
+  centerName: requiredText("اسم المركز"),
+  region: requiredText("المنطقة"),
+  city: requiredText("المدينة"),
+  address: requiredText("العنوان"),
+  phone: requiredText("رقم الهاتف", 5),
+  email: optionalEmailSchema,
+  specialties: z
+    .array(z.string().refine((value) => value.trim().length > 0, "اسم التخصص لا يمكن أن يكون فارغا."))
+    .default([]),
+  apiEndpoint: optionalApiEndpointSchema,
   apiKey: z.string().optional()
+});
+
+const centerCreateSchema = centerSharedSchema.extend({
+  centerCode: requiredText("رمز المركز"),
+  centerType: z.enum(["CLINIC", "MEDICAL_CENTER", "HOSPITAL"], {
+    required_error: "نوع المركز مطلوب.",
+    invalid_type_error: "نوع المركز غير صالح."
+  }),
+  latitude: z.coerce.number().finite().default(0),
+  longitude: z.coerce.number().finite().default(0),
+  isConnected: z.boolean().default(false)
+});
+
+const centerUpdateSchema = centerSharedSchema.extend({
+  latitude: z.coerce.number().finite().optional(),
+  longitude: z.coerce.number().finite().optional(),
+  isConnected: z.boolean()
 });
 
 const medicineSchema = z.object({
@@ -185,12 +235,49 @@ const labTestSchema = z.object({
 });
 
 const specialtySchema = z.object({
-  specialtyName: z.string().min(2),
-  description: z.string().optional()
+  specialtyName: requiredText("اسم التخصص", 2),
+  description: z.string().trim().optional()
 });
 
 function normalizeArabicName(value: string) {
-  return value.trim().replace(/\s+/g, " ").toLowerCase();
+  return value
+    .normalize("NFKC")
+    .replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]/g, "")
+    .replace(/\u0640/g, "")
+    .replace(/[إأآٱ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("ar");
+}
+
+function parseWithArabicValidation<T extends z.ZodTypeAny>(schema: T, input: unknown): z.infer<T> {
+  const result = schema.safeParse(input);
+
+  if (!result.success) {
+    throw new AppError(result.error.issues[0]?.message ?? "فشل التحقق من صحة البيانات المدخلة.", 400);
+  }
+
+  return result.data;
+}
+
+async function ensureUniqueCenterCode(centerCode: string) {
+  const existing = await prisma.centralCenter.findFirst({
+    where: {
+      centerCode: {
+        equals: centerCode,
+        mode: "insensitive"
+      }
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (existing) {
+    throw new AppError("رمز المركز مستخدم بالفعل. يرجى اختيار رمز آخر.", 409);
+  }
 }
 
 async function ensureUniqueSpecialtyName(specialtyName: string, excludeId?: number) {
@@ -256,14 +343,15 @@ router.get(
 router.post(
   "/centers",
   asyncHandler(async (req, res) => {
-    const payload = centerSchema.parse(req.body);
+    const payload = parseWithArabicValidation(centerCreateSchema, req.body);
+    await ensureUniqueCenterCode(payload.centerCode);
     const center = await prisma.centralCenter.create({
       data: {
         ...payload,
         apiEndpoint: payload.apiEndpoint || null,
-        apiKey: payload.apiKey || null,
+        apiKey: payload.apiKey?.trim() ? payload.apiKey : null,
         connectionSuspendedAt: payload.isConnected ? null : new Date(),
-        suspensionReason: payload.isConnected ? null : "Connection disabled when the center was created."
+        suspensionReason: payload.isConnected ? null : "لم يتم تفعيل الاتصال عند إنشاء المركز."
       }
     });
 
@@ -275,15 +363,44 @@ router.post(
 router.put(
   "/centers/:centerId",
   asyncHandler(async (req, res) => {
-    const payload = centerSchema.parse(req.body);
+    const centerId = Number(req.params.centerId);
+    const existingCenter = await prisma.centralCenter.findUnique({
+      where: { id: centerId },
+      select: {
+        centerCode: true,
+        centerType: true
+      }
+    });
+
+    if (!existingCenter) {
+      throw new AppError("تعذر العثور على المركز المطلوب.", 404);
+    }
+
+    const submitted = req.body && typeof req.body === "object" ? (req.body as Record<string, unknown>) : {};
+
+    if (
+      Object.prototype.hasOwnProperty.call(submitted, "centerCode") &&
+      (typeof submitted.centerCode !== "string" || submitted.centerCode.trim() !== existingCenter.centerCode)
+    ) {
+      throw new AppError("لا يمكن تغيير رمز المركز بعد إنشائه.", 409);
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(submitted, "centerType") &&
+      submitted.centerType !== existingCenter.centerType
+    ) {
+      throw new AppError("لا يمكن تغيير نوع المركز من نموذج التعديل العادي.", 409);
+    }
+
+    const payload = parseWithArabicValidation(centerUpdateSchema, req.body);
     const center = await prisma.centralCenter.update({
-      where: { id: Number(req.params.centerId) },
+      where: { id: centerId },
       data: {
         ...payload,
-        apiEndpoint: payload.apiEndpoint ? payload.apiEndpoint : undefined,
-        apiKey: payload.apiKey ? payload.apiKey : undefined,
+        apiEndpoint: payload.apiEndpoint === undefined ? undefined : payload.apiEndpoint || null,
+        apiKey: payload.apiKey?.trim() ? payload.apiKey : undefined,
         connectionSuspendedAt: payload.isConnected ? null : new Date(),
-        suspensionReason: payload.isConnected ? null : "Connection disabled from center record editing."
+        suspensionReason: payload.isConnected ? null : "تم تعطيل الاتصال من نموذج تعديل المركز."
       }
     });
 
@@ -544,7 +661,9 @@ router.get(
     const [outgoing, incoming, communicationLogs] = await Promise.all([
       prisma.centralNotification.findMany({
         include: {
-          targetCenter: true
+          targetCenter: {
+            select: centralCenterWithoutApiKeySelect
+          }
         },
         orderBy: {
           createdAt: "desc"
@@ -553,7 +672,9 @@ router.get(
       }),
       prisma.centerNotification.findMany({
         include: {
-          fromCenter: true
+          fromCenter: {
+            select: centralCenterWithoutApiKeySelect
+          }
         },
         orderBy: {
           receivedAt: "desc"
@@ -562,7 +683,9 @@ router.get(
       }),
       prisma.communicationLog.findMany({
         include: {
-          center: true
+          center: {
+            select: centralCenterWithoutApiKeySelect
+          }
         },
         orderBy: {
           createdAt: "desc"

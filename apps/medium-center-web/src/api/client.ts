@@ -1,6 +1,6 @@
 import { systemConfig } from "../config/system";
 
-const API_URL = import.meta.env.VITE_MEDIUM_API_URL ?? systemConfig.apiUrl;
+const API_URL = import.meta.env.VITE_MEDIUM_API_URL ?? import.meta.env.VITE_API_URL ?? systemConfig.apiUrl;
 const STORAGE_KEY = systemConfig.storageKey;
 
 let accessToken = localStorage.getItem(STORAGE_KEY);

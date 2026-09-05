@@ -2590,6 +2590,120 @@ a.ghost-button {
   flex: 0 0 auto;
 }
 
+.center-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.center-form-section {
+  min-width: 0;
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-muted);
+}
+
+.center-form-section legend {
+  padding-inline: 0.55rem;
+  color: var(--accent);
+  font-weight: 900;
+}
+
+.center-form-section .field input,
+.center-form-section .field select {
+  background: var(--surface-strong);
+}
+
+.center-form input[readonly] {
+  cursor: not-allowed;
+  background: color-mix(in srgb, var(--surface-muted) 72%, #ffffff);
+  color: var(--muted);
+}
+
+.technical-input,
+.technical-value {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: plaintext;
+}
+
+.connection-toggle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0.7rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  cursor: pointer;
+  direction: rtl;
+}
+
+.connection-toggle input {
+  width: auto;
+  margin: 0.25rem 0 0;
+  flex: 0 0 auto;
+}
+
+.connection-toggle-copy {
+  display: grid;
+  gap: 0.25rem;
+  text-align: right;
+}
+
+.connection-toggle-copy strong {
+  color: var(--text);
+}
+
+.connection-toggle-copy small {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.center-contact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.8rem;
+}
+
+.center-contact span {
+  overflow-wrap: anywhere;
+}
+
+.center-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.center-metric {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  text-align: center;
+}
+
+.center-metric strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.center-metric small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.center-specialties {
+  line-height: 1.75;
+}
+
 .profile-tile.wide {
   grid-column: span 6;
 }
@@ -2784,5 +2898,9 @@ a.ghost-button {
 
   .notification-dropdown {
     width: min(94vw, 360px);
+  }
+
+  .center-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

@@ -7,8 +7,9 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
+    "db:generate": "node ../../scripts/prisma-with-root-env.cjs generate",
+    "db:migrate": "node ../../scripts/prisma-with-root-env.cjs migrate deploy",
+    "db:status": "node ../../scripts/prisma-with-root-env.cjs migrate status",
     "db:seed": "tsx prisma/seed.ts"
   },
   "prisma": {

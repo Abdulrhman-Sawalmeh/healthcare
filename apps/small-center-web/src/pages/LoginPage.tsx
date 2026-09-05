@@ -29,20 +29,30 @@ interface PasswordResetRequestResponse {
 
 function getLoginFailureMessage(cause: unknown) {
   if (cause instanceof ApiError) {
-    return cause.status !== 401
-      ? cause.message
-      : "بيانات الدخول غير صحيحة أو لا تنتمي لهذا النظام.";
+    if (cause.status === 401) {
+      return "بيانات الدخول غير صحيحة.";
+    }
+
+    if (cause.status === 403) {
+      return "هذا الحساب غير مخول للدخول إلى هذا النظام.";
+    }
+
+    if (cause.status === 500) {
+      return "حدث خطأ داخلي في الخادم.";
+    }
+
+    return cause.message;
   }
 
   if (cause instanceof TypeError) {
     return "تعذر الاتصال بالخادم. تحقق من تشغيل واجهة API ثم حاول مرة أخرى.";
   }
 
-  if (cause instanceof Error && cause.message === systemConfig.accessDeniedMessage) {
+  if (cause instanceof Error) {
     return cause.message;
   }
 
-  return "بيانات الدخول غير صحيحة أو لا تنتمي لهذا النظام.";
+  return "تعذر تسجيل الدخول.";
 }
 
 export function LoginPage() {

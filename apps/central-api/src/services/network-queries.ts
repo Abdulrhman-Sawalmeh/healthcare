@@ -187,6 +187,22 @@ export async function getCentralDashboardData() {
 
 export async function getCentersOverview() {
   const centers = await prisma.centralCenter.findMany({
+    select: {
+      id: true,
+      centerCode: true,
+      centerName: true,
+      centerType: true,
+      region: true,
+      city: true,
+      address: true,
+      phone: true,
+      email: true,
+      specialties: true,
+      isConnected: true,
+      suspensionReason: true,
+      apiEndpoint: true,
+      lastSyncAt: true
+    },
     orderBy: {
       centerName: "asc"
     }
@@ -313,6 +329,7 @@ export async function getCentersOverview() {
       address: center.address,
       phone: center.phone,
       email: center.email,
+      apiEndpoint: center.apiEndpoint,
       specialties: center.specialties,
       isConnected: center.isConnected,
       suspensionReason: center.suspensionReason,

@@ -147,6 +147,18 @@ export function normalizeArabicText(value?: string | null) {
   return (value ?? "").trim().replace(/\s+/g, " ");
 }
 
+export function normalizeArabicName(value?: string | null) {
+  return normalizeArabicText(
+    (value ?? "")
+      .normalize("NFKC")
+      .replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]/g, "")
+      .replace(/\u0640/g, "")
+      .replace(/[إأآٱ]/g, "ا")
+      .replace(/ى/g, "ي")
+      .replace(/[\u200B-\u200D\uFEFF]/g, "")
+  ).toLocaleLowerCase("ar");
+}
+
 export function isUnknownValue(value?: string | number | null) {
   if (value === null || value === undefined) {
     return true;

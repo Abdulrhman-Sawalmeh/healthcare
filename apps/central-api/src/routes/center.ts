@@ -25,6 +25,7 @@ import {
   getCenterWorkspaceData
 } from "../services/network-queries";
 import { asyncHandler } from "../utils/async-handler";
+import { centralCenterWithoutApiKeySelect } from "../utils/central-center";
 
 const router = Router();
 
@@ -823,8 +824,12 @@ router.get(
       },
       include: {
         patient: true,
-        fromCenter: true,
-        toCenter: true
+        fromCenter: {
+          select: centralCenterWithoutApiKeySelect
+        },
+        toCenter: {
+          select: centralCenterWithoutApiKeySelect
+        }
       },
       orderBy: {
         requestedAt: "desc"

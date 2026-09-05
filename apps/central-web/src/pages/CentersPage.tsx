@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
 import { StatusBadge } from "../components/StatusBadge";
-import { formatCount, joinMeta, safeDisplay, toArabicLabel } from "../lib/arabic";
+import { formatCount, joinMeta, normalizeArabicName, safeDisplay, toArabicLabel } from "../lib/arabic";
 import { CenterRecord, MasterDataBundle } from "../types";
 
 const defaultCenterForm = {
@@ -16,13 +16,17 @@ const defaultCenterForm = {
   address: "",
   phone: "",
   email: "",
-  latitude: "0",
-  longitude: "0",
   specialties: [] as string[],
-  isConnected: true,
+  isConnected: false,
   apiEndpoint: "",
   apiKey: ""
 };
+
+interface SpecialtyOption {
+  id: number | null;
+  name: string;
+  normalizedName: string;
+}
 
 function centerToForm(center: CenterRecord) {
   return {
@@ -34,36 +38,54 @@ function centerToForm(center: CenterRecord) {
     address: center.address,
     phone: center.phone,
     email: center.email,
-    latitude: "0",
-    longitude: "0",
     specialties: center.specialties,
     isConnected: center.isConnected,
-    apiEndpoint: "",
+    apiEndpoint: center.apiEndpoint ?? "",
     apiKey: ""
   };
 }
 
-function normalizeCenterPayload(form: typeof defaultCenterForm) {
+function normalizeCenterPayload(form: typeof defaultCenterForm, isEditing: boolean) {
   const payload: Record<string, unknown> = {
-    ...form,
-    latitude: Number(form.latitude || 0),
-    longitude: Number(form.longitude || 0),
-    specialties: form.specialties
+    centerName: form.centerName,
+    region: form.region,
+    city: form.city,
+    address: form.address,
+    phone: form.phone,
+    email: form.email,
+    specialties: form.specialties,
+    isConnected: form.isConnected,
+    apiEndpoint: form.apiEndpoint
   };
 
-  if (!form.apiKey.trim()) {
-    delete payload.apiKey;
+  if (!isEditing) {
+    payload.centerCode = form.centerCode;
+    payload.centerType = form.centerType;
+  }
+
+  if (form.apiKey.trim()) {
+    payload.apiKey = form.apiKey;
   }
 
   return payload;
 }
 
-function maskSecret(value?: string | null) {
-  if (!value) {
-    return "لا يوجد";
+function isSpecialtySelected(specialties: string[], option: SpecialtyOption) {
+  return specialties.some((specialty) => normalizeArabicName(specialty) === option.normalizedName);
+}
+
+function deduplicateSpecialtyNames(specialties: string[]) {
+  const unique = new Map<string, string>();
+
+  for (const specialty of specialties) {
+    const normalizedName = normalizeArabicName(specialty);
+
+    if (normalizedName && !unique.has(normalizedName)) {
+      unique.set(normalizedName, specialty.trim());
+    }
   }
 
-  return `••••••••${value.slice(-4)}`;
+  return [...unique.values()];
 }
 
 function matchesCenter(center: CenterRecord, query: string) {
@@ -99,7 +121,6 @@ export function CentersPage() {
   const [editingCenterId, setEditingCenterId] = useState<number | null>(null);
   const [form, setForm] = useState(defaultCenterForm);
   const [isFormOpen, setIsFormOpen] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<CenterRecord | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const selectedCenterId = Number(searchParams.get("centerId") ?? "");
@@ -130,7 +151,7 @@ export function CentersPage() {
     try {
       await apiRequest<CenterRecord>(path, {
         method,
-        body: JSON.stringify(normalizeCenterPayload(form))
+        body: JSON.stringify(normalizeCenterPayload(form, Boolean(editingCenterId)))
       });
       await loadCenters();
       setForm(defaultCenterForm);
@@ -163,19 +184,6 @@ export function CentersPage() {
     }
   }
 
-  async function deleteCenter(center: CenterRecord) {
-    try {
-      await apiRequest(`/central/centers/${center.id}`, { method: "DELETE" });
-      setCenters((current) => current.filter((item) => item.id !== center.id));
-      setPendingDelete(null);
-      setError("");
-      setSuccessMessage("تم حذف بيانات المركز.");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذر حذف بيانات المركز.");
-      setPendingDelete(null);
-    }
-  }
-
   function editCenter(center: CenterRecord) {
     setEditingCenterId(center.id);
     setForm(centerToForm(center));
@@ -184,21 +192,44 @@ export function CentersPage() {
     setSuccessMessage("");
   }
 
-  function toggleSpecialty(specialty: string) {
+  function toggleSpecialty(option: SpecialtyOption) {
     setForm((current) => ({
       ...current,
-      specialties: current.specialties.includes(specialty)
-        ? current.specialties.filter((item) => item !== specialty)
-        : [...current.specialties, specialty]
+      specialties: isSpecialtySelected(current.specialties, option)
+        ? current.specialties.filter((item) => normalizeArabicName(item) !== option.normalizedName)
+        : [...current.specialties, option.name]
     }));
   }
 
   const specialtyOptions = useMemo(() => {
-    const masterSpecialties = masterData?.specialties.map((specialty) => specialty.specialtyName) ?? [];
-    const existingSpecialties = centers.flatMap((center) => center.specialties);
-    return Array.from(new Set([...masterSpecialties, ...existingSpecialties])).sort((a, b) =>
-      a.localeCompare(b, "ar")
-    );
+    const options = new Map<string, SpecialtyOption>();
+    const masterSpecialties = [...(masterData?.specialties ?? [])].sort((a, b) => a.id - b.id);
+
+    for (const specialty of masterSpecialties) {
+      const normalizedName = normalizeArabicName(specialty.specialtyName);
+
+      if (normalizedName && !options.has(normalizedName)) {
+        options.set(normalizedName, {
+          id: specialty.id,
+          name: specialty.specialtyName.trim(),
+          normalizedName
+        });
+      }
+    }
+
+    for (const specialtyName of centers.flatMap((center) => center.specialties)) {
+      const normalizedName = normalizeArabicName(specialtyName);
+
+      if (normalizedName && !options.has(normalizedName)) {
+        options.set(normalizedName, {
+          id: null,
+          name: specialtyName.trim(),
+          normalizedName
+        });
+      }
+    }
+
+    return [...options.values()].sort((a, b) => a.name.localeCompare(b.name, "ar"));
   }, [centers, masterData]);
 
   const visibleCenters = useMemo(() => {
@@ -248,151 +279,179 @@ export function CentersPage() {
         {error ? <div className="error-banner">{error}</div> : null}
 
         {isFormOpen ? (
-          <form className="form-grid" onSubmit={handleSubmit}>
-            <label className="field">
-              <span>رمز المركز</span>
-              <input
-                value={form.centerCode}
-                onChange={(event) => setForm((current) => ({ ...current, centerCode: event.target.value }))}
-                required
-              />
-            </label>
-            <label className="field">
-              <span>اسم المركز</span>
-              <input
-                value={form.centerName}
-                onChange={(event) => setForm((current) => ({ ...current, centerName: event.target.value }))}
-                required
-              />
-            </label>
-            <label className="field">
-              <span>نوع المركز</span>
-              <select
-                value={form.centerType}
-                onChange={(event) => setForm((current) => ({ ...current, centerType: event.target.value }))}
-              >
-                <option value="CLINIC">مركز صحي صغير</option>
-                <option value="MEDICAL_CENTER">مركز صحي متوسط</option>
-                <option value="HOSPITAL">مستشفى</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>المنطقة</span>
-              <input
-                value={form.region}
-                onChange={(event) => setForm((current) => ({ ...current, region: event.target.value }))}
-                required
-              />
-            </label>
-            <label className="field">
-              <span>المدينة</span>
-              <input
-                value={form.city}
-                onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))}
-                required
-              />
-            </label>
-            <label className="field">
-              <span>الهاتف</span>
-              <input
-                value={form.phone}
-                onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
-                required
-              />
-            </label>
-            <label className="field">
-              <span>البريد الإلكتروني</span>
-              <input
-                value={form.email}
-                onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
-                required
-              />
-            </label>
-            <label className="field">
-              <span>خط العرض</span>
-              <input
-                type="number"
-                step="any"
-                value={form.latitude}
-                onChange={(event) => setForm((current) => ({ ...current, latitude: event.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>خط الطول</span>
-              <input
-                type="number"
-                step="any"
-                value={form.longitude}
-                onChange={(event) => setForm((current) => ({ ...current, longitude: event.target.value }))}
-              />
-            </label>
-            <label className="field field-span-2">
-              <span>العنوان</span>
-              <input
-                value={form.address}
-                onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))}
-                required
-              />
-            </label>
+          <form className="center-form" onSubmit={handleSubmit}>
+            <fieldset className="center-form-section">
+              <legend>البيانات الأساسية</legend>
+              <div className="form-grid">
+                <label className="field">
+                  <span>رمز المركز</span>
+                  <input
+                    className="technical-input"
+                    dir="ltr"
+                    readOnly={Boolean(editingCenterId)}
+                    value={form.centerCode}
+                    onChange={(event) => setForm((current) => ({ ...current, centerCode: event.target.value }))}
+                    required
+                  />
+                  {editingCenterId ? <small className="field-hint">رمز ثابت لا يمكن تغييره بعد إنشاء المركز.</small> : null}
+                </label>
+                <label className="field">
+                  <span>اسم المركز</span>
+                  <input
+                    value={form.centerName}
+                    onChange={(event) => setForm((current) => ({ ...current, centerName: event.target.value }))}
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>نوع المركز</span>
+                  {editingCenterId ? (
+                    <>
+                      <input readOnly value={toArabicLabel(form.centerType)} />
+                      <small className="field-hint">نوع ثابت لا يتغير من نموذج التعديل العادي.</small>
+                    </>
+                  ) : (
+                    <select
+                      value={form.centerType}
+                      onChange={(event) => setForm((current) => ({ ...current, centerType: event.target.value }))}
+                      required
+                    >
+                      <option value="CLINIC">مركز صحي صغير</option>
+                      <option value="MEDICAL_CENTER">مركز صحي متوسط</option>
+                      <option value="HOSPITAL">مستشفى</option>
+                    </select>
+                  )}
+                </label>
+              </div>
+            </fieldset>
 
-            <div className="field field-span-2">
-              <span>التخصصات</span>
-              {specialtyOptions.length > 0 ? (
-                <div className="checkbox-list">
-                  {specialtyOptions.map((specialty) => (
-                    <label className="checkbox-option" key={specialty}>
-                      <input
-                        checked={form.specialties.includes(specialty)}
-                        onChange={() => toggleSpecialty(specialty)}
-                        type="checkbox"
-                      />
-                      <span>{specialty}</span>
-                    </label>
-                  ))}
+            <fieldset className="center-form-section">
+              <legend>الموقع وبيانات التواصل</legend>
+              <div className="form-grid">
+                <label className="field">
+                  <span>المنطقة</span>
+                  <input
+                    value={form.region}
+                    onChange={(event) => setForm((current) => ({ ...current, region: event.target.value }))}
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>المدينة</span>
+                  <input
+                    value={form.city}
+                    onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))}
+                    required
+                  />
+                </label>
+                <label className="field field-span-2">
+                  <span>العنوان</span>
+                  <input
+                    value={form.address}
+                    onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))}
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>الهاتف</span>
+                  <input
+                    className="technical-input"
+                    dir="ltr"
+                    type="tel"
+                    value={form.phone}
+                    onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>البريد الإلكتروني</span>
+                  <input
+                    className="technical-input"
+                    dir="ltr"
+                    type="email"
+                    value={form.email}
+                    onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                    onInvalid={(event) => event.currentTarget.setCustomValidity("يرجى إدخال بريد إلكتروني صحيح.")}
+                    onInput={(event) => event.currentTarget.setCustomValidity("")}
+                  />
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset className="center-form-section">
+              <legend>الخدمات والربط</legend>
+              <div className="form-grid">
+                <div className="field field-span-2">
+                  <span>التخصصات</span>
+                  {specialtyOptions.length > 0 ? (
+                    <div className="checkbox-list">
+                      {specialtyOptions.map((specialty) => (
+                        <label
+                          className="checkbox-option"
+                          key={specialty.id === null ? `existing-${specialty.normalizedName}` : `master-${specialty.id}`}
+                        >
+                          <input
+                            checked={isSpecialtySelected(form.specialties, specialty)}
+                            onChange={() => toggleSpecialty(specialty)}
+                            type="checkbox"
+                          />
+                          <span>{specialty.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="field-hint">لا توجد تخصصات مرجعية حاليا. أضف التخصصات من صفحة البيانات المرجعية أولا.</p>
+                  )}
                 </div>
-              ) : (
-                <p className="field-hint">لا توجد تخصصات مرجعية حاليا. أضف التخصصات من صفحة البيانات المرجعية أولا.</p>
-              )}
-            </div>
 
-            <label className="field field-span-2">
-              <span>رابط واجهة API</span>
-              <input
-                value={form.apiEndpoint}
-                onChange={(event) => setForm((current) => ({ ...current, apiEndpoint: event.target.value }))}
-                placeholder="https://center-api.example.com/api"
-              />
-            </label>
-            <div className="field field-span-2">
-              <span>مفتاح API</span>
-              <input
-                type="password"
-                value={form.apiKey}
-                onChange={(event) => setForm((current) => ({ ...current, apiKey: event.target.value }))}
-                placeholder={editingCenterId ? "اتركه فارغا للاحتفاظ بالمفتاح الحالي" : "أدخل مفتاحا جديدا عند الحاجة"}
-              />
-              <p className="field-hint">
-                {form.apiKey ? `المفتاح المدخل: ${maskSecret(form.apiKey)}` : "لا يتم عرض مفاتيح API الحالية كاملة داخل الواجهة."}
-              </p>
-              {form.apiKey ? (
-                <button
-                  className="ghost-button"
-                  type="button"
-                  onClick={() => void navigator.clipboard?.writeText(form.apiKey)}
-                >
-                  نسخ المفتاح
-                </button>
-              ) : null}
-            </div>
-            <label className="field checkbox-field field-span-2">
-              <input
-                checked={form.isConnected}
-                onChange={(event) => setForm((current) => ({ ...current, isConnected: event.target.checked }))}
-                type="checkbox"
-              />
-              <span>متصل ومسموح له بتبادل البيانات</span>
-            </label>
-            <div className="field-span-2 button-row">
+                <label className="field field-span-2">
+                  <span>رابط واجهة API</span>
+                  <input
+                    className="technical-input"
+                    dir="ltr"
+                    type="url"
+                    value={form.apiEndpoint}
+                    onChange={(event) => setForm((current) => ({ ...current, apiEndpoint: event.target.value }))}
+                    onInvalid={(event) =>
+                      event.currentTarget.setCustomValidity("يرجى إدخال رابط API صحيح يبدأ بـ http:// أو https://")
+                    }
+                    onInput={(event) => event.currentTarget.setCustomValidity("")}
+                    pattern="https?://.+"
+                    placeholder="http://localhost:4200/api"
+                  />
+                </label>
+                <div className="field field-span-2">
+                  <span>مفتاح API</span>
+                  <input
+                    autoComplete="new-password"
+                    className="technical-input"
+                    dir="ltr"
+                    type="password"
+                    value={form.apiKey}
+                    onChange={(event) => setForm((current) => ({ ...current, apiKey: event.target.value }))}
+                    placeholder={editingCenterId ? "اتركه فارغا للاحتفاظ بالمفتاح الحالي" : "أدخل مفتاحا جديدا عند الحاجة"}
+                  />
+                  <p className="field-hint">
+                    {form.apiKey
+                      ? "سيتم استبدال المفتاح الحالي عند حفظ النموذج."
+                      : "المفتاح الحالي لا يعرض أبدا، وترك الحقل فارغا يحافظ عليه دون تغيير."}
+                  </p>
+                </div>
+                <label className="connection-toggle field-span-2">
+                  <input
+                    checked={form.isConnected}
+                    onChange={(event) => setForm((current) => ({ ...current, isConnected: event.target.checked }))}
+                    type="checkbox"
+                  />
+                  <span className="connection-toggle-copy">
+                    <strong>متصل ومسموح له بتبادل البيانات</strong>
+                    <small>يسمح للمركز بالمزامنة وتبادل البيانات مع النظام المركزي.</small>
+                  </span>
+                </label>
+              </div>
+            </fieldset>
+
+            <div className="button-row">
               <button className="primary-button" type="submit">
                 {editingCenterId ? "حفظ تعديلات المركز" : "إضافة المركز"}
               </button>
@@ -409,9 +468,7 @@ export function CentersPage() {
               </button>
             </div>
           </form>
-        ) : (
-          <div className="empty-state compact">نموذج إضافة المركز مخفي. استخدم زر “+ إضافة مركز جديد” عند الحاجة.</div>
-        )}
+        ) : null}
       </SectionCard>
 
       <SectionCard
@@ -454,24 +511,45 @@ export function CentersPage() {
                 center.id === selectedCenterId || (selectedCenterCode && center.code === selectedCenterCode);
 
               return (
-                <article key={center.id} className={`profile-tile${isHighlighted ? " highlighted-tile" : ""}`}>
+                <article
+                  key={center.id}
+                  className={`profile-tile center-card${isHighlighted ? " highlighted-tile" : ""}`}
+                >
                   <div className="tile-heading">
                     <div>
-                      <p className="eyebrow">{center.code}</p>
+                      <p className="eyebrow technical-value" dir="ltr">{center.code}</p>
                       <h3>{center.name}</h3>
                     </div>
                     <StatusBadge status={center.isConnected ? "connected" : "suspended"} />
                   </div>
                   <p>{joinMeta([toArabicLabel(center.type), center.city])}</p>
-                  <p className="muted">{joinMeta([center.address, center.phone, center.email])}</p>
-                  <div className="tile-stats">
-                    <span>{formatCount(center.availableDoctors)}/{formatCount(center.totalDoctors)} أطباء متاحون</span>
-                    <span>الحمل {formatCount(center.currentLoad)}</span>
-                    <span>الانتظار {formatCount(center.averageWaitTime)} دقيقة</span>
-                    <span>{formatCount(center.patientCount)} مريض</span>
+                  <div className="center-contact muted">
+                    <span>{center.address}</span>
+                    <span className="technical-value" dir="ltr">{center.phone}</span>
+                    {center.email ? <span className="technical-value" dir="ltr">{center.email}</span> : null}
                   </div>
-                  <p className="muted">
-                    {center.specialties.length > 0 ? center.specialties.join("، ") : "لا توجد تخصصات مسجلة."}
+                  <div className="center-metrics">
+                    <span className="center-metric">
+                      <strong>{formatCount(center.availableDoctors)}/{formatCount(center.totalDoctors)}</strong>
+                      <small>أطباء متاحون</small>
+                    </span>
+                    <span className="center-metric">
+                      <strong>{formatCount(center.currentLoad)}</strong>
+                      <small>الحمل</small>
+                    </span>
+                    <span className="center-metric">
+                      <strong>{formatCount(center.averageWaitTime)}</strong>
+                      <small>دقيقة انتظار</small>
+                    </span>
+                    <span className="center-metric">
+                      <strong>{formatCount(center.patientCount)}</strong>
+                      <small>مريض</small>
+                    </span>
+                  </div>
+                  <p className="center-specialties muted">
+                    {center.specialties.length > 0
+                      ? deduplicateSpecialtyNames(center.specialties).join("، ")
+                      : "لا توجد تخصصات مسجلة."}
                   </p>
                   <p className="field-hint">مفتاح API: مخفي ولا يعرض كاملا في الواجهة</p>
                   {center.suspensionReason ? <div className="inline-note">{safeDisplay(center.suspensionReason)}</div> : null}
@@ -482,9 +560,6 @@ export function CentersPage() {
                     <button className="ghost-button" type="button" onClick={() => void toggleConnection(center)}>
                       {center.isConnected ? "تعطيل" : "إعادة التفعيل"}
                     </button>
-                    <button className="danger-button" type="button" onClick={() => setPendingDelete(center)}>
-                      حذف نهائي
-                    </button>
                   </div>
                 </article>
               );
@@ -492,36 +567,6 @@ export function CentersPage() {
           </div>
         )}
       </SectionCard>
-
-      {pendingDelete ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="delete-center-title">
-          <div className="modal-card compact">
-            <div className="modal-header">
-              <div>
-                <p className="eyebrow">تأكيد حساس</p>
-                <h2 id="delete-center-title">حذف مركز نهائيا</h2>
-              </div>
-              <button className="ghost-button modal-close-button" type="button" onClick={() => setPendingDelete(null)}>
-                ×
-              </button>
-            </div>
-            <div className="modal-body">
-              <p>
-                حذف {pendingDelete.name} قد يفشل إذا كان مرتبطا بمرضى أو زيارات أو إحالات. يفضل تعطيل المركز إذا كان
-                الهدف إيقاف الاتصال فقط.
-              </p>
-              <div className="button-row">
-                <button className="danger-button" type="button" onClick={() => void deleteCenter(pendingDelete)}>
-                  تأكيد الحذف النهائي
-                </button>
-                <button className="ghost-button" type="button" onClick={() => setPendingDelete(null)}>
-                  إلغاء
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

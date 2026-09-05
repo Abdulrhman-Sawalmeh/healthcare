@@ -2,7 +2,14 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { apiRequest } from "../api/client";
 import { SectionCard } from "../components/SectionCard";
-import { formatCount, formatDateTime, formatMedicineUnit, normalizeArabicText, safeDisplay } from "../lib/arabic";
+import {
+  formatCount,
+  formatDateTime,
+  formatMedicineUnit,
+  normalizeArabicName,
+  normalizeArabicText,
+  safeDisplay
+} from "../lib/arabic";
 import { MasterDataBundle } from "../types";
 
 type MedicineRecord = MasterDataBundle["medicines"][number];
@@ -42,7 +49,7 @@ function includesTerm(values: Array<string | number | boolean | null | undefined
 }
 
 function normalizeName(value: string) {
-  return normalizeArabicText(value).toLowerCase();
+  return normalizeArabicName(value);
 }
 
 export function MasterDataPage() {

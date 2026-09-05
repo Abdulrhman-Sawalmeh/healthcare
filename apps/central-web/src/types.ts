@@ -149,6 +149,7 @@ export interface CenterRecord {
   address: string;
   phone: string;
   email: string;
+  apiEndpoint?: string | null;
   specialties: string[];
   isConnected: boolean;
   suspensionReason?: string | null;

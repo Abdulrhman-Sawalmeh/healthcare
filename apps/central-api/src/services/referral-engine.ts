@@ -20,9 +20,23 @@ function toRadians(value: number) {
   return (value * Math.PI) / 180;
 }
 
+type Coordinates = { latitude: number; longitude: number };
+
+export function hasUsableCoordinates(value: Coordinates) {
+  return (
+    Number.isFinite(value.latitude) &&
+    Number.isFinite(value.longitude) &&
+    value.latitude >= -90 &&
+    value.latitude <= 90 &&
+    value.longitude >= -180 &&
+    value.longitude <= 180 &&
+    !(value.latitude === 0 && value.longitude === 0)
+  );
+}
+
 function calculateDistanceKm(
-  from: { latitude: number; longitude: number },
-  to: { latitude: number; longitude: number }
+  from: Coordinates,
+  to: Coordinates
 ) {
   const earthRadiusKm = 6371;
   const dLat = toRadians(to.latitude - from.latitude);
@@ -37,8 +51,16 @@ function calculateDistanceKm(
   return earthRadiusKm * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
+export function calculateReferralDistanceKm(from: Coordinates, to: Coordinates) {
+  if (!hasUsableCoordinates(from) || !hasUsableCoordinates(to)) {
+    return null;
+  }
+
+  return calculateDistanceKm(from, to);
+}
+
 function calculateScore(input: {
-  distanceKm: number;
+  distanceKm: number | null;
   availableDoctors: number;
   currentLoad: number;
   averageWaitTime: number;
@@ -49,7 +71,9 @@ function calculateScore(input: {
 }) {
   let score = 0;
 
-  score += Math.max(0, (100 - input.distanceKm) * 2);
+  if (input.distanceKm !== null) {
+    score += Math.max(0, (100 - input.distanceKm) * 2);
+  }
   score += input.availableDoctors * 10;
   score += Math.max(0, (100 - input.currentLoad) * 3);
   score += Math.max(0, (60 - input.averageWaitTime) * 2);
@@ -137,7 +161,7 @@ export async function resolveReferralRequest(fromCenterId: number, input: Referr
 
   const scoredCandidates = candidates
     .map((candidate) => {
-      const distanceKm = calculateDistanceKm(sourceCenter, candidate);
+      const distanceKm = calculateReferralDistanceKm(sourceCenter, candidate);
       const doctorAvailability = candidate.doctorAvailability[0];
       const loadSnapshot = candidate.loadSnapshots[0];
       const orStatus = candidate.operatingRoomStatus[0];
@@ -148,11 +172,13 @@ export async function resolveReferralRequest(fromCenterId: number, input: Referr
       const violatesRegion =
         input.preferredRegion &&
         candidate.region.toLowerCase() !== input.preferredRegion.toLowerCase() &&
+        distanceKm !== null &&
         distanceKm > maxDistanceKm;
+      const exceedsMaximumDistance = distanceKm !== null && distanceKm > maxDistanceKm;
 
       if (
         violatesRegion ||
-        distanceKm > maxDistanceKm ||
+        exceedsMaximumDistance ||
         !doctorAvailability ||
         doctorAvailability.availableDoctors <= 0 ||
         ((input.requiresOr ?? false) && (!orStatus || orStatus.availableRooms <= 0)) ||
@@ -243,8 +269,12 @@ export async function resolveReferralRequest(fromCenterId: number, input: Referr
   }
 
   const best = scoredCandidates[0];
+  const distanceReason =
+    best.distanceKm === null
+      ? "ولم تدخل المسافة في التقييم لعدم توفر إحداثيات صالحة"
+      : `وبمسافة ${best.distanceKm.toFixed(1)} كم`;
   const selectedCenterReason =
-    `تم اختيار ${best.candidate.centerName} بدرجة ${best.score} اعتمادًا على مسافة ${best.distanceKm.toFixed(1)} كم، ` +
+    `تم اختيار ${best.candidate.centerName} بدرجة ${best.score} ${distanceReason}، ` +
     `وتوفر ${best.availableDoctors} من الأطباء، وحمل تشغيلي قدره ${best.currentLoad}، ومتوسط انتظار ${best.averageWaitTime} دقيقة.`;
 
   const acceptedReferral = await prisma.centralReferral.update({
